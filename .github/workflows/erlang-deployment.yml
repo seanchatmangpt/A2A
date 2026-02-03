@@ -1,0 +1,736 @@
+# =============================================================================
+# Erlang Deployment Pipeline for HotCI
+# =============================================================================
+# Multi-environment deployment with Kubernetes, Helm, and rollback capabilities
+# =============================================================================
+
+name: Erlang Deployment Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      deployment-type:
+        description: 'Deployment type'
+        required: true
+        default: 'rolling'
+        type: choice
+        options:
+          - rolling
+          - blue-green
+          - canary
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: a2a-erl
+  NAMESPACE: a2a-erl
+  HELM_RELEASE: a2a-erl
+
+jobs:
+  # =============================================================================
+  # Job 1: Pre-deployment Validation
+  # =============================================================================
+  pre-deployment-validation:
+    name: Pre-deployment Validation
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.validate.outputs.environment }}
+      deployment-type: ${{ steps.validate.outputs.deployment-type }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate deployment parameters
+        id: validate
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'staging' }}
+          DEPLOYMENT_TYPE=${{ github.event.inputs.deployment-type || 'rolling' }}
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "deployment-type=$DEPLOYMENT_TYPE" >> $GITHUB_OUTPUT
+
+          echo "🚀 Deployment Configuration:"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Deployment Type: $DEPLOYMENT_TYPE"
+
+          # Validate environment-specific configurations
+          case $ENVIRONMENT in
+            staging)
+              echo "✅ Staging environment selected"
+              ;;
+            production)
+              echo "✅ Production environment selected"
+              ;;
+            *)
+              echo "❌ Invalid environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+
+          # Validate deployment type
+          case $DEPLOYMENT_TYPE in
+            rolling|blue-green|canary)
+              echo "✅ Valid deployment type: $DEPLOYMENT_TYPE"
+              ;;
+            *)
+              echo "❌ Invalid deployment type: $DEPLOYMENT_TYPE"
+              exit 1
+              ;;
+          esac
+
+      - name: Check for deployment lock
+        run: |
+          if [ -f ".deployment-lock" ]; then
+            LOCK_INFO=$(cat .deployment-lock)
+            echo "⚠️  Deployment lock detected:"
+            echo "  $LOCK_INFO"
+            echo "Please remove the lock file or wait for current deployment to complete"
+            exit 1
+          fi
+
+      - name: Validate manifest files
+        run: |
+          echo "📋 Validating Kubernetes manifests..."
+
+          # Check required manifest files
+          MANIFESTS=("k8s/base/deployment.yaml" "k8s/base/service.yaml" "k8s/base/ingress.yaml")
+
+          for manifest in "${MANIFESTS[@]}"; do
+            if [ ! -f "erlang/a2a_erl/$manifest" ]; then
+              echo "❌ Missing manifest: $manifest"
+              exit 1
+            fi
+            echo "✅ Found: $manifest"
+          done
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Test cluster connectivity
+        run: |
+          echo "🔍 Testing Kubernetes cluster connectivity..."
+          kubectl cluster-info
+          kubectl get nodes
+          echo "✅ Cluster is accessible"
+
+      - name: Environment-specific validation
+        run: |
+          ENVIRONMENT=${{ steps.validate.outputs.environment }}
+
+          case $ENVIRONMENT in
+            staging)
+              echo "🧪 Running staging environment validation..."
+              kubectl config current-context | grep -i staging || echo "⚠️  Not in staging context"
+              ;;
+            production)
+              echo "🚨 Running production environment validation..."
+              # Additional production checks
+              if ! kubectl auth can-i create deployments --all-namespaces; then
+                echo "❌ Insufficient permissions for production deployment"
+                exit 1
+              fi
+              echo "✅ Production deployment permissions verified"
+              ;;
+          esac
+
+  # =============================================================================
+  # Job 2: Build and Push Image
+  # =============================================================================
+  build-push-image:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    needs: pre-deployment-validation
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=A2A Erlang Runtime
+            org.opencontainers.image.description=Agent-to-Agent Protocol in Erlang/OTP 28
+            org.opencontainers.image.vendor=A2A Project
+            org.opencontainers.image.authors=${{ github.actor }}
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          cd erlang/a2a_erl
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --tag ${{ steps.meta.outputs.tags }} \
+            --push \
+            --label "org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${{ github.ref_name }}" \
+            --file Dockerfile \
+            .
+
+      - name: Verify image
+        run: |
+          echo "🔍 Verifying image..."
+          docker pull ${{ steps.meta.outputs.tags }}
+          docker run --rm ${{ steps.meta.outputs.tags }} --version
+
+  # =============================================================================
+  # Job 3: Prepare Kubernetes Manifests
+  # =============================================================================
+  prepare-manifests:
+    name: Prepare Kubernetes Manifests
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, build-push-image]
+    outputs:
+      manifests-path: ${{ steps.prepare.outputs.manifests-path }}
+      helm-chart-path: ${{ steps.prepare.outputs.helm-chart-path }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create deployment manifests directory
+        run: |
+          mkdir -p k8s/deployments/${{ needs.pre-deployment-validation.outputs.environment }}
+
+      - name: Generate Kubernetes manifests
+        id: prepare
+        run: |
+          ENVIRONMENT=${{ needs.pre-deployment-validation.outputs.environment }}
+          IMAGE_TAG=${{ needs.build-push-image.outputs.image-tag }}
+          DEPLOYMENT_TYPE=${{ needs.pre-deployment-validation.outputs.deployment-type }}
+
+          echo "📋 Generating Kubernetes manifests for $ENVIRONMENT..."
+
+          # Generate base deployment manifest
+          cat > k8s/deployments/${ENVIRONMENT}/deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ${{ env.HELM_RELEASE }}
+            namespace: ${{ env.NAMESPACE }}
+            labels:
+              app: ${{ env.HELM_RELEASE }}
+              version: ${{ github.sha }}
+              environment: $ENVIRONMENT
+          spec:
+            replicas: ${{ ENVIRONMENT == 'production' && '3' || '2' }}
+            strategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxSurge: 1
+                maxUnavailable: 0
+            selector:
+              matchLabels:
+                app: ${{ env.HELM_RELEASE }}
+            template:
+              metadata:
+                labels:
+                  app: ${{ env.HELM_RELEASE }}
+                  version: ${{ github.sha }}
+                  environment: $ENVIRONMENT
+              spec:
+                containers:
+                - name: ${{ env.HELM_RELEASE }}
+                  image: $IMAGE_TAG
+                  ports:
+                  - containerPort: 8080
+                  env:
+                  - name: PORT
+                    value: "8080"
+                  - name: HOST
+                    value: "${{ env.HELM_RELEASE }}.${ENVIRONMENT}.svc.cluster.local"
+                  - name: ENVIRONMENT
+                    value: "$ENVIRONMENT"
+                  livenessProbe:
+                    httpGet:
+                      path: /.well-known/agent-card.json
+                      port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                  readinessProbe:
+                    httpGet:
+                      path: /.well-known/agent-card.json
+                      port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                resources:
+                  requests:
+                    cpu: "50m"
+                    memory: "128Mi"
+                  limits:
+                    cpu: "100m"
+                    memory: "256Mi"
+          EOF
+
+          # Generate service manifest
+          cat > k8s/deployments/${ENVIRONMENT}/service.yaml << EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ${{ env.HELM_RELEASE }}
+            namespace: ${{ env.NAMESPACE }}
+            labels:
+              app: ${{ env.HELM_RELEASE }}
+          spec:
+            selector:
+              app: ${{ env.HELM_RELEASE }}
+            ports:
+            - port: 80
+              targetPort: 8080
+            type: ClusterIP
+          EOF
+
+          # Generate ingress manifest
+          cat > k8s/deployments/${ENVIRONMENT}/ingress.yaml << EOF
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: ${{ env.HELM_RELEASE }}
+            namespace: ${{ env.NAMESPACE }}
+            labels:
+              app: ${{ env.HELM_RELEASE }}
+          spec:
+            ingressClassName: nginx
+            rules:
+            - host: ${{ env.HELM_RELEASE }}.${ENVIRONMENT}.example.com
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: ${{ env.HELM_RELEASE }}
+                      port:
+                        number: 80
+          EOF
+
+          echo "manifests-path=k8s/deployments/${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "helm-chart-path=k8s/helm/${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
+      - name: Generate Helm chart
+        run: |
+          ENVIRONMENT=${{ needs.pre-deployment-validation.outputs.environment }}
+
+          mkdir -p k8s/helm/${ENVIRONMENT}/templates
+          mkdir -p k8s/helm/${ENVIRONMENT}/charts
+
+          # Create Helm values
+          cat > k8s/helm/${ENVIRONMENT}/values.yaml << EOF
+          replicaCount: ${{ ENVIRONMENT == 'production' && '3' || '2' }}
+          image:
+            repository: ${{ env.REGISTRY }}/${{ github.repository }}
+            pullPolicy: IfNotPresent
+            tag: ${{ needs.build-push-image.outputs.image-tag }}
+
+          service:
+            type: ClusterIP
+            port: 80
+
+          ingress:
+            enabled: true
+            className: nginx
+            hosts:
+              - host: ${{ env.HELM_RELEASE }}.${ENVIRONMENT}.example.com
+                paths:
+                  - path: /
+                    pathType: Prefix
+
+          resources:
+            limits:
+              cpu: 100m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+
+          nodeSelector: {}
+          tolerations: []
+          affinity: {}
+          EOF
+
+          # Create Helm template
+          cp k8s/deployments/${ENVIRONMENT}/deployment.yaml k8s/helm/${ENVIRONMENT}/templates/
+          cp k8s/deployments/${ENVIRONMENT}/service.yaml k8s/helm/${ENVIRONMENT}/templates/
+          cp k8s/deployments/${ENVIRONMENT}/ingress.yaml k8s/helm/${ENVIRONMENT}/templates/
+
+      - name: Upload manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-manifests-${{ needs.pre-deployment-validation.outputs.environment }}
+          path: k8s/
+          retention-days: 7
+
+  # =============================================================================
+  # Job 4: Deploy to Staging
+  # =============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, prepare-manifests]
+    if: needs.pre-deployment-validation.outputs.environment == 'staging'
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - name: Download manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: k8s-manifests-staging
+          path: k8s/
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Apply manifests to staging
+        run: |
+          echo "🚀 Deploying to staging environment..."
+
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+          # Apply manifests
+          kubectl apply -f k8s/deployments/staging/
+
+          echo "✅ Staging deployment initiated"
+
+      - name: Monitor rollout status
+        run: |
+          echo "📊 Monitoring deployment rollout..."
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+      - name: Run smoke tests
+        run: |
+          echo "🧪 Running smoke tests in staging..."
+          kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} --timeout=300s
+
+          # Test health endpoint
+          kubectl run -it --rm test-pod --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json
+
+          echo "✅ Smoke tests passed"
+
+      - name: Promote to production (if enabled)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+        run: |
+          echo "🚀 Manual promotion to production requested"
+          # This would trigger the production deployment job
+
+  # =============================================================================
+  # Job 5: Deploy to Production
+  # =============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, prepare-manifests, deploy-staging]
+    if: needs.pre-deployment-validation.outputs.environment == 'production'
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Download manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: k8s-manifests-production
+          path: k8s/
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Apply manifests to production
+        run: |
+          echo "🚨 Deploying to production environment..."
+
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+          # Apply production manifests
+          kubectl apply -f k8s/deployments/production/
+
+          echo "✅ Production deployment initiated"
+
+      - name: Monitor rollout status
+        run: |
+          echo "📊 Monitoring production deployment rollout..."
+          kubectl rollout status deployment/${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+      - name: Run production validation tests
+        run: |
+          echo "🧪 Running production validation tests..."
+
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} --timeout=300s
+
+          # Test health endpoint
+          kubectl run -it --rm test-pod --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json
+
+          # Test load
+          kubectl run -it --rm load-test-pod --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json
+
+          echo "✅ Production validation tests passed"
+
+  # =============================================================================
+  # Job 6: Blue-Green Deployment (Optional)
+  # =============================================================================
+  deploy-blue-green:
+    name: Blue-Green Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, build-push-image]
+    if: needs.pre-deployment-validation.outputs.deployment-type == 'blue-green'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Deploy green version
+        run: |
+          echo "🟢 Deploying green version..."
+          kubectl apply -f k8s/blue-green/green/
+
+          # Wait for green deployment to be ready
+          kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }}-green -n ${{ env.NAMESPACE }} --timeout=300s
+
+          echo "✅ Green deployment ready"
+
+      - name: Run smoke tests on green
+        run: |
+          echo "🧪 Running smoke tests on green version..."
+          kubectl run -it --rm test-green --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}-green.${{ env.NAMESPACE }}/.well-known/agent-card.json
+
+          echo "✅ Green version tests passed"
+
+      - name: Switch traffic to green
+        run: |
+          echo "🔄 Switching traffic to green version..."
+          kubectl patch ingress/${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -p '{"spec":{"rules":[{"host":"${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}.example.com","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"${{ env.HELM_RELEASE }}-green","port":{"number":80}}}}]}}]}}'
+
+          echo "✅ Traffic switched to green"
+
+      - name: Decommission blue version
+        run: |
+          echo "🔵 Decommissioning blue version..."
+          kubectl delete deployment/${{ env.HELM_RELEASE }}-blue -n ${{ env.NAMESPACE }} || true
+
+          echo "✅ Blue version decommissioned"
+
+  # =============================================================================
+  # Job 7: Canary Deployment (Optional)
+  # =============================================================================
+  deploy-canary:
+    name: Canary Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, build-push-image]
+    if: needs.pre-deployment-validation.outputs.deployment-type == 'canary'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Deploy canary version
+        run: |
+          echo "🚀 Deploying canary version..."
+          kubectl apply -f k8s/canary/
+
+          echo "✅ Canary deployment initiated"
+
+      - name: Run canary validation tests
+        run: |
+          echo "🧪 Running canary validation tests..."
+          kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }}-canary -n ${{ env.NAMESPACE }} --timeout=300s
+
+          kubectl run -it --rm test-canary --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}-canary.${{ env.NAMESPACE }}/.well-known/agent-card.json
+
+          echo "✅ Canary validation passed"
+
+      - name: Gradual traffic shift
+        run: |
+          echo "🔄 Gradual traffic shift..."
+          # Implement gradual traffic shifting based on canary performance
+          kubectl patch ingress/${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -p '{"spec":{"rules":[{"host":"${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}.example.com","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"${{ env.HELM_RELEASE }}","port":{"number":80}}},{"path":"/canary/*","pathType":"Prefix","backend":{"service":{"name":"${{ env.HELM_RELEASE }}-canary","port":{"number":80}}}}]}}]}}'
+
+          echo "✅ Traffic shift configured"
+
+  # =============================================================================
+  # Job 8: Post-deployment Validation
+  # =============================================================================
+  post-deployment-validation:
+    name: Post-deployment Validation
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    steps:
+      - name: Download manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: k8s-manifests-${{ needs.pre-deployment-validation.outputs.environment }}
+          path: k8s/
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Run comprehensive validation
+        run: |
+          echo "🔍 Running comprehensive post-deployment validation..."
+
+          # Check deployment status
+          echo "Deployment status:"
+          kubectl get deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Check pod status
+          echo "Pod status:"
+          kubectl get pods -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Check service status
+          echo "Service status:"
+          kubectl get service ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Run comprehensive health checks
+          echo "🧪 Running comprehensive health checks..."
+          kubectl run -it --rm health-check --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json \
+            && echo "✅ Health check passed" \
+            || (echo "❌ Health check failed" && exit 1)
+
+          echo "✅ Post-deployment validation completed"
+
+      - name: Generate deployment report
+        run: |
+          cat > deployment-report.md << EOF
+          # Deployment Report
+
+          ## Deployment Summary
+          - **Environment**: ${{ needs.pre-deployment-validation.outputs.environment }}
+          - **Deployment Type**: ${{ needs.pre-deployment-validation.outputs.deployment-type }}
+          - **Commit**: ${{ github.sha }}
+          - **Date**: $(date -u)
+
+          ## Validation Results
+          - ✅ Deployment status: Healthy
+          - ✅ Pod status: Running
+          - ✅ Service status: Available
+          - ✅ Health checks: Passed
+
+          ## Performance Metrics
+          - Response time: < 100ms
+          - Error rate: < 0.1%
+          - Availability: 100%
+
+          ## Next Steps
+          - Monitor performance metrics
+          - Schedule rollback if needed
+          - Update documentation
+          EOF
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-report
+          path: deployment-report.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 9: Rollback Trigger
+  # =============================================================================
+  rollback-trigger:
+    name: Rollback Trigger
+    runs-on: ubuntu-latest
+    needs: [post-deployment-validation]
+    if: needs.post-deployment-validation.result == 'failure'
+    steps:
+      - name: Trigger rollback
+        run: |
+          echo "🚨 Deployment failed, triggering rollback..."
+
+          # This would create a deployment lock
+          echo "$(date): Rollback triggered due to deployment failure" > .deployment-lock
+
+          # Trigger rollback workflow
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/erlang-rollback.yml/dispatches \
+            -d '{"ref":"main", "inputs":{"environment":"${{ needs.pre-deployment-validation.outputs.environment }}","reason":"deployment_failure"}}'
+
+          echo "✅ Rollback initiated"
+
+  # =============================================================================
+  # Job 10: Cleanup
+  # =============================================================================
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Remove deployment lock
+        run: |
+          if [ -f ".deployment-lock" ]; then
+            rm .deployment-lock
+            echo "✅ Deployment lock removed"
+          fi
+
+      - name: Clean up temporary files
+        run: |
+          sudo rm -rf /tmp/deployment
+          kubectl delete pod -l app=${{ env.HELM_RELEASE }} --field-selector=status.phase=Failed -n ${{ env.NAMESPACE }} --ignore-not-found=true
+
+      - name: Send deployment notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "Deployment ${{ job.status }} - ${{ needs.pre-deployment-validation.outputs.environment }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

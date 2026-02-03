@@ -1,0 +1,485 @@
+# HotCI-style Release Management Workflow
+# Automated release management with Smoothver versioning and tarball publishing
+name: Release Management
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      pre_release:
+        description: 'Create pre-release'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Create draft release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  OTP_VERSION: "28"
+  REBAR3_VERSION: "3.24.0"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: a2a-erl
+
+jobs:
+  # ============================================================================
+  # Job: Validate Release Conditions
+  # ============================================================================
+  validate-release:
+    name: Validate Release Conditions
+    runs-on: ubuntu-24.04
+    outputs:
+      is_tag_release: ${{ steps.check.outputs.is_tag_release }}
+      current_version: ${{ steps.version.outputs.current_version }}
+      new_version: ${{ steps.version.outputs.new_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine release type
+        id: release-type
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "release_type=tag" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
+          else
+            echo "release_type=snapshot" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get current version
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            CURRENT_VERSION=$(cat VERSION)
+          else
+            # Extract from rebar.config
+            CURRENT_VERSION=$(grep -oP '{release, {a2a_erl, "\K[^"]+' rebar.config)
+          fi
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Smoothver version calculation
+          if [ "${{ steps.release-type.outputs.release_type }}" = "tag" ]; then
+            NEW_VERSION="$CURRENT_VERSION"
+          elif [ "${{ steps.release-type.outputs.release_type }}" = "snapshot" ]; then
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            NEW_VERSION="${CURRENT_VERSION}-dev-${TIMESTAMP}"
+          else
+            MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+            MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+            PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
+
+            case "${{ steps.release-type.outputs.release_type }}" in
+              "major")
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              "minor")
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              "patch")
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag release
+        id: check
+        run: |
+          if [ "${{ steps.release-type.outputs.release_type }}" = "tag" ]; then
+            echo "is_tag_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_tag_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ============================================================================
+  # Job: Compile and Build
+  # ============================================================================
+  compile-build:
+    name: Compile and Build
+    runs-on: ubuntu-24.04
+    needs: validate-release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build/default/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-compile-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+
+      - name: Compile
+        run: rebar3 compile --warnings_as_errors
+
+  # ============================================================================
+  # Job: Run Tests
+  # ============================================================================
+  run-tests:
+    name: Run Tests
+    runs-on: ubuntu-24.04
+    needs: compile-build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Cache test dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build/test/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-test-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+
+      - name: Run Common Test
+        run: rebar3 ct --verbose
+
+      - name: Run Proper tests
+        run: rebar3 proper -d 100
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: _build/test/logs/
+          retention-days: 30
+
+  # ============================================================================
+  # Job: Build Release
+  # ============================================================================
+  build-release:
+    name: Build Release
+    runs-on: ubuntu-24.04
+    needs: [compile-build, run-tests]
+    outputs:
+      release_name: ${{ steps.release.outputs.release_name }}
+      release_path: ${{ steps.release.outputs.release_path }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Cache release dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build/default/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-release-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+
+      - name: Update version
+        id: version
+        run: |
+          VERSION=${{ needs.validate-release.outputs.new_version }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Update VERSION file if it exists
+          if [ -f VERSION ]; then
+            echo "$VERSION" > VERSION
+          fi
+
+          # Update rebar.config
+          sed -i "s/{release, {a2a_erl, \".*\"}/{release, {a2a_erl, \"$VERSION\"}/g" rebar.config
+
+      - name: Build production release
+        id: release
+        run: |
+          VERSION=${{ needs.validate-release.outputs.new_version }}
+          rebar3 as prod release
+
+          # Create release name
+          if [ "${{ needs.validate-release.outputs.is_tag_release }}" = "true" ]; then
+            RELEASE_NAME="v$VERSION"
+          else
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            RELEASE_NAME="snapshot-$TIMESTAMP"
+          fi
+
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "release_path=_build/prod/rel/a2a_erl" >> $GITHUB_OUTPUT
+
+      - name: Create tarball
+        run: |
+          VERSION=${{ needs.validate-release.outputs.new_version }}
+          RELEASE_NAME=${{ steps.release.outputs.release_name }}
+
+          cd _build/prod/rel/
+          tar -czf "../$RELEASE_NAME.tar.gz" a2a_erl/
+
+          # Create checksum
+          sha256sum "../$RELEASE_NAME.tar.gz" > "../$RELEASE_NAME.sha256"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.release.outputs.release_name }}
+          path: |
+            _build/prod/rel/*.tar.gz
+            _build/prod/rel/*.sha256
+          retention-days: 90
+
+  # ============================================================================
+  # Job: Build Docker Images
+  # ============================================================================
+  build-docker:
+    name: Build Docker Images
+    runs-on: ubuntu-24.04
+    needs: build-release
+    outputs:
+      image_tag: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${{ needs.build-release.outputs.version }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker images
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Build image
+          docker build \
+            --build-arg VERSION=$VERSION \
+            --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+            --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+            -t ${{ env.REGISTRY }}/${{ github.repository }}:$VERSION \
+            -t ${{ env.REGISTRY }}/${{ github.repository }}:latest \
+            --target runtime \
+            .
+
+          # Push images
+          docker push ${{ env.REGISTRY }}/${{ github.repository }}:$VERSION
+          docker push ${{ env.REGISTRY }}/${{ github.repository }}:latest
+
+  # ============================================================================
+  # Job: Publish Release
+  # ============================================================================
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    needs: [build-release, build-docker]
+    if: needs.validate-release.outputs.is_tag_release == 'true'
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build-release.outputs.release_name }}
+          path: artifacts/
+
+      - name: Release version number
+        id: version
+        run: |
+          VERSION=${{ needs.build-release.outputs.version }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          body: |
+            ## What's Changed
+
+            ### Features
+            ### Bug Fixes
+            ### Documentation
+
+            ## Installation
+
+            ```bash
+            # Download the tarball
+            curl -L -O https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/release-${{ needs.build-release.outputs.release_name }}.tar.gz
+
+            # Verify checksum
+            sha256sum release-${{ needs.build-release.outputs.release_name }}.tar.gz
+
+            # Extract and run
+            tar -xzf release-${{ needs.build-release.outputs.release_name }}.tar.gz
+            cd a2a_erl
+            ./bin/a2a_erl console
+            ```
+
+            ## Docker
+
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.version }}
+            docker run -p 8080:8080 ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.version }}
+            ```
+
+            ## Docker
+
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}:latest
+            docker run -p 8080:8080 ${{ env.REGISTRY }}/${{ github.repository }}:latest
+            ```
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: ${{ github.event.inputs.pre_release == 'true' }}
+          generate_release_notes: true
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          DATE=$(date +%Y-%m-%d)
+
+          # Update unreleased section to new version
+          sed -i "s/## \[Unreleased\]/## [$VERSION] - $DATE/" CHANGELOG.md
+
+          # Add new unreleased section
+          echo "" >> CHANGELOG.md
+          echo "## [Unreleased]" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Planned" >> CHANGELOG.md
+          echo "- " >> CHANGELOG.md
+
+          # Commit changes
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add CHANGELOG.md VERSION rebar.config
+          git commit -m "chore: Release v$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push
+          git push --tags
+
+  # ============================================================================
+  # Job: Create Snapshot Release
+  # ============================================================================
+  create-snapshot:
+    name: Create Snapshot Release
+    runs-on: ubuntu-24.04
+    needs: [build-release, build-docker]
+    if: needs.validate-release.outputs.is_tag_release == 'false'
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build-release.outputs.release_name }}
+          path: artifacts/
+
+      - name: Create snapshot release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-release.outputs.release_name }}
+          name: Snapshot Release - ${{ needs.build-release.outputs.release_name }}
+          body: |
+            ## Snapshot Release
+
+            This is an automated snapshot build. Not intended for production use.
+
+            ## Installation
+
+            ```bash
+            # Download the tarball
+            curl -L -O https://github.com/${{ github.repository }}/releases/download/${{ needs.build-release.outputs.release_name }}/release-${{ needs.build-release.outputs.release_name }}.tar.gz
+
+            # Verify checksum
+            sha256sum release-${{ needs.build-release.outputs.release_name }}.tar.gz
+            ```
+
+            ## Docker
+
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.build-release.outputs.version }}
+            ```
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+          draft: true
+          prerelease: true
+          generate_release_notes: true
+
+  # ============================================================================
+  # Job: Notification
+  # ============================================================================
+  notification:
+    name: Send Notification
+    runs-on: ubuntu-24.04
+    needs: [publish-release, create-snapshot]
+    if: always()
+    steps:
+      - name: Release notification
+        if: needs.publish-release.result == 'success' || needs.create-snapshot.result == 'success'
+        run: |
+          echo "## Release Completed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.validate-release.outputs.is_tag_release }}" = "true" ]; then
+            echo "🎉 Official release created: v${{ needs.build-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📦 Docker Image: ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.build-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 GitHub Release: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.build-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "📋 Snapshot release created: ${{ needs.build-release.outputs.release_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 GitHub Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.build-release.outputs.release_name }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Tarball: release-${{ needs.build-release.outputs.release_name }}.tar.gz" >> $GITHUB_STEP_SUMMARY
+          echo "- Checksum: release-${{ needs.build-release.outputs.release_name }}.sha256" >> $GITHUB_STEP_SUMMARY
+
+      - name: Failure notification
+        if: failure()
+        run: |
+          echo "## ❌ Release Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the individual job logs above for details." >> $GITHUB_STEP_SUMMARY

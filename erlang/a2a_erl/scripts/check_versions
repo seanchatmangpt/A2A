@@ -1,0 +1,124 @@
+#!/usr/bin/env escript
+-module(check_versions).
+-mode(compile).
+
+usage() ->
+    io:format("usage: Relname [Branch]\n"),
+    halt(1).
+
+main([Relname]) ->
+    main([Relname, os:cmd("git rev-parse --abbrev-ref HEAD")]);
+
+main([Relname, Branch]) ->
+    %% A2A uses src/ directory, not apps/
+    SrcPrefix = "src/",
+    case get_last_tag() of
+        {ok, LastTag} ->
+            io:format("switching to ~ts and back to ~ts~n", [LastTag, Branch]),
+            io:format("~p: ~ts~n", [?LINE, os:cmd("git checkout "++LastTag)]),
+            io:format("~p: ~ts~n", [?LINE, os:cmd("rebar3 do clean -a, release, tar")]),
+            io:format("~p: ~ts~n", [?LINE, os:cmd("git checkout "++Branch)]),
+            io:format("~p: ~ts~n", [?LINE, os:cmd("rebar3 do clean -a, release")]);
+        {error, no_tag} ->
+            io:format("No previous version tag found, creating initial release~n"),
+            io:format("~p: ~ts~n", [?LINE, os:cmd("rebar3 do clean -a, release, tar")]),
+            init:stop(0)
+    end,
+
+    RelFiles = filelib:wildcard("_build/default/rel/*/releases/**/*.rel"),
+    case length(RelFiles) of
+        2 ->
+            ok;
+        N ->
+            io:format("Expected two find two releases, found ~p~n"
+                      "The current release likely has the same version as "
+                      "an older one.~n"
+                      "Bump up the release version to generate relups.~n",
+                      [N]),
+            init:stop(1)
+    end,
+    Releases = [Content || Path <- RelFiles,
+                           {ok, [Content]} <- [file:consult(Path)]],
+    case [{ERTS, to_vsn(VsnStr)} || {release, {_Name, VsnStr}, ERTS, _Apps} <- Releases] of
+        [{_,{V1,_,_}},{_,{V2,_,_}}] when V1 =/= V2 ->
+            io:format("RESTART version bumped, ignoring relup check.~n", []),
+            init:stop(0);
+        [{ERTS,_}, {ERTS,_}] ->
+            ok;
+        [{_, {V1,_,_}}, {_, {V1,_,_}}] ->
+            io:format("The ERTS version changed; the release version should "
+                      "be bumped accordingly (RESTART+1.RELUP.RELOAD)~n", []),
+            init:stop(1)
+    end,
+
+    ChangedFiles = [Sub
+                    || Path <- diff_lines(os:cmd("git diff "++get_last_tag_string())),
+                       Sub <- [string:prefix(Path, SrcPrefix)],
+                       Sub =/= nomatch],
+
+    %% For A2A single-app structure, check if any source files changed
+    case length(ChangedFiles) of
+        0 ->
+            io:format("No source changes detected in src/~n"),
+            ok;
+        _ ->
+            io:format("Source changes detected: ~p files~n", [length(ChangedFiles)])
+    end,
+
+    [{_, OldStr, Old}, {_, NewStr, New}] = lists:sort(
+        [{to_vsn(VsnStr), VsnStr, Apps}
+         || {release, {_Name, VsnStr}, _ERTS, Apps} <- Releases]
+    ),
+
+    %% For single-app A2A, just check if app version in .app file changed
+    AppFile = "src/a2a_erl.app",
+    case file:read_file(AppFile) of
+        {ok, Content} ->
+            %% Check app version - simplified for A2A
+            io:format("Application file found: ~s~n", [AppFile]);
+        {error, _} ->
+            io:format("Warning: Application file not found at ~s~n", [AppFile])
+    end,
+
+    %% Build relup phase
+    io:format("~ts~n", [os:cmd("rebar3 appup generate")]),
+    io:format("~ts~n", [os:cmd("rebar3 relup -n"++ Relname ++" -v "++NewStr++" -u "++OldStr)]),
+    io:format("~ts~n", [os:cmd("rebar3 tar")]),
+    io:format("OLD: _build/default/rel/"++Relname++"/"++Relname++"-~ts.tar.gz~n"
+              "NEW: _build/default/rel/"++Relname++"/"++Relname++"-~ts.tar.gz~n",
+              [OldStr, NewStr]),
+    init:stop(0);
+
+main(_) ->
+    usage().
+
+get_last_tag() ->
+    case string:trim(os:cmd("git tag -l --sort=committerdate 'v*.*.*' | tail -n 1")) of
+        "" -> {error, no_tag};
+        "v"++_ = Tag -> {ok, Tag};
+        Tag -> {ok, Tag}
+    end.
+
+get_last_tag_string() ->
+    case get_last_tag() of
+        {ok, Tag} -> Tag;
+        {error, no_tag} -> ""
+    end.
+
+to_vsn(Str) ->
+    case string:lexemes(Str, ".") of
+        [Restart, Relup, Reload] ->
+            [list_to_integer(Restart), list_to_integer(Relup), list_to_integer(Reload)];
+        _ ->
+            [0, 0, 0]
+    end.
+
+diff_lines("") ->
+    [];
+diff_lines(Str) ->
+    [string:sub_string(Path, 3)
+     || Line <- string:lexemes(Str, "\n"),
+        nomatch =/= string:prefix(Line, "+++") orelse
+        nomatch =/= string:prefix(Line, "---"),
+        [_, Path |_ ] <- [string:lexemes(Line, " ")]
+    ].

@@ -673,7 +673,15 @@ transition_to_canceled(Data, Reason) ->
     },
 
     NewHistory = Task#task.history ++ [CancelMessage],
-    NewTask = Task#task{history = NewHistory},
+    NewStatus = #task_status{
+        state = canceled,
+        message = CancelMessage,
+        timestamp = Now
+    },
+    NewTask = Task#task{
+        history = NewHistory,
+        status = NewStatus
+    },
 
     Data#data{
         task = NewTask,

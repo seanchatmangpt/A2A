@@ -21,7 +21,8 @@
     encode_stream_response/1,
     encode_agent_card/1,
     encode_jsonrpc_response/1,
-    encode_jsonrpc_error/1
+    encode_jsonrpc_error/1,
+    encode_jsonrpc_error/3
 ]).
 
 %% Decoding API
@@ -383,6 +384,18 @@ encode_jsonrpc_response(#jsonrpc_response{} = Resp) ->
     json:encode(Final).
 
 %% @doc Encode JSON-RPC error
+-spec encode_jsonrpc_error(#jsonrpc_error{}) -> map().
+encode_jsonrpc_error(#jsonrpc_error{} = Error) ->
+    Base = #{
+        <<"code">> => Error#jsonrpc_error.code,
+        <<"message">> => Error#jsonrpc_error.message
+    },
+    case Error#jsonrpc_error.data of
+        undefined -> Base;
+        D -> Base#{<<"data">> => D}
+    end.
+
+%% @doc Encode JSON-RPC error (deprecated - for backward compatibility)
 -spec encode_jsonrpc_error(integer(), binary(), term()) -> map().
 encode_jsonrpc_error(Code, Message, Data) ->
     Base = #{

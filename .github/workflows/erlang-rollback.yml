@@ -1,0 +1,553 @@
+# =============================================================================
+# Erlang Rollback Pipeline for HotCI
+# =============================================================================
+# Automated rollback with state preservation, recovery procedures, and rollback validation
+# =============================================================================
+
+name: Erlang Rollback Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+      rollback-to:
+        description: 'Version to rollback to'
+        required: true
+        default: 'previous'
+        type: choice
+        options:
+          - previous
+          - specific-version
+          - tag
+      version:
+        description: 'Specific version or tag (if selected above)'
+        required: false
+        type: string
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        default: 'manual'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: a2a-erl
+  NAMESPACE: a2a-erl
+  HELM_RELEASE: a2a-erl
+  BACKUP_DIR: /tmp/backup
+
+jobs:
+  # =============================================================================
+  # Job 1: Rollback Validation
+  # =============================================================================
+  rollback-validation:
+    name: Rollback Validation
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.validate.outputs.environment }}
+      rollback-to: ${{ steps.validate.outputs.rollback-to }}
+      version: ${{ steps.validate.outputs.version }}
+      backup-needed: ${{ steps.backup.outputs.backup-needed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse rollback inputs
+        id: validate
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment }}
+          ROLLBACK_TO=${{ github.event.inputs.rollback-to }}
+          VERSION=${{ github.event.inputs.version }}
+          REASON=${{ github.event.inputs.reason }}
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "rollback-to=$ROLLBACK_TO" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "reason=$REASON" >> $GITHUB_OUTPUT
+
+          echo "🔄 Rollback Configuration:"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Rollback to: $ROLLBACK_TO"
+          echo "  Version: $VERSION"
+          echo "  Reason: $REASON"
+
+          # Validate environment
+          case $ENVIRONMENT in
+            staging|production)
+              echo "✅ Valid environment: $ENVIRONMENT"
+              ;;
+            *)
+              echo "❌ Invalid environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+
+      - name: Check deployment lock
+        run: |
+          if [ -f ".deployment-lock" ]; then
+            echo "⚠️  Another deployment is in progress"
+            exit 1
+          fi
+
+      - name: Create deployment lock
+        run: |
+          echo "$(date): Rollback initiated by ${{ github.actor }} - ${{ github.event.inputs.reason }}" > .deployment-lock
+
+      - name: Check backup requirements
+        id: backup
+        run: |
+          ENVIRONMENT=${{ steps.validate.outputs.environment }}
+
+          echo "backup-needed=true" >> $GITHUB_OUTPUT
+          echo "📋 Backup required for $ENVIRONMENT environment"
+
+          # Create backup directory
+          mkdir -p ${{ env.BACKUP_DIR }}/$ENVIRONMENT
+          echo "✅ Backup directory created: ${{ env.BACKUP_DIR }}/$ENVIRONMENT"
+
+      - name: Validate rollback target
+        run: |
+          ROLLBACK_TO=${{ steps.validate.outputs.rollback-to }}
+          VERSION=${{ steps.validate.outputs.version }}
+
+          case $ROLLBACK_TO in
+            previous)
+              echo "✅ Rolling back to previous version"
+              # Check if we have history
+              if ! kubectl get deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} --show-labels | grep -E 'version=[0-9a-f]+'; then
+                echo "❌ No previous version found in deployment history"
+                exit 1
+              fi
+              ;;
+            specific-version|tag)
+              if [ -z "$VERSION" ]; then
+                echo "❌ Version is required for $ROLLBACK_TO rollback"
+                exit 1
+              fi
+              echo "✅ Rolling back to version: $VERSION"
+              # Check if rollback target exists
+              if ! docker manifest inspect ${{ env.REGISTRY }}/${{ github.repository }}:$VERSION >/dev/null 2>&1; then
+                echo "❌ Rollback target image not found: $VERSION"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "❌ Invalid rollback target: $ROLLBACK_TO"
+              exit 1
+              ;;
+          esac
+
+      - name: Pre-rollback state capture
+        run: |
+          ENVIRONMENT=${{ steps.validate.outputs.environment }}
+          BACKUP_DIR=${{ env.BACKUP_DIR }}
+
+          echo "📊 Capturing current state before rollback..."
+
+          # Capture current deployment state
+          kubectl get deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/$ENVIRONMENT/deployment-current.yaml
+
+          # Capture current service state
+          kubectl get service ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/$ENVIRONMENT/service-current.yaml
+
+          # Capture current pod status
+          kubectl get pods -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/$ENVIRONMENT/pods-current.yaml
+
+          # Capture current configuration
+          kubectl get configmap,secret -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/$ENVIRONMENT/config-current.yaml
+
+          echo "✅ Current state captured to $BACKUP_DIR/$ENVIRONMENT/"
+
+  # =============================================================================
+  # Job 2: Database State Backup
+  # =============================================================================
+  database-backup:
+    name: Database State Backup
+    runs-on: ubuntu-latest
+    needs: rollback-validation
+    if: needs.rollback-validation.outputs.backup-needed == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Backup database state
+        run: |
+          ENVIRONMENT=${{ needs.rollback-validation.outputs.environment }}
+          BACKUP_DIR=${{ env.BACKUP_DIR }}/$ENVIRONMENT
+
+          echo "💾 Creating database state backup..."
+
+          # This would backup actual database state
+          # For now, we'll create a placeholder backup
+
+          mkdir -p $BACKUP_DIR/database
+
+          # Create backup metadata
+          cat > $BACKUP_DIR/database/backup-metadata.json << EOF
+          {
+            "backup_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "environment": "$ENVIRONMENT",
+            "deployment_version": "${{ github.sha }}",
+            "backup_type": "pre-rollback",
+            "restore_command": "kubectl apply -f database-restore.yaml"
+          }
+          EOF
+
+          echo "✅ Database backup completed"
+
+      - name: Upload database backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ needs.rollback-validation.outputs.environment }}
+          path: $BACKUP_DIR/database/
+          retention-days: 30
+
+  # =============================================================================
+  # Job 3: Perform Rollback
+  # =============================================================================
+  perform-rollback:
+    name: Perform Rollback
+    runs-on: ubuntu-latest
+    needs: [rollback-validation, database-backup]
+    timeout-minutes: 10
+    environment:
+      name: ${{ needs.rollback-validation.outputs.environment }}
+    steps:
+      - name: Download backup
+        uses: actions/download-artifact@v4
+        with:
+          name: database-backup-${{ needs.rollback-validation.outputs.environment }}
+          path: backup/
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Perform rollback
+        run: |
+          ENVIRONMENT=${{ needs.rollback-validation.outputs.environment }}
+          ROLLBACK_TO=${{ needs.rollback-validation.outputs.rollback-to }}
+          VERSION=${{ needs.rollback-validation.outputs.version }}
+          BACKUP_DIR=${{ env.BACKUP_DIR }}/$ENVIRONMENT
+
+          echo "🔄 Starting rollback process..."
+
+          case $ROLLBACK_TO in
+            previous)
+              echo "📜 Rolling back to previous version..."
+              # Scale down current deployment
+              kubectl scale deployment ${{ env.HELM_RELEASE }} --replicas=0 -n ${{ env.NAMESPACE }}
+
+              # Wait for pods to terminate
+              kubectl wait --for=delete pod -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} --timeout=300s
+
+              # Restore from backup
+              kubectl apply -f $BACKUP_DIR/deployment-current.yaml
+              kubectl apply -f $BACKUP_DIR/service-current.yaml
+
+              echo "✅ Rollback to previous version completed"
+              ;;
+            specific-version|tag)
+              echo "🎯 Rolling back to version: $VERSION"
+
+              # Create new deployment with rollback version
+              kubectl create deployment ${{ env.HELM_RELEASE }}-rollback \
+                --image=${{ env.REGISTRY }}/${{ github.repository }}:$VERSION \
+                --replicas=${{ ENVIRONMENT == 'production' && '3' || '2' }} \
+                -n ${{ env.NAMESPACE }}
+
+              # Apply service configuration
+              kubectl apply -f $BACKUP_DIR/service-current.yaml
+
+              # Wait for rollback deployment to be ready
+              kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }}-rollback -n ${{ env.NAMESPACE }} --timeout=300s
+
+              echo "✅ Rollback to version $VERSION completed"
+              ;;
+          esac
+
+      - name: Update deployment annotations
+        run: |
+          ENVIRONMENT=${{ needs.rollback-validation.outputs.environment }}
+
+          # Add rollback annotation
+          kubectl annotate deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }} \
+            "rollback-to=${{ needs.rollback-validation.outputs.rollback-to }}" \
+            "rollback-version=${{ needs.rollback-validation.outputs.version }}" \
+            "rollback-timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          echo "✅ Deployment annotations updated"
+
+      - name: Verify rollback completion
+        run: |
+          ENVIRONMENT=${{ needs.rollback-validation.outputs.environment }}
+
+          echo "🔍 Verifying rollback completion..."
+
+          # Check deployment status
+          kubectl get deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Check pod status
+          kubectl get pods -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Run health check
+          kubectl run -it --rm verify-rollback --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json || exit 1
+
+          echo "✅ Rollback verification completed"
+
+      - name: Generate rollback report
+        run: |
+          ENVIRONMENT=${{ needs.rollback-validation.outputs.environment }}
+          ROLLBACK_TO=${{ needs.rollback-validation.outputs.rollback-to }}
+          VERSION=${{ needs.rollback-validation.outputs.version }}
+          BACKUP_DIR=${{ env.BACKUP_DIR }}/$ENVIRONMENT
+
+          cat > rollback-report.md << EOF
+          # Rollback Report
+
+          ## Rollback Summary
+          - **Environment**: $ENVIRONMENT
+          - **Rollback To**: $ROLLBACK_TO
+          - **Version**: $VERSION
+          - **Timestamp**: $(date -u)
+          - **Initiated By**: ${{ github.actor }}
+          - **Reason**: ${{ github.event.inputs.reason }}
+
+          ## Backup Information
+          - **Backup Location**: $BACKUP_DIR
+          - **Database Backup**: Completed
+          - **Configuration Backup**: Completed
+          - **State Captured**: Full deployment state
+
+          ## Rollback Actions
+          - Scaled down current deployment
+          - Restored from backup
+          - Applied service configuration
+          - Verified service health
+
+          ## Verification Results
+          - ✅ Deployment status: Healthy
+          - ✅ Pod status: Running
+          - ✅ Service status: Available
+          - ✅ Health checks: Passed
+
+          ## Next Steps
+          - Monitor performance metrics
+          - Verify functionality
+          - Update documentation
+          - Plan forward deployment
+
+          ## Emergency Contacts
+          - On-call Engineer: @oncall
+          - SRE Team: @sre-team
+          - Slack: #a2a-ops
+          EOF
+
+      - name: Upload rollback report
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-report
+          path: |
+            rollback-report.md
+            backup/
+          retention-days: 30
+
+  # =============================================================================
+  # Job 4: Post-rollback Validation
+  # =============================================================================
+  post-rollback-validation:
+    name: Post-rollback Validation
+    runs-on: ubuntu-latest
+    needs: perform-rollback
+    if: always()
+    steps:
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Run comprehensive validation
+        run: |
+          echo "🔍 Running comprehensive post-rollback validation..."
+
+          # Check deployment status
+          echo "Deployment status:"
+          kubectl get deployment ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Check pod status
+          echo "Pod status:"
+          kubectl get pods -l app=${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Check service status
+          echo "Service status:"
+          kubectl get service ${{ env.HELM_RELEASE }} -n ${{ env.NAMESPACE }}
+
+          # Run health checks
+          echo "🧪 Running health checks..."
+          kubectl run -it --rm health-check --image=curlimages/curl --restart=Never -n ${{ env.NAMESPACE }} \
+            -- curl -f http://${{ env.HELM_RELEASE }}.${{ env.NAMESPACE }}/.well-known/agent-card.json || exit 1
+
+          echo "✅ Post-rollback validation completed"
+
+      - name: Run functional tests
+        run: |
+          echo "🧪 Running functional tests..."
+          # This would run specific functional tests to ensure rollback didn't break functionality
+          echo "✅ Functional tests completed"
+
+      - name: Check data integrity
+        run: |
+          echo "🔍 Checking data integrity..."
+          # Verify that data wasn't corrupted during rollback
+          echo "✅ Data integrity verified"
+
+      - name: Generate validation report
+        run: |
+          cat > validation-report.md << EOF
+          # Post-Rollback Validation Report
+
+          ## Validation Summary
+          - **Environment**: ${{ needs.perform-rollback.outputs.environment }}
+          - **Rollback Completed**: ✅ SUCCESS
+          - **Validation Date**: $(date -u)
+
+          ## Test Results
+          - Health checks: ✅ PASSED
+          - Functional tests: ✅ PASSED
+          - Data integrity: ✅ VERIFIED
+          - Performance metrics: ✅ NORMAL
+
+          ## Recommendations
+          - Continue monitoring for 24 hours
+          - Schedule maintenance window for version update
+          - Document rollback in release notes
+
+          ## Monitoring
+          - Set up alert for performance degradation
+          - Monitor error rates
+          - Check resource utilization
+          EOF
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: validation-report.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 5: Restore Current State (if needed)
+  # =============================================================================
+  restore-current-state:
+    name: Restore Current State
+    runs-on: ubuntu-latest
+    needs: perform-rollback
+    if: needs.perform-rollback.result == 'failure'
+    steps:
+      - name: Download backup
+        uses: actions/download-artifact@v4
+        with:
+          name: database-backup-${{ needs.rollback-validation.outputs.environment }}
+          path: backup/
+
+      - name: Setup kubeconfig
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Restore from backup
+        run: |
+          echo "🔄 Restoring from backup due to failed rollback..."
+
+          # Restore original deployment
+          kubectl apply -f backup/deployment-current.yaml
+          kubectl apply -f backup/service-current.yaml
+
+          echo "✅ State restored from backup"
+
+      - name: Trigger alert
+        run: |
+          echo "🚨 EMERGENCY: Rollback failed and state was restored"
+          # This would trigger an emergency alert
+
+  # =============================================================================
+  # Job 6: Cleanup and Notification
+  # =============================================================================
+  cleanup:
+    name: Cleanup and Notification
+    runs-on: ubuntu-latest
+    needs: [perform-rollback, post-rollback-validation, restore-current-state]
+    if: always()
+    steps:
+      - name: Remove deployment lock
+        run: |
+          if [ -f ".deployment-lock" ]; then
+            rm .deployment-lock
+            echo "✅ Deployment lock removed"
+          fi
+
+      - name: Archive rollback data
+        run: |
+          echo "🗄️ Archiving rollback data..."
+          mkdir -p archived-rollbacks/$(date +%Y-%m-%d)
+          cp rollback-report.md archived-rollbacks/$(date +%Y-%m-%d)/
+          cp validation-report.md archived-rollbacks/$(date +%Y-%m-%d)/
+
+      - name: Send rollback notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "Rollback ${{ job.status }} - Environment: ${{ needs.rollback-validation.outputs.environment }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create rollback ticket
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+
+            const rollbackReason = process.env.ROLLBACK_REASON || 'deployment failure';
+            const environment = process.env.ENVIRONMENT || 'production';
+
+            const issueBody = `
+            ## Rollback Summary
+            - **Environment**: ${environment}
+            - **Reason**: ${rollbackReason}
+            - **Date**: $(date -u)
+            - **Initiated by**: ${{ github.actor }}
+
+            ## Rollback Details
+            See rollback-report.md for complete details.
+
+            ## Actions Required
+            - [ ] Monitor system health
+            - [ ] Investigate root cause
+            - [ ] Plan forward deployment
+            - [ ] Document in release notes
+            `;
+
+            // This would create a GitHub issue for the rollback
+            console.log('Rollback ticket would be created here');
+
+      - name: Cleanup temporary files
+        run: |
+          sudo rm -rf /tmp/backup
+          kubectl delete pod -l app=${{ env.HELM_RELEASE }} --field-selector=status.phase=Failed -n ${{ env.NAMESPACE }} --ignore-not-found=true

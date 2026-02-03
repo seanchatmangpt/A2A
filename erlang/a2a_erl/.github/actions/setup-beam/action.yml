@@ -1,0 +1,21 @@
+name: 'Setup Beam'
+description: 'Setup Erlang/OTP with required dependencies'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Erlang/OTP
+      uses: erlef/setup-beam@v1
+      with:
+        otp-version: '28'
+        rebar3-version: '3.24.0'
+        gleam-version: 'latest'
+
+    - name: Cache Rebar3
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/rebar3
+          _build
+        key: ${{ runner.os }}-rebar3-${{ hashFiles('**/rebar.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rebar3-

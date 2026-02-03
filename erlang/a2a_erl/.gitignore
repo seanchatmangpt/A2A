@@ -1,0 +1,166 @@
+# Erlang/OTP compiled files
+*.beam
+*.beam.*
+
+# Erlang compilation outputs
+erl_crash.dump
+*.dump
+
+# Dialyzer platform-specific files
+*.plt
+*.plt.*
+dialyzer_plt
+*dialyzer.plt
+
+# Rebar3 build artifacts
+_rebar/
+_rebar3/
+*.d
+ebin/
+deps/
+.dialyzer_plt
+*.deps
+*.o
+
+# Hex/Elixir related (if using interop)
+mix.lock
+/tmp/
+
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.#*
+\#*#
+*.orig
+.*.sw[a-z]
+*.un~
+Session.vim
+.netrwhistp
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Emacs
+.dir-locals.el
+*~
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# Documentation generation
+doc/
+*.html
+*.css
+docs/
+
+# Test coverage
+.coverage
+.coverage.*
+cover/
+*.coverdata
+eunit.coverdata
+
+# Logs
+*.log
+log/
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS-specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build directories (custom)
+build/
+_build/
+.built
+
+# Private configuration (if any)
+rebar.config.private
+*.private
+
+# Local overrides
+rebar.config.local
+sys.config.local
+vm.args.local
+
+# Generated files (if any)
+src/*.app
+src/*.app.up
+src/*.rel
+src/*.script
+
+# Claude-flow and hive-mind (from git status)
+.claude-flow/
+.hive-mind/
+
+# Additional Erlang tools
+.rel
+.script
+.boot
+*.script
+*.boot
+
+# Edoc generated docs
+doc/
+*.css
+*.html
+*.png
+edoc-info
+
+# Common Test logs
+logs/
+ct_run.*/
+*.ctlog
+
+# Diameter application (if used)
+*.diameter
+
+# Cowboy/HTTP server logs (if used)
+access.log
+error.log
+
+# Database files (if using Mnesia, etc.)
+*.mnesia
+*.db
+
+# Backup files
+*.bak
+*.backup

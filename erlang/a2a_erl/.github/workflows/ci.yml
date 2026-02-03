@@ -1,0 +1,448 @@
+# A2A Erlang/OTP CI Workflow
+# Enforces Lean Six Sigma quality standards with zero-defect delivery
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  OTP_VERSION: "28"
+  REBAR3_VERSION: "3.24.0"
+  CFLAGS: "-O2"
+
+jobs:
+  # ============================================================================
+  # Job: Compile and Build
+  # ============================================================================
+  compile:
+    name: Compile
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-compile-deps
+        with:
+          path: |
+            _build/default/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-compile-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-compile-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-compile-
+
+      - name: Compile
+        run: rebar3 compile --warnings_as_errors
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-artifacts
+          path: _build/default/lib/
+          retention-days: 1
+
+  # ============================================================================
+  # Job: Common Test (Unit Tests)
+  # ============================================================================
+  common-test:
+    name: Common Test
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compile-artifacts
+
+      - name: Cache test dependencies
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-test-deps
+        with:
+          path: |
+            _build/test/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-test-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-test-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-test-
+
+      - name: Run Common Test
+        run: rebar3 ct --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-results
+          path: |
+            _build/test/logs/
+          retention-days: 7
+
+      - name: Generate CT summary
+        if: always()
+        run: |
+          echo "### Common Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f _build/test/logs/ct-run.*.*/suite.log ]; then
+            echo "Test logs available in artifacts" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # Job: Property-Based Testing (Proper)
+  # ============================================================================
+  proper-test:
+    name: Proper Property Tests
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compile-artifacts
+
+      - name: Cache test dependencies
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-proper-deps
+        with:
+          path: |
+            _build/test/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-proper-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-proper-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-proper-
+
+      - name: Run Proper property tests
+        run: rebar3 proper -d 100
+
+      - name: Upload proper results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proper-results
+          path: _build/test/logs/
+          retention-days: 7
+
+  # ============================================================================
+  # Job: Code Quality (Elvis)
+  # ============================================================================
+  elvis:
+    name: Elvis Code Quality
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Install Elvis
+        run: |
+          curl -fsSL https://github.com/inaka/elvis/releases/download/2.3.0/elvis_2.3.0_linux_amd64.tar.gz | tar xz
+          chmod +x elvis
+
+      - name: Run Elvis
+        run: ./elvis --config elvis.config
+
+      - name: Upload Elvis report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elvis-report
+          path: elvis-results.txt
+          retention-days: 7
+
+      - name: Generate Elvis summary
+        if: always()
+        run: |
+          echo "### Elvis Code Quality Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f elvis-results.txt ]; then
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat elvis-results.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # Job: Dialyzer Type Checking
+  # ============================================================================
+  dialyzer:
+    name: Dialyzer Type Check
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compile-artifacts
+
+      - name: Cache PLT
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-dialyzer-plt
+        with:
+          path: |
+            _build/default/plt
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-dialyzer-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-dialyzer-
+
+      - name: Run Dialyzer
+        run: rebar3 dialyzer
+
+      - name: Upload Dialyzer report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dialyzer-report
+          path: |
+            _build/default/dialyzer_warnings
+          retention-days: 7
+
+      - name: Generate Dialyzer summary
+        if: always()
+        run: |
+          echo "### Dialyzer Type Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f _build/default/dialyzer_warnings ]; then
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat _build/default/dialyzer_warnings >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No type errors found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # Job: Code Coverage
+  # ============================================================================
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compile-artifacts
+
+      - name: Cache test dependencies
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-coverage-deps
+        with:
+          path: |
+            _build/test/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-coverage-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-coverage-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-coverage-
+
+      - name: Run tests with coverage
+        run: rebar3 cover --verbose
+
+      - name: Generate coverage report
+        run: rebar3 cover --verbose
+
+      - name: Upload coverage results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-results
+          path: |
+            _build/test/cover/
+          retention-days: 7
+
+      - name: Extract coverage percentage
+        id: extract
+        run: |
+          COVERAGE=$(rebar3 cover | grep -oP '\d+(?=\.%)' || echo "0")
+          echo "coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          echo "### Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Coverage:** ${{ steps.extract.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.extract.outputs.coverage }}" -lt 80 ]; then
+            echo "Warning: Coverage is below 80%" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "Coverage meets 80% minimum requirement" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
+  # Job: Documentation (EDoc)
+  # ============================================================================
+  documentation:
+    name: Generate Documentation
+    runs-on: ubuntu-24.04
+    needs: compile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compile-artifacts
+
+      - name: Generate EDoc
+        run: rebar3 edoc
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: edoc-documentation
+          path: doc/
+          retention-days: 7
+
+      - name: Documentation summary
+        run: |
+          echo "### Documentation Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "EDoc documentation generated successfully" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Job: Build Release
+  # ============================================================================
+  release:
+    name: Build Release
+    runs-on: ubuntu-24.04
+    needs: [common-test, proper-test, elvis, dialyzer, coverage]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          rebar3-version: ${{ env.REBAR3_VERSION }}
+
+      - name: Cache release dependencies
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-release-deps
+        with:
+          path: |
+            _build/default/lib
+            ~/.cache/rebar3
+          key: ${{ runner.os }}-release-${{ env.OTP_VERSION }}-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-release-${{ env.OTP_VERSION }}-
+            ${{ runner.os }}-release-
+
+      - name: Build production release
+        run: rebar3 as prod release
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2a-erl-release
+          path: _build/prod/rel/
+          retention-days: 7
+
+      - name: Release summary
+        run: |
+          echo "### Production Release Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Release tarball available in artifacts" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Job: Quality Gate (Final Status)
+  # ============================================================================
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-24.04
+    needs: [common-test, proper-test, elvis, dialyzer, coverage]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          echo "### Quality Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Common Test | ${{ needs.common-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Proper Tests | ${{ needs.proper-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Elvis | ${{ needs.elvis.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dialyzer | ${{ needs.dialyzer.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coverage | ${{ needs.coverage.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.common-test.result }}" != "success" ] || \
+             [ "${{ needs.proper-test.result }}" != "success" ] || \
+             [ "${{ needs.elvis.result }}" != "success" ] || \
+             [ "${{ needs.dialyzer.result }}" != "success" ] || \
+             [ "${{ needs.coverage.result }}" != "success" ]; then
+            echo "Quality gate failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "All quality gates passed" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,213 @@
+# Release Management Makefile
+# HotCI-style release automation for A2A Erlang
+
+# Configuration
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo "0.1.0")
+IMAGE_NAME ?= a2a-erl
+REGISTRY ?= ghcr.io
+BUILD_DIR ?= _build
+RELEASE_NAME := a2a-erl-v$(VERSION)
+
+# Colors
+BLUE = \033[0;34m
+GREEN = \033[0;32m
+RED = \033[0;31m
+YELLOW = \033[0;33m
+NC = \033[0m # No Color
+
+.PHONY: help build test package docker release validate clean-all bump-version
+
+# Default target
+.DEFAULT_GOAL := help
+
+# -----------------------------------------------------------------------------
+# Help Target
+# -----------------------------------------------------------------------------
+help: ## Show this help message
+	@echo "$(BLUE)A2A Erlang Release Management$(NC)"
+	@echo ""
+	@echo "$(GREEN)Available targets:$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Examples:$(NC)"
+	@echo "  make build              # Build release with all artifacts"
+	@echo "  make test              # Run all tests and checks"
+	@echo "  make package           # Create release package"
+	@echo "  make release           # Build and release (requires git)"
+	@echo "  make bump-version patch # Bump patch version and commit"
+
+# -----------------------------------------------------------------------------
+# Build Targets
+# -----------------------------------------------------------------------------
+build: ## Build release with all artifacts
+	@echo "$(BLUE)Building release $(VERSION)...$(NC)"
+	./scripts/release-manager.sh build
+	@echo "$(GREEN)Build complete!$(NC)"
+
+test: ## Run all tests and checks
+	@echo "$(BLUE)Running tests and checks...$(NC)"
+	./scripts/release-manager.sh test
+	@echo "$(GREEN)Tests complete!$(NC)"
+
+package: ## Create release package
+	@echo "$(BLUE)Creating release package $(VERSION)...$(NC)"
+	./scripts/release-manager.sh package $(VERSION)
+	@echo "$(GREEN)Package created!$(NC)"
+
+docker: ## Build Docker image
+	@echo "$(BLUE)Building Docker image $(VERSION)...$(NC)"
+	./scripts/release-manager.sh docker $(VERSION)
+	@echo "$(GREEN)Docker image built!$(NC)"
+
+release: ## Build and release (requires clean git state)
+	@echo "$(BLUE)Release process for $(VERSION)...$(NC)"
+	@echo "$(YELLOW)Checking git status...$(NC)"
+	git diff --quiet && git diff --cached --quiet || { echo "Working directory not clean. Commit or stash changes first."; exit 1; }
+
+	@echo "$(BLUE)Building release...$(NC)"
+	./scripts/release-manager.sh build
+
+	@echo "$(BLUE)Creating release tag...$(NC)"
+	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+
+	@echo "$(BLUE)Pushing changes and tags...$(NC)"
+	git push
+	git push --tags
+
+	@echo "$(GREEN)Release v$(VERSION) completed!$(NC)"
+
+validate: ## Validate existing release package
+	@echo "$(BLUE)Validating release package $(VERSION)...$(NC)"
+	./scripts/release-manager.sh validate $(VERSION)
+	@echo "$(GREEN)Validation complete!$(NC)"
+
+# -----------------------------------------------------------------------------
+# Version Management
+# -----------------------------------------------------------------------------
+bump-version: ## Bump version (major|minor|patch|prerelease|metadata|snapshot)
+	@if [ -z "$(TYPE)" ]; then \
+		echo "$(RED)Usage: make bump-version TYPE=<version_type>$(NC)"; \
+		echo "Example: make bump-version TYPE=patch"; \
+		echo "Types: major, minor, patch, prerelease, metadata, snapshot"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Bumping version: $(TYPE)...$(NC)"
+	./scripts/bump-version.sh $(TYPE)
+
+bump-major: ## Bump major version
+	@echo "$(BLUE)Bumping major version...$(NC)"
+	./scripts/bump-version.sh major
+
+bump-minor: ## Bump minor version
+	@echo "$(BLUE)Bumping minor version...$(NC)"
+	./scripts/bump-version.sh minor
+
+bump-patch: ## Bump patch version
+	@echo "$(BLUE)Bumping patch version...$(NC)"
+	./scripts/bump-version.sh patch
+
+bump-prerelease: ## Bump pre-release version
+	@echo "$(BLUE)Bumping pre-release version...$(NC)"
+	./scripts/bump-version.sh prerelease
+
+# -----------------------------------------------------------------------------
+# Clean Targets
+# -----------------------------------------------------------------------------
+clean: ## Clean build artifacts
+	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
+	./scripts/release-manager.sh clean
+	@echo "$(GREEN)Build directory cleaned$(NC)"
+
+clean-all: clean ## Clean all artifacts including Docker
+	@echo "$(BLUE)Cleaning all artifacts...$(NC)"
+	@echo "$(YELLOW)Cleaning Docker images...$(NC)"
+	@docker images | grep $(IMAGE_NAME) | awk '{print $$3}' | xargs -r docker rmi 2>/dev/null || true
+	@echo "$(GREEN)All artifacts cleaned$(NC)"
+
+# -----------------------------------------------------------------------------
+# Development Targets
+# -----------------------------------------------------------------------------
+dev-setup: ## Setup development environment
+	@echo "$(BLUE)Setting up development environment...$(NC)"
+	@echo "$(YELLOW)Copying environment file...$(NC)"
+	@cp .env.example .env
+	@echo "$(YELLOWInstalling dependencies...$(NC)"
+	@rebar3 deps
+	@echo "$(GREEN)Development setup complete$(NC)"
+
+dev-test: ## Run development tests
+	@echo "$(BLUE)Running development tests...$(NC)"
+	@echo "$(YELLOW)Compiling...$(NC)"
+	@rebar3 compile
+	@echo "$(YELLOW)Running tests...$(NC)"
+	@rebar3 ct --suite test/*
+	@echo "$(GREEN)Development tests complete$(NC)"
+
+# -----------------------------------------------------------------------------
+# Release Management
+# #
+release-info: ## Show release information
+	@echo "$(BLUE)Release Information$(NC)"
+	@echo ""
+	@echo "Current Version: $(VERSION)"
+	@echo "Release Name: $(RELEASE_NAME)"
+	@echo "Registry: $(REGISTRY)"
+	@echo "Image: $(IMAGE_NAME)"
+	@echo ""
+	@echo "$(BLUE)Git Information$(NC)"
+	@echo "Current Branch: $(shell git rev-parse --abbrev-ref HEAD)"
+	@echo "Git Commit: $(git rev-parse HEAD)"
+	@echo "Latest Tag: $(git describe --tags --abbrev=0 2>/dev/null || echo 'none')"
+	@echo ""
+	@echo "$(BLUE)Artifacts$(NC)"
+	@if [ -d "$(BUILD_DIR)" ]; then \
+		ls -la $(BUILD_DIR)/*.tar.gz 2>/dev/null || echo "No tarballs found"; \
+	else \
+		echo "No build artifacts found"; \
+	fi
+
+release-status: ## Check release status
+	@echo "$(BLUE)Release Status Check$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Git Status:$(NC)"
+	@git status --porcelain
+	@echo ""
+	@echo "$(YELLOW)Untracked Files:$(NC)"
+	@git ls-files --others --exclude-standard
+	@echo ""
+	@echo "$(YELLOW)Recent Tags:$(NC)"
+	@git tag --sort=-version:refname | head -5
+
+# -----------------------------------------------------------------------------
+# Quality Targets
+# #
+quality-check: ## Run all quality checks
+	@echo "$(BLUE)Running quality checks...$(NC)"
+	@echo "$(YELLOW)Compiling with warnings as errors...$(NC)"
+	@rebar3 compile --warnings_as_errors
+	@echo "$(YELLOW)Running Dialyzer...$(NC)"
+	@rebar3 dialyzer
+	@echo "$(YELLOW)Running Elvis...$(NC)"
+	@which elvis > /dev/null && elvis --config elvis.config || echo "Elvis not installed"
+	@echo "$(GREEN)Quality checks complete$(NC)"
+
+coverage-report: ## Generate coverage report
+	@echo "$(BLUE)Generating coverage report...$(NC)"
+	@rebar3 cover --verbose
+	@echo "$(GREEN)Coverage report generated$(NC)"
+
+# -----------------------------------------------------------------------------
+# Documentation
+# #
+docs: ## Generate documentation
+	@echo "$(BLUE)Generating documentation...$(NC)"
+	@rebar3 edoc
+	@echo "$(GREEN)Documentation generated in doc/$(NC)"
+
+docs-serve: ## Serve documentation locally
+	@echo "$(BLUE)Serving documentation...$(NC)"
+	@python3 -m http.server -d doc/ 8000
+	@echo "$(GREEN)Documentation available at http://localhost:8000$(NC)"
+
+# =============================================================================
+#

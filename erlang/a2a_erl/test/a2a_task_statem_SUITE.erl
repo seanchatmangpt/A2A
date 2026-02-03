@@ -5,7 +5,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
--include("a2a.hrl").
+-include("../include/a2a.hrl").
 
 %% CT callbacks
 -export([
@@ -43,8 +43,16 @@ all() ->
 init_per_suite(Config) ->
     %% Start required applications
     application:ensure_all_started(crypto),
-    {ok, _} = a2a_task_store:start_link(),
-    Config.
+
+    %% Start the application properly
+    case application:ensure_all_started(a2a_erl) of
+        {ok, _} ->
+            Config;
+        {error, {already_started, _}} ->
+            Config;
+        Error ->
+            ct:fail("Failed to start a2a_erl application: ~p", [Error])
+    end.
 
 end_per_suite(_Config) ->
     ok.
@@ -103,6 +111,9 @@ test_cancel_task(_Config) ->
     Message = create_test_message(<<"test-003">>),
 
     {ok, Pid} = a2a_task_statem:start_link(Message),
+
+    %% Wait a bit for task to enter working state
+    timer:sleep(100),
 
     %% Cancel the task
     {ok, CanceledTask} = a2a_task_statem:cancel_task(Pid),

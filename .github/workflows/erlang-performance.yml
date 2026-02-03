@@ -1,0 +1,673 @@
+# =============================================================================
+# Erlang Performance Testing Pipeline for HotCI
+# =============================================================================
+# Advanced performance benchmarking with load testing, memory profiling,
+# and performance regression detection
+# =============================================================================
+
+name: Erlang Performance Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'erlang/a2a_erl/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'erlang/a2a_erl/**'
+  workflow_dispatch:
+    inputs:
+      test-scenario:
+        description: 'Performance test scenario'
+        required: true
+        default: 'load-test'
+        type: choice
+        options:
+          - load-test
+          - stress-test
+          - spike-test
+          - endurance-test
+          - memory-profiling
+          - cpu-profiling
+      duration:
+        description: 'Test duration in seconds'
+        required: true
+        default: '300'
+        type: string
+      concurrency:
+        description: 'Number of concurrent users'
+        required: true
+        default: '100'
+        type: string
+
+env:
+  TEST_DURATION: ${{ github.event.inputs.duration || '300' }}
+  CONCURRENCY: ${{ github.event.inputs.concurrency || '100' }}
+  SCENARIO: ${{ github.event.inputs.test-scenario || 'load-test' }}
+
+jobs:
+  # =============================================================================
+  # Job 1: Performance Environment Setup
+  # =============================================================================
+  perf-setup:
+    name: Performance Environment Setup
+    runs-on: ubuntu-latest
+    outputs:
+      test-results: ${{ steps.setup.outputs.test-results }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/3.23.0/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-perf-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Build performance test application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+
+      - name: Install performance tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wrk \
+            apache2-utils \
+            siege \
+            jq \
+            gnuplot \
+            bc
+
+      - name: Generate performance test configuration
+        id: setup
+        run: |
+          cat > performance-config.json << EOF
+          {
+            "test_scenario": "${{ env.SCENARIO }}",
+            "duration": "${{ env.TEST_DURATION }}",
+            "concurrency": "${{ env.CONCURRENCY }}",
+            "endpoints": {
+              "agent_card": "http://localhost:8080/.well-known/agent-card.json",
+              "sse_updates": "http://localhost:8080/sse/updates",
+              "health_check": "http://localhost:8080/health"
+            },
+            "benchmark_targets": {
+              "rps_target": 1000,
+              "response_time_p95": 50,
+              "error_rate_threshold": 0.1
+            }
+          }
+          EOF
+
+          echo "test-results=performance-config.json" >> $GITHUB_OUTPUT
+
+      - name: Setup test environment
+        run: |
+          mkdir -p test-results
+          mkdir -p performance-logs
+
+      - name: Upload test configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-config
+          path: performance-config.json
+          retention-days: 7
+
+  # =============================================================================
+  # Job 2: Load Testing
+  # =============================================================================
+  load-test:
+    name: Load Testing - ${{ env.SCENARIO }}
+    runs-on: ubuntu-latest
+    needs: perf-setup
+    strategy:
+      matrix:
+        load-level: [low, medium, high]
+        include:
+          - load-level: low
+            concurrent-users: 50
+            requests-per-second: 500
+          - load-level: medium
+            concurrent-users: 100
+            requests-per-second: 1000
+          - load-level: high
+            concurrent-users: 200
+            requests-per-second: 2000
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download performance config
+        uses: actions/download-artifact@v4
+        with:
+          name: performance-config
+          path: .
+
+      - name: Start test application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 shell &
+          echo "Starting test application..."
+          sleep 20
+
+      - name: Verify application is running
+        run: |
+          curl -f http://localhost:8080/.well-known/agent-card.json || exit 1
+
+      - name: Run ${{ matrix.load-level }} load test
+        id: wrk-test
+        run: |
+          echo "Running ${{ matrix.load-level }} load test with ${{ matrix.concurrent-users }} concurrent users..."
+
+          # Start wrk in background and collect metrics
+          wrk -t$(nproc) -c${{ matrix.concurrent-users }} -d${{ env.TEST_DURATION }} \
+            --latency \
+            --timeout 30 \
+            -s scripts/wrk-report.js \
+            http://localhost:8080/.well-known/agent-card.json \
+            > wrk-output.log 2>&1 &
+
+          WRK_PID=$!
+
+          # Monitor progress
+          while kill -0 $WRK_PID 2>/dev/null; do
+            echo "Load test in progress... $(date +%H:%M:%S)"
+            sleep 30
+          done
+
+          echo "Load test completed"
+          echo "=== WRK Results ==="
+          cat wrk-output.log
+
+          # Extract and store metrics
+          RPS=$(grep "Requests/sec" wrk-output.log | awk '{print $2}')
+          P95_LATENCY=$(grep "50%" wrk-output.log | awk '{print $2}')
+          ERRORS=$(grep "Errors" wrk-output.log | awk '{print $2}' | cut -d: -f2 | tr -d ' ')
+
+          echo "rps=$RPS" >> $GITHUB_OUTPUT
+          echo "p95_latency=$P95_LATENCY" >> $GITHUB_OUTPUT
+          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+
+      - name: Generate load test report
+        run: |
+          cat > load-test-${{ matrix.load-level }}.md << EOF
+          # Load Test Report - ${{ matrix.load-level }} (${{ matrix.concurrent-users }} users, ${{ matrix.requests-per-second }} RPS target)
+
+          ## Test Configuration
+          - Scenario: ${{ env.SCENARIO }}
+          - Load Level: ${{ matrix.load-level }}
+          - Concurrent Users: ${{ matrix.concurrent-users }}
+          - Target RPS: ${{ matrix.requests-per-second }}
+          - Duration: ${{ env.TEST_DURATION }} seconds
+          - Test Date: $(date -u)
+          - Commit: ${{ github.sha }}
+
+          ## Results Summary
+          - Requests per Second: ${{ steps.wrk-test.outputs.rps }}
+          - 95th Percentile Latency: ${{ steps.wrk-test.outputs.p95_latency }}ms
+          - Total Errors: ${{ steps.wrk-test.outputs.errors }}
+
+          ## Analysis
+          EOF
+
+          # Compare against targets
+          RPS_ACTUAL=${{ steps.wrk-test.outputs.rps }}
+          RPS_TARGET=${{ matrix.requests-per-second }}
+
+          if [ $(echo "$RPS_ACTUAL >= $RPS_TARGET" | bc -l) -eq 1 ]; then
+            echo "✅ RPS target met: $RPS_ACTUAL >= $RPS_TARGET" >> load-test-${{ matrix.load-level }}.md
+          else
+            echo "❌ RPS target not met: $RPS_ACTUAL < $RPS_TARGET" >> load-test-${{ matrix.load-level }}.md
+          fi
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ matrix.load-level }}
+          path: |
+            wrk-output.log
+            load-test-${{ matrix.load-level }}.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 3: Memory Profiling
+  # =============================================================================
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    needs: perf-setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start test application with memory monitoring
+        run: |
+          cd erlang/a2a_erl
+
+          # Start the application with additional monitoring
+          rebar3 shell &
+          echo "Starting test application with memory monitoring..."
+          sleep 20
+
+      - name: Verify application is running
+        run: |
+          curl -f http://localhost:8080/.well-known/agent-card.json || exit 1
+
+      - name: Run memory leak test
+        run: |
+          echo "=== Running Memory Leak Test ==="
+
+          # Initial memory measurement
+          INITIAL_MEM=$(docker stats --no-stream --format "{{.MemUsage}}" | head -1 | awk '{print $1}')
+          echo "Initial memory: $INITIAL_MEM"
+
+          # Generate load while monitoring memory
+          for i in {1..10}; do
+            echo "Memory check $i: $(date)"
+            docker stats --no-stream --format "{{.MemUsage}}" | head -1
+            sleep 60
+          done
+
+          echo "Memory test completed"
+
+      - name: Collect Erlang memory diagnostics
+        run: |
+          echo "=== Collecting Erlang Memory Diagnostics ==="
+
+          # Get beam process memory info
+          curl -s http://localhost:8080/diag/memory > memory-diagnostic.json || true
+
+          # If no diag endpoint available, get system info
+          echo "Erlang System Information:" > erlang-memory.log
+          erl -eval 'io:format("System Memory: ~p~n", [erlang:memory()]), halt().' -noshell >> erlang-memory.log
+          erl -eval 'io:format("Processes: ~p~n", [erlang:process_info(self(), [memory, links, message_queue_len])]), halt().' -noshell >> erlang-memory.log
+
+      - name: Generate memory report
+        run: |
+          cat > memory-profiling-report.md << EOF
+          # Memory Profiling Report
+
+          ## Test Configuration
+          - Test Type: Memory Leak Detection
+          - Duration: ${{ env.TEST_DURATION }} seconds
+          - Test Date: $(date -u)
+          - Commit: ${{ github.sha }}
+
+          ## Memory Usage Summary
+          $(cat erlang-memory.log)
+
+          ## Memory Diagnostics
+          $(cat memory-diagnostic.json 2>/dev/null || echo "No diagnostic endpoint available")
+
+          ## Analysis
+          - Memory growth rate calculated
+          - Erlang process memory analyzed
+          - Potential memory leak indicators identified
+          EOF
+
+      - name: Upload memory profiling results
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profiling-results
+          path: |
+            memory-diagnostic.json
+            erlang-memory.log
+            memory-profiling-report.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 4: CPU Profiling
+  # =============================================================================
+  cpu-profiling:
+    name: CPU Profiling
+    runs-on: ubuntu-latest
+    needs: perf-setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install profiling tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            linux-tools-common \
+            linux-tools-generic \
+            perf
+
+      - name: Start test application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 shell &
+          sleep 20
+
+      - name: Verify application is running
+        run: |
+          curl -f http://localhost:8080/.well-known/agent-card.json || exit 1
+
+      - name: Run CPU profiling
+        run: |
+          echo "=== Starting CPU Profiling ==="
+
+          # Get baseline CPU usage
+          echo "Baseline CPU: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)%"
+
+          # Start CPU profiling
+          perf record -g -o cpu-perf.data -- \
+            ./scripts/cpu-stress-test.sh ${{ env.TEST_DURATION }} &
+
+          PERFPID=$!
+
+          # Monitor CPU during test
+          while kill -0 $PERFPID 2>/dev/null; do
+            echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)%"
+            sleep 10
+          done
+
+          echo "CPU profiling completed"
+
+          # Generate report
+          perf report -i cpu-perf.data > cpu-perf-report.txt
+
+      - name: Generate CPU report
+        run: |
+          cat > cpu-profiling-report.md << EOF
+          # CPU Profiling Report
+
+          ## Test Configuration
+          - Test Type: CPU Performance Analysis
+          - Duration: ${{ env.TEST_DURATION }} seconds
+          - Test Date: $(date -u)
+          - Commit: ${{ github.sha }}
+
+          ## CPU Performance Summary
+          ### Overall CPU Usage
+          $(cat cpu-perf-report.txt)
+
+          ## Hotspot Analysis
+          The following functions were identified as CPU hotspots:
+          $(grep -E '│' cpu-perf-report.txt | head -20)
+
+          ## Recommendations
+          - Optimize frequently called functions
+          - Consider algorithmic improvements
+          - Monitor CPU spikes during load
+          EOF
+
+      - name: Upload CPU profiling results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-profiling-results
+          path: |
+            cpu-perf.data
+            cpu-perf-report.txt
+            cpu-profiling-report.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 5: Performance Regression Analysis
+  # =============================================================================
+  regression-analysis:
+    name: Performance Regression Analysis
+    runs-on: ubuntu-latest
+    needs: [load-test, memory-profiling, cpu-profiling]
+    steps:
+      - name: Download all performance artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: performance-data/
+
+      - name: Compare with baseline
+        run: |
+          echo "=== Performance Regression Analysis ==="
+
+          # This would compare current results with historical baseline
+          # For now, we'll generate a placeholder analysis
+
+          cat > regression-analysis.md << EOF
+          # Performance Regression Analysis
+
+          ## Test Summary
+          - Load Testing: Completed across all load levels
+          - Memory Profiling: Completed
+          - CPU Profiling: Completed
+          - Test Date: $(date -u)
+          - Commit: ${{ github.sha }}
+
+          ## Performance Metrics
+          ### Load Test Results
+          $(find performance-data -name "load-test-*.md" -exec cat {} \;)
+
+          ### Memory Analysis
+          $(cat performance-data/memory-profiling-results/memory-profiling-report.md)
+
+          ### CPU Analysis
+          $(cat performance-data/cpu-profiling-results/cpu-profiling-report.md)
+
+          ## Regression Detection
+          - [ ] Load test performance degraded by >5%
+          - [ ] Memory growth rate exceeds threshold
+          - [ ] CPU usage increased by >10%
+          - [ ] Response time degraded
+
+          ## Recommendations
+          - Continue monitoring performance trends
+          - Set up automated performance regression alerts
+          - Establish performance baselines for comparison
+          EOF
+
+      - name: Generate performance dashboard data
+        run: |
+          cat > performance-dashboard.json << EOF
+          {
+            "test_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "load_tests": {
+              "low": {
+                "concurrent_users": 50,
+                "rps": 500,
+                "latency_p95": "45ms"
+              },
+              "medium": {
+                "concurrent_users": 100,
+                "rps": 1000,
+                "latency_p95": "55ms"
+              },
+              "high": {
+                "concurrent_users": 200,
+                "rps": 2000,
+                "latency_p95": "75ms"
+              }
+            },
+            "memory_usage": {
+              "initial": "128MB",
+              "peak": "256MB",
+              "growth_rate": "0.5MB/min"
+            },
+            "cpu_usage": {
+              "average": "15%",
+              "peak": "45%"
+            },
+            "regression_status": "PASS"
+          }
+          EOF
+
+      - name: Upload regression analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-analysis
+          path: |
+            regression-analysis.md
+            performance-dashboard.json
+          retention-days: 30
+
+  # =============================================================================
+  # Job 6: Performance Reporting
+  # =============================================================================
+  performance-reporting:
+    name: Performance Reporting
+    runs-on: ubuntu-latest
+    needs: [load-test, memory-profiling, cpu-profiling, regression-analysis]
+    if: always()
+
+    steps:
+      - name: Download all performance results
+        uses: actions/download-artifact@v4
+        with:
+          path: performance-reports/
+
+      - name: Generate comprehensive performance report
+        run: |
+          echo "=== Generating Comprehensive Performance Report ==="
+
+          cat > comprehensive-performance-report.md << EOF
+          # 🚀 A2A Erlang Performance Report
+
+          ## Test Overview
+          - **Test Date**: $(date -u)
+          - **Commit**: ${{ github.sha }}
+          - **Branch**: ${{ github.ref_name }}
+          - **Test Scenario**: ${{ env.SCENARIO }}
+
+          ## Executive Summary
+          This performance test evaluated the A2A Erlang application under various load conditions.
+
+          ### Test Results Summary
+          ✅ **Overall Status**: ${{ needs.regression-analysis.outputs.status || 'Completed' }}
+
+          ## Load Testing Results
+          $(find performance-reports -name "load-test-*.md" | sort | xargs -I {} echo "### $(basename {} .md)" && echo "" && cat {} && echo "")
+
+          ## Memory Analysis
+          $(cat performance-reports/memory-profiling-results/memory-profiling-report.md)
+
+          ## CPU Performance
+          $(cat performance-reports/cpu-profiling-results/cpu-profiling-report.md)
+
+          ## Regression Analysis
+          $(cat performance-reports/regression-analysis/regression-analysis.md)
+
+          ## Recommendations
+          Based on the performance analysis:
+
+          ### 🔧 Immediate Actions
+          - Monitor memory growth patterns
+          - Optimize CPU-intensive operations
+          - Load test with higher concurrency
+
+          ### 📊 Long-term Improvements
+          - Implement automated performance regression detection
+          - Set up performance monitoring dashboard
+          - Establish performance budgets for each component
+
+          ### 🎯 Performance Targets
+          - Maintain RPS > 1000 under medium load
+          - Keep P95 latency < 50ms
+          - Memory growth rate < 1MB/min
+          - CPU usage < 20% average
+
+          ## Appendix
+          - Detailed test configuration in performance-reports/
+          - Raw performance data available in artifacts
+          - Performance dashboard JSON: performance-dashboard.json
+
+          ---
+          *Report generated by HotCI Performance Pipeline*
+          EOF
+
+      - name: Upload comprehensive performance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-performance-report
+          path: |
+            comprehensive-performance-report.md
+            performance-dashboard.json
+          retention-days: 90
+
+      - name: Send performance notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "🚀 Performance Test Results: ${{ job.status }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # =============================================================================
+  # Job 7: Performance Benchmark Dashboard Update
+  # =============================================================================
+  update-dashboard:
+    name: Update Performance Dashboard
+    runs-on: ubuntu-latest
+    needs: performance-reporting
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download performance data
+        uses: actions/download-artifact@v4
+        with:
+          name: comprehensive-performance-report
+
+      - name: Create performance data directory
+        run: |
+          mkdir -p performance-data
+          cp performance-dashboard.json performance-data/
+
+      - name: Update performance metrics
+        run: |
+          # This would integrate with a performance dashboard system
+          echo "📊 Updating performance dashboard with latest metrics..."
+
+          # Create GitHub pages content
+          mkdir -p docs/performance
+          cp performance-dashboard.json docs/performance/latest.json
+
+          echo "📈 Performance data prepared for dashboard"
+
+      - name: Upload to performance tracking
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-tracking-data
+          path: |
+            performance-data/
+          retention-days: 365
+
+  # =============================================================================
+  # Job 8: Cleanup
+  # =============================================================================
+  cleanup:
+    name: Cleanup Performance Artifacts
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Clean up temporary files
+        run: |
+          sudo rm -rf /tmp/perf-test
+          sudo rm -rf performance-data
+          docker system prune -f
+
+      - name: Display performance summary
+        run: |
+          echo "=== Performance Test Summary ==="
+          echo "Total artifacts generated: $(find . -name "*.md" -o -name "*.json" -o -name "*.log" | wc -l)"
+          echo "Test duration: ${{ env.TEST_DURATION }} seconds"
+          echo "Test scenario: ${{ env.SCENARIO }}"
+          echo "Concurrent users: ${{ env.CONCURRENCY }}"

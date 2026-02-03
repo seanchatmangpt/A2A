@@ -22,6 +22,9 @@ start(_StartType, _StartArgs) ->
     %% Start the supervisor
     case a2a_erl_sup:start_link() of
         {ok, Pid} ->
+            %% Start HotCI services if enabled
+            start_hotci_services(),
+
             %% Start Cowboy HTTP server
             start_cowboy(),
             {ok, Pid};
@@ -30,6 +33,9 @@ start(_StartType, _StartArgs) ->
     end.
 
 stop(_State) ->
+    %% Stop HotCI services
+    stop_hotci_services(),
+
     %% Stop Cowboy
     cowboy:stop_listener(a2a_http_listener),
     ok.
@@ -82,3 +88,35 @@ start_cowboy() ->
 
     logger:info("A2A server started on port ~p", [Port]),
     ok.
+
+%%% ============================================================================
+%%% HotCI Functions
+%%% ============================================================================
+
+%% @doc Start HotCI services if enabled
+start_hotci_services() ->
+    case application:get_env(a2a_erl, enable_hotci, false) of
+        true ->
+            logger:info("Starting HotCI services..."),
+            case hotci_supervisor:start_link() of
+                {ok, _HotciPid} ->
+                    logger:info("HotCI services started successfully"),
+                    %% Register with local cluster
+                    hotci_node_orchestrator:start_link();
+                {error, Reason} ->
+                    logger:error("Failed to start HotCI services: ~p", [Reason])
+            end;
+        false ->
+            logger:info("HotCI services disabled")
+    end.
+
+%% @doc Stop HotCI services
+stop_hotci_services() ->
+    logger:info("Stopping HotCI services..."),
+    %% Unregister from cluster
+    hotci_node_orchestrator:stop(),
+
+    %% Stop HotCI supervisor
+    hotci_supervisor:stop(),
+
+    logger:info("HotCI services stopped").

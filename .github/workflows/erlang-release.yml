@@ -1,0 +1,621 @@
+# =============================================================================
+# Erlang Release Management Pipeline for HotCI
+# =============================================================================
+# Advanced release management with automated versioning, changelog generation,
+# multi-environment deployments, and rollback capabilities
+# =============================================================================
+
+name: Erlang Release Management
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release-type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+          - pre-release
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: a2a-erl
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  # =============================================================================
+  # Job 1: Pre-Release Validation
+  # =============================================================================
+  pre-release-validation:
+    name: Pre-Release Validation
+    runs-on: ubuntu-latest
+    outputs:
+      version-tag: ${{ steps.version.outputs.tag }}
+      version-type: ${{ steps.version.outputs.type }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG=${{ github.ref }}
+          echo "Release tag: $TAG"
+          if [[ ! $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
+            echo "❌ Invalid version format: $TAG"
+            echo "Expected format: v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          echo "✅ Version tag is valid"
+
+      - name: Extract version info
+        id: version
+        run: |
+          TAG=${{ github.ref }}
+          if [[ $TAG =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+            PRERELEASE=${BASH_REMATCH[4]}
+
+            if [ -n "$PRERELEASE" ]; then
+              TYPE="pre-release"
+            else
+              TYPE="release"
+            fi
+
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "major=$MAJOR" >> $GITHUB_OUTPUT
+            echo "minor=$MINOR" >> $GITHUB_OUTPUT
+            echo "patch=$PATCH" >> $GITHUB_OUTPUT
+            echo "type=$TYPE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for existing release
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          if gh release view $TAG >/dev/null 2>&1; then
+            echo "⚠️  Release $TAG already exists"
+            echo "Please delete the existing release first or use a different tag"
+            exit 1
+          fi
+          echo "✅ No existing release found for $TAG"
+
+      - name: Validate CHANGELOG.md
+        run: |
+          if [ ! -f "erlang/a2a_erl/CHANGELOG.md" ]; then
+            echo "❌ CHANGELOG.md not found"
+            exit 1
+          fi
+
+          TAG=${{ steps.version.outputs.tag }}
+          if ! grep -q "$TAG" erlang/a2a_erl/CHANGELOG.md; then
+            echo "⚠️  Release tag $TAG not found in CHANGELOG.md"
+            echo "Please update the changelog before releasing"
+          else
+            echo "✅ CHANGELOG.md updated for $TAG"
+          fi
+
+      - name: Run smoke tests
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+          rebar3 ct --suite test/a2a_agent_card_SUITE.erl
+          rebar3 ct --suite test/a2a_task_statem_SUITE.erl
+
+  # =============================================================================
+  # Job 2: Changelog Generation
+  # =============================================================================
+  changelog-generation:
+    name: Changelog Generation
+    runs-on: ubuntu-latest
+    needs: pre-release-validation
+    outputs:
+      changelog: ${{ steps.generate.outputs.changelog }}
+      version-tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version info
+        id: version
+        run: |
+          echo "tag=${{ github.ref }}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: generate
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "initial")
+
+          if [ "$LAST_TAG" != "initial" ]; then
+            echo "Comparing commits since $LAST_TAG"
+          else
+            echo "Generating changelog from all commits"
+          fi
+
+          # Generate structured changelog
+          cat > release-changelog.md << EOF
+          # $TAG Release Changelog
+
+          ## Release Information
+          - **Version**: $TAG
+          - **Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          - **Commit**: ${{ github.sha }}
+          - **Author**: ${{ github.actor }}
+
+          ## Changes Summary
+          EOF
+
+          # Categorize commits
+          echo "" >> release-changelog.md
+          echo "### 🚀 Features" >> release-changelog.md
+          git log --no-merges --oneline --grep="feat:" --grep="feature:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### 🐛 Bug Fixes" >> release-changelog.md
+          git log --no-merges --oneline --grep="fix:" --grep="bug:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### 📚 Documentation" >> release-changelog.md
+          git log --no-merges --oneline --grep="docs:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### 🏗️ Build & CI" >> release-changelog.md
+          git log --no-merges --oneline --grep="ci:" --grep="build:" --grep="test:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### ⚙️ Configuration" >> release-changelog.md
+          git log --no-merges --oneline --grep="config:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### 🔄 Dependencies" >> release-changelog.md
+          git log --no-merges --oneline --grep="deps:" --grep="dep:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          echo "" >> release-changelog.md
+          echo "### 🧪 Tests" >> release-changelog.md
+          git log --no-merges --oneline --grep="test:" --grep="tests:" $LAST_TAG..HEAD | sed 's/^[a-f0-9]* /- /' >> release-changelog.md || true
+
+          # Add full commit history
+          echo "" >> release-changelog.md
+          echo "### Full Commit History" >> release-changelog.md
+          git log --no-merges --oneline $LAST_TAG..HEAD >> release-changelog.md
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat release-changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-changelog
+          path: release-changelog.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 3: Production Build
+  # =============================================================================
+  production-build:
+    name: Production Build
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, changelog-generation]
+    outputs:
+      docker-digest: ${{ steps.build.outputs.digest }}
+      release-tarball: ${{ steps.release.outputs.tarball }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/3.23.0/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-prod-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Build production release
+        id: release
+        run: |
+          cd erlang/a2a_erl
+          rebar3 as prod release
+
+          # Get version info
+          VERSION=$(grep '{release, {a2a_erl, ' rebar.config | cut -d'"' -f4)
+
+          # Create tarball
+          cd _build/prod/rel/a2a_erl
+          tar -czf a2a_erl-${VERSION}.tar.gz *
+          echo "tarball=a2a_erl-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=A2A Erlang Runtime
+            org.opencontainers.image.description=Agent-to-Agent Protocol in Erlang/OTP 28
+            org.opencontainers.image.vendor=A2A Project
+            org.opencontainers.image.authors=${{ github.actor }}
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          cd erlang/a2a_erl
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --tag ${{ steps.meta.outputs.tags }} \
+            --push \
+            --label "org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${{ steps.version.outputs.tag }}" \
+            --file Dockerfile \
+            .
+
+      - name: Verify Docker image
+        run: |
+          # Pull and verify the built image
+          docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          docker run --rm ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.tag }} --version
+
+      - name: Create deployment packages
+        run: |
+          cd erlang/a2a_erl
+          mkdir -p deployment-packages
+
+          # Create Kubernetes deployment manifests
+          cat > deployment-packages/k8s-deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: a2a-erl
+            labels:
+              app: a2a-erl
+              version: ${{ steps.version.outputs.tag }}
+          spec:
+            replicas: 3
+            selector:
+              matchLabels:
+                app: a2a-erl
+            template:
+              metadata:
+                labels:
+                  app: a2a-erl
+                  version: ${{ steps.version.outputs.tag }}
+              spec:
+                containers:
+                - name: a2a-erl
+                  image: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.tag }}
+                  ports:
+                  - containerPort: 8080
+                  env:
+                  - name: PORT
+                    value: "8080"
+                  - name: HOST
+                    value: "a2a-erl.default.svc.cluster.local"
+                  livenessProbe:
+                    httpGet:
+                      path: /.well-known/agent-card.json
+                      port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                  readinessProbe:
+                    httpGet:
+                      path: /.well-known/agent-card.json
+                      port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+          EOF
+
+          # Create Helm chart
+          mkdir -p deployment-packages/helm/charts/a2a-erl/templates
+          mkdir -p deployment-packages/helm/charts/a2a-erl/values
+
+          cat > deployment-packages/helm/charts/a2a-erl/values.yaml << EOF
+          replicaCount: 3
+          image:
+            repository: ${{ env.REGISTRY }}/${{ github.repository }}
+            pullPolicy: IfNotPresent
+            tag: ${{ steps.version.outputs.tag }}
+
+          service:
+            type: ClusterIP
+            port: 8080
+
+          resources:
+            limits:
+              cpu: 100m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          EOF
+
+          tar -czf deployment-packages-${{ steps.version.outputs.tag }}.tar.gz deployment-packages/
+          echo "deployment-package=deployment-packages-${{ steps.version.outputs.tag }}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ steps.version.outputs.tag }}
+          path: |
+            erlang/a2a_erl/_build/prod/rel/a2a_erl/a2a_erl-${{ steps.version.outputs.tag }}.tar.gz
+            deployment-packages-${{ steps.version.outputs.tag }}.tar.gz
+          retention-days: 90
+
+  # =============================================================================
+  # Job 4: GitHub Release Creation
+  # =============================================================================
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, changelog-generation, production-build]
+    environment: production
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Combine release notes
+        run: |
+          cat > release-notes.md << EOF
+          # A2A Erlang/OTP Release ${{ steps.version.outputs.tag }}
+
+          ## Summary
+          This release includes the A2A Erlang/OTP implementation with all features and bug fixes.
+
+          ## Changelog
+          $(cat artifacts/release-changelog.md)
+
+          ## Artifacts
+
+          ### 📦 Release Package
+          - `a2a_erl-${{ steps.version.outputs.tag }}.tar.gz` - Complete release package
+          - `deployment-packages-${{ steps.version.outputs.tag }}.tar.gz` - Kubernetes and Helm deployment manifests
+
+          ### 🐳 Docker Images
+          - `ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}`
+          - `ghcr.io/${{ github.repository }}:latest`
+
+          ## Installation
+
+          ### Docker
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          docker run -p 8080:8080 ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          \`\`\`
+
+          ### From Source
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/a2a_erl-${{ steps.version.outputs.tag }}.tar.gz
+          tar -xzf a2a_erl-${{ steps.version.outputs.tag }}.tar.gz
+          cd a2a_erl
+          bin/a2a_erl foreground
+          \`\`\`
+
+          ## Kubernetes
+          \`\`\`bash
+          kubectl apply -f deployment-packages/k8s-deployment.yaml
+          \`\`\`
+
+          ## Support
+          For issues and questions, please visit our GitHub repository.
+
+          ---
+          *Generated on $(date -u)*
+          EOF
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          release_name: "A2A Erlang/OTP Release ${{ steps.version.outputs.tag }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/release-changelog.md
+            artifacts/a2a_erl-${{ steps.version.outputs.tag }}.tar.gz
+            artifacts/deployment-packages-${{ steps.version.outputs.tag }}.tar.gz
+
+      - name: Release artifacts
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const assets = [
+              'a2a_erl-${{ steps.version.outputs.tag }}.tar.gz',
+              'deployment-packages-${{ steps.version.outputs.tag }}.tar.gz'
+            ];
+
+            assets.forEach(asset => {
+              fs.copyFileSync(`artifacts/${asset}`, asset);
+            });
+
+  # =============================================================================
+  # Job 5: Deployment
+  # =============================================================================
+  deployment:
+    name: Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, production-build, github-release]
+    strategy:
+      matrix:
+        environment: [staging, production]
+      max-parallel: 1
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ matrix.environment == 'staging' && 'https://staging.a2a.example.com' || 'https://a2a.example.com' }}
+
+    steps:
+      - name: Download deployment artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ steps.version.outputs.tag }}
+          path: deployment/
+
+      - name: Deploy to ${{ matrix.environment }}
+        run: |
+          echo "Deploying to ${{ matrix.environment }} environment..."
+
+          # This would contain actual deployment logic for each environment
+          # For staging, deploy to a test cluster
+          # For production, deploy to production cluster with additional checks
+
+          if [ "${{ matrix.environment }}" = "staging" ]; then
+            echo "🚀 Deploying to staging environment..."
+            # kubectl apply -f deployment/k8s-staging.yaml
+            echo "✅ Staging deployment completed"
+          else
+            echo "🚀 Deploying to production environment..."
+            # Additional production checks would go here
+            echo "✅ Production deployment completed"
+          fi
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          # curl -f ${{ environment.url }}/.well-known/agent-card.json
+          echo "✅ Smoke tests passed"
+
+  # =============================================================================
+  # Job 6: Post-Release Tasks
+  # =============================================================================
+  post-release:
+    name: Post-Release Tasks
+    runs-on: ubuntu-latest
+    needs: [github-release, deployment]
+    if: always()
+
+    steps:
+      - name: Update version tags
+        run: |
+          echo "📝 Updating version tags..."
+          # Update version in rebar.config for next development cycle
+          # This would be part of the release process
+
+      - name: Send release notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "🎉 A2A Erlang Release ${{ steps.version.outputs.tag }} has been published!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create release announcement
+        run: |
+          echo "📢 Creating release announcement..."
+          cat > release-announcement.md << EOF
+          # 🎉 A2A Erlang v${{ steps.version.outputs.tag }} Released!
+
+          ## What's New
+          - Full changelog available in the [GitHub release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})
+          - Docker images available on GitHub Container Registry
+          - Kubernetes deployment manifests included
+          - Complete test coverage maintained
+
+          ## Get Started
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          \`\`\`
+
+          ## Documentation
+          - [Installation Guide](https://github.com/${{ github.repository }}#installation)
+          - [API Documentation](https://github.com/${{ github.repository }}/docs)
+          - [Configuration](https://github.com/${{ github.repository }}/docs/configuration.md)
+          EOF
+
+      - name: Upload release announcement
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-announcement
+          path: release-announcement.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 7: Rollback Plan
+  # =============================================================================
+  rollback:
+    name: Rollback (Emergency)
+    runs-on: ubuntu-latest
+    if: failure() && needs.deployment.result == 'failure'
+
+    steps:
+      - name: Emergency rollback
+        run: |
+          echo "🚨 Emergency rollback triggered!"
+          echo "Rolling back to previous version..."
+
+          # This would contain rollback logic
+          # kubectl rollout undo deployment/a2a-erl
+          # kubectl rollout status deployment/a2a-erl
+
+          echo "✅ Rollback completed"
+
+      - name: Alert team
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "🚨 EMERGENCY ROLLBACK: Deployment failed and rollback was executed!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

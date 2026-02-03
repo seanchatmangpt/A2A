@@ -1,0 +1,43 @@
+name: 'Publish Common Test Results'
+description: 'Publish Common Test results as GitHub check annotations'
+inputs:
+  test-name:
+    description: 'Name of the test suite'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish Test Results
+      shell: bash
+      run: |
+        if [ -d "results" ]; then
+          echo "### Test Results: ${{ inputs.test-name }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Parse CT logs
+          for log_file in results/*.log; do
+            if [ -f "$log_file" ]; then
+              echo "#### $(basename $log_file)" >> $GITHUB_STEP_SUMMARY
+              grep -E "(Failed|Passed|Error|Skipped)" "$log_file" | tail -20 >> $GITHUB_STEP_SUMMARY || true
+            fi
+          done
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Count test results
+          PASSED=$(grep -r "passed" results/*.log 2>/dev/null | grep -o "[0-9]* passed" | grep -o "[0-9]*" | head -1 || echo "0")
+          FAILED=$(grep -r "failed" results/*.log 2>/dev/null | grep -o "[0-9]* failed" | grep -o "[0-9]*" | head -1 || echo "0")
+
+          echo "#### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Passed: $PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Failed: $FAILED" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::Some tests failed in ${{ inputs.test-name }}"
+            exit 1
+          fi
+        else
+          echo "### No test results found" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi

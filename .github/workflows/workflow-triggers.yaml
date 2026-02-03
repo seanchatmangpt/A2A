@@ -1,0 +1,274 @@
+# =============================================================================
+# HotCI Workflow Triggers Configuration
+# =============================================================================
+# This file defines trigger conditions and workflow dependencies
+# =============================================================================
+
+# Erlang CI Pipeline triggers
+erlang-ci:
+  # Main triggers
+  triggers:
+    push:
+      branches: [main, develop]
+      paths:
+        - 'erlang/a2a_erl/**'
+        - '.github/workflows/erlang-ci.yml'
+    pull_request:
+      branches: [main]
+      paths:
+        - 'erlang/a2a_erl/**'
+    schedule:
+      - cron: '0 2 * * *'  # Daily at 2 AM UTC
+    workflow_dispatch:
+      inputs:
+        environment:
+          description: 'Target environment'
+          required: true
+          default: 'test'
+          options: [test, staging, production]
+
+  # Dependencies and conditions
+  conditions:
+    # Skip if another workflow is running
+    skip_if: 'github.event_name == "workflow_dispatch" && github.event.sender.login == "dependabot"'
+    # Required checks before deployment
+    required_checks:
+      - name: 'lint'
+        condition: 'success'
+      - name: 'test'
+        condition: 'success'
+      - name: 'security'
+        condition: 'success'
+
+# Erlang Release Management triggers
+erlang-release:
+  triggers:
+    push:
+      tags: ['v*', 'v*.*.*']
+    workflow_dispatch:
+      inputs:
+        release-type:
+          description: 'Release type'
+          required: true
+          options: [major, minor, patch, pre-release]
+        environment:
+          description: 'Target environment'
+          required: true
+          options: [staging, production]
+
+  conditions:
+    # Only run on tagged commits
+    only_tags: true
+    # Skip on main branch push without tag
+    skip_branch: main
+    # Required checks
+    required_checks:
+      - name: 'ci'
+        condition: 'success'
+      - name: 'security'
+        condition: 'success'
+
+# Erlang Performance Testing triggers
+erlang-performance:
+  triggers:
+    push:
+      branches: [main, develop]
+      paths:
+        - 'erlang/a2a_erl/**'
+    pull_request:
+      branches: [main]
+      paths:
+        - 'erlang/a2a_erl/**'
+    workflow_dispatch:
+      inputs:
+        test-scenario:
+          description: 'Performance test scenario'
+          required: true
+          options: [load-test, stress-test, spike-test, endurance-test, memory-profiling, cpu-profiling]
+        duration:
+          description: 'Test duration in seconds'
+          required: true
+          type: string
+        concurrency:
+          description: 'Number of concurrent users'
+          required: true
+          type: string
+
+  conditions:
+    # Schedule: Weekly performance tests
+    schedule:
+      - cron: '0 3 * * 1'  # Every Monday at 3 AM UTC
+    # Only run on performance-critical changes
+    paths:
+      include:
+        - 'erlang/a2a_erl/src/**'
+        - 'erlang/a2a_erl/deps/**'
+
+# Erlang Dependency Security triggers
+erlang-dependency-security:
+  triggers:
+    push:
+      branches: [main, develop]
+      paths:
+        - 'erlang/a2a_erl/rebar.config'
+        - 'erlang/a2a_erl/rebar.lock'
+    pull_request:
+      branches: [main]
+      paths:
+        - 'erlang/a2a_erl/rebar.config'
+        - 'erlang/a2a_erl/rebar.lock'
+    schedule:
+      - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC
+    workflow_dispatch:
+      inputs:
+        scan-type:
+          description: 'Security scan type'
+          required: true
+          options: [quick, comprehensive, deep]
+        fail-on-high:
+          description: 'Fail on high severity vulnerabilities'
+          required: true
+          type: boolean
+
+  conditions:
+    # Always run on dependency changes
+    force_on_paths:
+      - 'erlang/a2a_erl/rebar.config'
+      - 'erlang/a2a_erl/rebar.lock'
+    # Critical for security
+    critical: true
+
+# Erlang Deployment triggers
+erlang-deployment:
+  triggers:
+    push:
+      branches: [main]
+    workflow_dispatch:
+      inputs:
+        environment:
+          description: 'Target environment'
+          required: true
+          options: [staging, production]
+        deployment-type:
+          description: 'Deployment type'
+          required: true
+          options: [rolling, blue-green, canary]
+
+  conditions:
+    # Only run on main branch
+    only_branch: main
+    # Required artifacts
+    requires_artifacts:
+      - name: 'release-artifacts'
+        type: 'container'
+      - name: 'security-scan'
+        type: 'report'
+    # Deployment strategy based on environment
+    strategy:
+      staging:
+        auto_approve: true
+        requires_approval: false
+      production:
+        auto_approve: false
+        requires_approval: true
+        approvers: ['maintainers', 'sre-team']
+
+# Erlang Rollback triggers
+erlang-rollback:
+  triggers:
+    workflow_dispatch:
+      inputs:
+        environment:
+          description: 'Target environment'
+          required: true
+          options: [staging, production]
+        rollback-to:
+          description: 'Version to rollback to'
+          required: true
+          options: [previous, specific-version, tag]
+        version:
+          description: 'Specific version or tag'
+          required: false
+        reason:
+          description: 'Reason for rollback'
+          required: true
+
+  conditions:
+    # Emergency rollback capability
+    emergency: true
+    # Quick response
+    timeout: 300  # 5 minutes
+    # Notify on call
+    emergency_contacts:
+      - '@oncall'
+      - '@sre-team'
+
+# Workflow matrix configurations
+matrices:
+  erlang-ci:
+    include:
+      - test-type: 'unit'
+        coverage: true
+      - test-type: 'integration'
+        coverage: false
+      - test-type: 'property'
+        coverage: false
+
+  erlang-performance:
+    include:
+      - scenario: 'load-test'
+        duration: '300'
+        concurrency: '100'
+      - scenario: 'stress-test'
+        duration: '600'
+        concurrency: '200'
+      - scenario: 'endurance-test'
+        duration: '1800'
+        concurrency: '50'
+
+# Secret configurations
+secrets:
+  required:
+    - 'GITHUB_TOKEN'
+    - 'SLACK_WEBHOOK_URL'
+    - 'DOCKER_USERNAME'
+    - 'DOCKER_PASSWORD'
+
+  optional:
+    - 'KUBECONFIG_STAGING'
+    - 'KUBECONFIG_PRODUCTION'
+    - 'REGISTRY_CREDENTIALS'
+
+# Cache configurations
+cache:
+  erlang-ci:
+    paths:
+      - '~/.cache/rebar3'
+      - 'erlang/_build'
+      - '.cache'
+    key: 'rebar3-{hashFiles("erlang/a2a_erl/rebar.config", "erlang/a2a_erl/rebar.lock")}'
+
+  docker:
+    paths:
+      - '~/.cache/docker/buildx'
+      - '/tmp/.buildx-cache'
+    key: 'docker-{hashFiles("erlang/a2a_erl/Dockerfile")}'
+
+# Notification settings
+notifications:
+  slack:
+    channel: '#a2a-ops'
+    on_success: true
+    on_failure: true
+    on_cancel: true
+
+  email:
+    on_failure: true
+    recipients: ['devops@example.com']
+
+# Quality gates
+quality_gates:
+  required_success_rate: 95
+  max_failure_rate: 5
+  required_coverage: 80
+  max_security_vulnerabilities: 0

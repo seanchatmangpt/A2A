@@ -21,7 +21,7 @@
 +K true
 
 ## Schedulers online
-+sbt db
+## +sbt ns
 
 ## Use async threads
 +A 64

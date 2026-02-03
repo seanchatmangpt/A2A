@@ -1,0 +1,685 @@
+# =============================================================================
+# Erlang CI Pipeline for HotCI
+# =============================================================================
+# Comprehensive Erlang/OTP testing and build pipeline
+# Triggers on push, pull requests, and schedule for main branch
+# =============================================================================
+
+name: Erlang CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'erlang/a2a_erl/**'
+      - '.github/workflows/erlang-ci.yml'
+      - 'erlang/a2a_erl/Makefile'
+      - 'erlang/a2a_erl/rebar.config'
+      - 'erlang/a2a_erl/Dockerfile'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'erlang/a2a_erl/**'
+      - '.github/workflows/erlang-ci.yml'
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - staging
+          - production
+
+env:
+  OTP_VERSION: '28'
+  BUILD_DIR: '/tmp/build'
+  ERLANG_HOME: '/usr/local/lib/erlang'
+  REBAR3_VERSION: '3.23.0'
+
+jobs:
+  # =============================================================================
+  # Job 1: Syntax Check & Dependencies
+  # =============================================================================
+  syntax-check:
+    name: Syntax Check & Dependencies
+    runs-on: ubuntu-latest
+    outputs:
+      rebar3-version: ${{ steps.install.outputs.rebar3-version }}
+      otp-version: ${{ steps.check.outputs.otp-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Erlang/OTP ${{ env.OTP_VERSION }}
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Verify OTP version
+        id: check
+        run: |
+          echo "otp-version=$(erl -eval 'io:format("~s", [erlang:system_info(otp_release)]), halt().' -noshell)" >> $GITHUB_OUTPUT
+
+      - name: Install rebar3
+        id: install
+        run: |
+          echo "Installing rebar3..."
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+          echo "rebar3-version=$(rebar3 version)" >> $GITHUB_OUTPUT
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rebar3-
+            ${{ runner.os }}-rebar3-
+
+      - name: Check syntax
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+
+      - name: Check dependencies
+        run: |
+          cd erlang/a2a_erl
+          rebar3 deps
+          rebar3 tree
+
+      - name: Validate rebar.config
+        run: |
+          cd erlang/a2a_erl
+          # Check for syntax errors in rebar.config
+          erl -eval 'Config = file:consult("rebar.config"), io:format("✓ rebar.config is valid~n"), halt().' -noshell
+
+  # =============================================================================
+  # Job 2: Unit & Property Testing
+  # =============================================================================
+  unit-tests:
+    name: Unit & Property Tests
+    runs-on: ubuntu-latest
+    needs: syntax-check
+    strategy:
+      matrix:
+        test-type: [unit, property]
+        include:
+          - test-type: unit
+            command: 'rebar3 ct --suite test/*_SUITE.erl'
+            coverage: true
+          - test-type: property
+            command: 'rebar3 proper'
+            coverage: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Run ${{ matrix.test-type }} tests
+        run: |
+          cd erlang/a2a_erl
+          rebar3 as test compile
+          ${{ matrix.command }}
+
+      - name: Generate coverage report (when applicable)
+        if: matrix.coverage == true
+        run: |
+          cd erlang/a2a_erl
+          rebar3 cover
+          rebar3 coveralls send
+
+      - name: Upload coverage to Codecov
+        if: matrix.coverage == true
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./erlang/a2a_erl/_build/test/cover/eunit.coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  # =============================================================================
+  # Job 3: Integration Tests
+  # =============================================================================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests]
+    strategy:
+      matrix:
+        test-group: [http, sse, websocket, metrics]
+      continue-on-error: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Build application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+
+      - name: Start test application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 shell &
+          sleep 10
+
+      - name: Run ${{ matrix.test-group }} integration tests
+        run: |
+          cd erlang/a2a_erl
+          case "${{ matrix.test-group }}" in
+            http)
+              rebar3 ct --suite test/a2a_http_handler_SUITE.erl
+              ;;
+            sse)
+              rebar3 ct --suite test/a2a_sse_handler_SUITE.erl
+              ;;
+            websocket)
+              rebar3 ct --suite test/a2a_websocket_SUITE.erl
+              ;;
+            metrics)
+              rebar3 ct --suite test/a2a_metrics_SUITE.erl
+              ;;
+          esac
+
+      - name: Stop test application
+        if: always()
+        run: |
+          pkill -f "beam.smp" || true
+
+  # =============================================================================
+  # Job 4: Dialyzer Static Analysis
+  # =============================================================================
+  dialyzer:
+    name: Dialyzer Static Analysis
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Build application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+
+      - name: Create PLT
+        run: |
+          cd erlang/a2a_erl
+          rebar3 dialyzer plt
+
+      - name: Run Dialyzer
+        continue-on-error: true
+        run: |
+          cd erlang/a2a_erl
+          rebar3 dialyzer
+
+      - name: Upload Dialyzer results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dialyzer-results
+          path: erlang/a2a_erl/_build/test/logs/dialyzer.log
+          retention-days: 7
+
+  # =============================================================================
+  # Job 5: Docker Build Test
+  # =============================================================================
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests]
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: a2a-erl
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/docker/buildx
+            /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-buildx-${{ hashFiles('erlang/a2a_erl/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-buildx-
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          cd erlang/a2a_erl
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new \
+            --tag ${{ steps.meta.outputs.tags }} \
+            --push \
+            --label "org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${GITHUB_REF_NAME}" \
+            .
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Test Docker image
+        run: |
+          cd erlang/a2a_erl
+          docker run --rm -d --name a2a-test \
+            -p 8080:8080 \
+            ${{ steps.meta.outputs.tags }}
+          sleep 10
+          curl -f http://localhost:8080/.well-known/agent-card.json || exit 1
+          docker stop a2a-test
+
+  # =============================================================================
+  # Job 6: Security Scan
+  # =============================================================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests]
+    strategy:
+      matrix:
+        scan-type: [deps, code, container]
+      continue-on-error: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run dependency security scan
+        if: matrix.scan-type == 'deps'
+        uses: erlef/actions/rebar3-audit@v1
+        with:
+          minimum-otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Run code security scan
+        if: matrix.scan_type == 'code'
+        uses: fjogstadt/trivy-action@0.2.3
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run container security scan
+        if: matrix.scan_type == 'container'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'a2a-erl:latest'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-${{ matrix.scan-type }}
+          path: |
+            trivy-results.sarif
+            security-audit.log
+          retention-days: 7
+
+  # =============================================================================
+  # Job 7: Performance Benchmark
+  # =============================================================================
+  performance-test:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests, docker-build]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Build benchmark application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+
+      - name: Install benchmarking tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wrk apache2-utils
+
+      - name: Run performance benchmarks
+        run: |
+          cd erlang/a2a_erl
+          # Start the application in background
+          rebar3 shell &
+          sleep 15
+
+          # Run benchmarks
+          echo "=== Benchmarking HTTP endpoints ==="
+          wrk -t12 -c400 -d30s http://localhost:8080/.well-known/agent-card.json
+
+          echo "=== Benchmarking SSE endpoint ==="
+          wrk -t12 -c200 -d30s http://localhost:8080/sse/updates
+
+          echo "=== Benchmark with concurrent requests ==="
+          ab -n 10000 -c 100 http://localhost:8080/.well-known/agent-card.json
+
+      - name: Generate performance report
+        run: |
+          cd erlang/a2a_erl
+          cat > performance-report.md << 'EOF'
+          # Performance Test Results
+
+          ## Test Configuration
+          - Workers: 12
+          - Connections: 400
+          - Duration: 30 seconds
+          - Test Date: $(date)
+          - Commit: ${{ github.sha }}
+
+          ## Key Metrics
+          - Requests per second
+          - Mean response time
+          - Error rate
+          - Throughput
+          EOF
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: |
+            erlang/a2a_erl/performance-report.md
+            benchmark-logs/
+          retention-days: 30
+
+  # =============================================================================
+  # Job 8: Release Artifact Creation
+  # =============================================================================
+  release-artifacts:
+    name: Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests, docker-build, security-scan, performance-test]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    outputs:
+      release-version: ${{ steps.version.outputs.version }}
+      artifacts-url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock') }}
+
+      - name: Extract version
+        id: version
+        run: |
+          cd erlang/a2a_erl
+          VERSION=$(grep '{release, {a2a_erl, ' rebar.config | cut -d'"' -f4)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build production release
+        run: |
+          cd erlang/a2a_erl
+          rebar3 as prod release
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          release_name: A2A Erlang Release v${{ steps.version.outputs.version }}
+          body: |
+            ## Release Notes
+
+            This is an automated release of the A2A Erlang/OTP implementation.
+
+            ### What's Included
+            - Production release artifacts
+            - Docker images
+            - Test coverage reports
+            - Security scan results
+            - Performance benchmarks
+
+            ### Artifacts
+            - Release tarball: `a2a_erl-${{ steps.version.outputs.version }}.tar.gz`
+            - Docker image: `a2a-erl:${{ steps.version.outputs.version }}`
+
+            ### Build Information
+            - Build Date: $(date -u)
+            - Commit: ${{ github.sha }}
+            - Branch: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload release artifacts
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./erlang/a2a_erl/_build/prod/rel/a2a_erl/a2a_erl-${{ steps.version.outputs.version }}.tar.gz
+          asset_name: a2a_erl-${{ steps.version.outputs.version }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            erlang/a2a_erl/_build/test/cover/
+          retention-days: 30
+
+  # =============================================================================
+  # Job 9: Status Notification
+  # =============================================================================
+  status-notification:
+    name: Status Notification
+    runs-on: ubuntu-latest
+    needs: [syntax-check, unit-tests, integration-tests, dialyzer, docker-build, security-scan, performance-test, release-artifacts]
+    if: always()
+
+    steps:
+      - name: Generate status summary
+        run: |
+          echo "## CI Pipeline Summary" > status.md
+          echo "" >> status.md
+          echo "### Job Status" >> status.md
+
+          # Check each job status
+          jobs="syntax-check unit-tests integration-tests dialyzer docker-build security-scan performance-test release-artifacts"
+          for job in $jobs; do
+            status="${{ needs.$job.result }}"
+            if [ "$status" = "success" ]; then
+              echo "- ✅ $job: $status" >> status.md
+            elif [ "$status" = "failure" ]; then
+              echo "- ❌ $job: $status" >> status.md
+            else
+              echo "- ⏳ $job: $status" >> status.md
+            fi
+          done
+
+          echo "" >> status.md
+          echo "### Build Information" >> status.md
+          echo "- Commit: ${{ github.sha }}" >> status.md
+          echo "- Branch: ${{ github.ref_name }}" >> status.md
+          echo "- Date: $(date -u)" >> status.md
+          echo "- Runner: ${{ runner.os }} ${{ runner.arch }}" >> status.md
+
+      - name: Upload status report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-status
+          path: status.md
+          retention-days: 7
+
+      - name: Send Slack notification
+        if: github.event_name != 'pull_request'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: 'CI Pipeline Status: ${{ job.status }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # =============================================================================
+  # Job 10: Cleanup
+  # =============================================================================
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Clean up temporary files
+        run: |
+          sudo rm -rf /tmp/.buildx-cache
+          sudo rm -rf ~/.cache/rebar3
+          docker system prune -f
+
+      - name: Display disk usage
+        run: |
+          echo "=== Disk Usage ==="
+          df -h
+          echo ""
+          echo "=== Docker Disk Usage ==="
+          docker system df

@@ -1,0 +1,158 @@
+# =============================================================================
+# Docker Compose configuration for A2A Erlang/OTP Application
+# =============================================================================
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------------
+  # Main A2A Service
+  # -------------------------------------------------------------------------
+  a2a-erl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-02-03}
+        VCS_REF: ${VCS_REF:-main}
+        VERSION: ${VERSION:-0.1.0}
+    image: a2a-erl:${VERSION:-0.1.0}
+    container_name: a2a-erl
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+      - "4369:4369"  # EPMD for distributed Erlang
+    environment:
+      # Release configuration
+      RELEASE_NODE: a2a@${HOST:-localhost}
+      RELEASE_COOKIE: ${COOKIE:-a2a_cookie}
+      RELEASE_MODE: interactive
+
+      # Application configuration
+      PORT: ${PORT:-8080}
+      HOST: ${HOST:-localhost}
+      SCHEME: ${SCHEME:-http}
+
+      # OTP runtime tuning
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+
+      # Optional: Additional VM arguments
+      # ERL_OPTS: "+P 1000000 +K true +A 64"
+
+    networks:
+      - a2a-network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------------------------------------------------------
+  # Development Service (with live code reloading)
+  # -------------------------------------------------------------------------
+  a2a-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: a2a-erl:dev
+    container_name: a2a-erl-dev
+    ports:
+      - "8080:8080"
+      - "4369:4369"
+    volumes:
+      # Mount source code for live development
+      - ./src:/build/src:ro
+      - ./include:/build/include:ro
+      - ./config:/build/config:ro
+      - ./test:/build/test:ro
+      - ./rebar.config:/build/rebar.config:ro
+    environment:
+      RELEASE_NODE: a2a-dev@localhost
+      PORT: 8080
+    networks:
+      - a2a-network
+    profiles:
+      - dev
+
+  # -------------------------------------------------------------------------
+  # Testing Service
+  # -------------------------------------------------------------------------
+  a2a-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: a2a-erl:dev
+    container_name: a2a-erl-test
+    volumes:
+      - ./src:/build/src:ro
+      - ./include:/build/include:ro
+      - ./config:/build/config:ro
+      - ./test:/build/test:ro
+      - ./rebar.config:/build/rebar.config:ro
+      # Mount test output directory
+      - ./_build/test:/build/_build/test
+    environment:
+      RELEASE_NODE: a2a-test@localhost
+    command: ["rebar3", "ct", "--cover"]
+    networks:
+      - a2a-network
+    profiles:
+      - test
+
+networks:
+  a2a-network:
+    driver: bridge
+    name: a2a-network
+
+# =============================================================================
+# Usage Examples:
+# =============================================================================
+#
+# Build and run production container:
+#   docker-compose up -d
+#
+# Build and run development container with live code mounting:
+#   docker-compose --profile dev up a2a-dev
+#
+# Run tests:
+#   docker-compose --profile test run --rm a2a-test
+#
+# View logs:
+#   docker-compose logs -f
+#
+# Stop all services:
+#   docker-compose down
+#
+# Rebuild from scratch (no cache):
+#   docker-compose build --no-cache
+#
+# Run custom commands:
+#   docker-compose run --rm a2a-erl bash
+#   docker-compose run --rm a2a-erl bin/a2a_erl versions
+#
+# Scale multiple instances (requires RELEASE_MODE=interactive to be removed):
+#   docker-compose up -d --scale a2a-erl=3
+#
+# =============================================================================
