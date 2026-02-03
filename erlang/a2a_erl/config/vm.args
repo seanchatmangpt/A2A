@@ -1,0 +1,35 @@
+## Name of the node
+-name a2a@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie a2a_cookie
+
+## Heartbeat management
+## Disabled by default to avoid unexpected restarts
+## +K true
+
+## Enable SMP
++S 4:4
+
+## Increase number of concurrent ports/sockets
++Q 65536
+
+## Increase process count
++P 1000000
+
+## Enable kernel poll
++K true
+
+## Schedulers online
++sbt db
+
+## Use async threads
++A 64
+
+## Garbage collection
++hms 233
+
+## Allocator settings for memory efficiency
++MBas aobf
++MBlmbcs 512
++MEas aobf

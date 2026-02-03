@@ -1,0 +1,38 @@
+{application, a2a_erl,
+ [{description, "A2A Agent-to-Agent Protocol Implementation in Erlang/OTP"},
+  {vsn, "0.1.0"},
+  {registered, [
+      a2a_task_store,
+      a2a_agent_card,
+      a2a_task_sup
+  ]},
+  {mod, {a2a_erl_app, []}},
+  {applications, [
+      kernel,
+      stdlib,
+      crypto,
+      inets,
+      cowboy
+  ]},
+  {env, [
+      {port, 8080},
+      {host, "localhost"},
+      {scheme, "http"}
+  ]},
+  {modules, [
+      a2a_erl_app,
+      a2a_erl_sup,
+      a2a_task_sup,
+      a2a_task_statem,
+      a2a_task_store,
+      a2a_agent_card,
+      a2a_http_handler,
+      a2a_sse_handler,
+      a2a_push_notifier,
+      a2a_json
+  ]},
+  {licenses, ["Apache-2.0"]},
+  {links, [
+      {"GitHub", "https://github.com/a2aproject/A2A"}
+  ]}
+ ]}.
