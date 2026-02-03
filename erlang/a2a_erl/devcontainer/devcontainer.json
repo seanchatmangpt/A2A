@@ -1,0 +1,56 @@
+{
+  "name": "A2A Erlang Development",
+  "dockerContext": "..",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": "..",
+    "dockerfile": "devcontainer/Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "erlang-ls.erlang-ls",
+        "forumotion.vscode-erlang-formatter",
+        "redhat.vscode-yaml",
+        "ms-vscode.makefile-tools"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.eol": "\n",
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest"
+    }
+  },
+  "forwardPorts": [8080, 4369],
+  "portsAttributes": {
+    "8080": {
+      "label": "HTTP Server",
+      "onAutoForward": "notify"
+    },
+    "4369": {
+      "label": "EPMD",
+      "onAutoForward": "silent"
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/_build,target=/workspace/_build,type=bind,consistency=cached"
+  ],
+  "postCreateCommand": "rebar3 compile",
+  "remoteUser": "dev",
+  "runArgs": [
+    "--cap-add=SYS_PTRACE",
+    "--security-opt", "seccomp=unconfined"
+  ]
+}

@@ -94,16 +94,18 @@ init_per_suite(Config) ->
     application:ensure_all_started(crypto),
 
     %% Start the a2a_task_store gen_server
-    {ok, _Pid} = a2a_task_store:start_link(),
+    case whereis(a2a_task_store) of
+        undefined ->
+            {ok, _Pid} = a2a_task_store:start_link();
+        _Pid ->
+            ok  % Already running from another test suite
+    end,
 
     Config.
 
 end_per_suite(_Config) ->
-    %% Stop the gen_server - tables will be cleaned up
-    case whereis(a2a_task_store) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
+    %% Don't stop the gen_server - let it persist for other test suites
+    %% Individual test cases clean up their own data
     ok.
 
 init_per_testcase(_TestCase, Config) ->
@@ -141,7 +143,7 @@ test_table_properties(_Config) ->
     %% Check a2a_tasks table properties
     ?assertEqual(set, ets:info(a2a_tasks, type)),
     ?assertEqual(public, ets:info(a2a_tasks, protection)),
-    ?assertEqual(named_table, ets:info(a2a_tasks, named_table)),
+    ?assertEqual(true, ets:info(a2a_tasks, named_table)),
     %% OTP 28: write_concurrency and read_concurrency
     WriteConcurrencyTasks = ets:info(a2a_tasks, write_concurrency),
     ReadConcurrencyTasks = ets:info(a2a_tasks, read_concurrency),
@@ -151,17 +153,17 @@ test_table_properties(_Config) ->
     %% Check a2a_task_pids table properties
     ?assertEqual(set, ets:info(a2a_task_pids, type)),
     ?assertEqual(public, ets:info(a2a_task_pids, protection)),
-    ?assertEqual(named_table, ets:info(a2a_task_pids, named_table)),
+    ?assertEqual(true, ets:info(a2a_task_pids, named_table)),
 
     %% Check a2a_task_contexts table properties (bag type)
     ?assertEqual(bag, ets:info(a2a_task_contexts, type)),
     ?assertEqual(public, ets:info(a2a_task_contexts, protection)),
-    ?assertEqual(named_table, ets:info(a2a_task_contexts, named_table)),
+    ?assertEqual(true, ets:info(a2a_task_contexts, named_table)),
 
     %% Check a2a_push_configs table properties
     ?assertEqual(set, ets:info(a2a_push_configs, type)),
     ?assertEqual(public, ets:info(a2a_push_configs, protection)),
-    ?assertEqual(named_table, ets:info(a2a_push_configs, named_table)),
+    ?assertEqual(true, ets:info(a2a_push_configs, named_table)),
 
     ok.
 
@@ -195,8 +197,9 @@ test_unregister_task(_Config) ->
     ok = a2a_task_store:register_task(TaskId, Pid),
     ?assertEqual([{TaskId, Pid}], ets:lookup(a2a_task_pids, TaskId)),
 
-    %% Unregister
+    %% Unregister (cast is async, need to wait)
     ok = a2a_task_store:unregister_task(TaskId),
+    timer:sleep(100),  % Wait for gen_server to process the cast
 
     %% Verify removal
     ?assertEqual([], ets:lookup(a2a_task_pids, TaskId)),

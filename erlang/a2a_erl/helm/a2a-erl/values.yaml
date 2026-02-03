@@ -1,0 +1,117 @@
+# Default values for a2a-erl
+replicaCount: 1
+
+# Number of old ReplicaSets to retain for rollback
+revisionHistoryLimit: 10
+
+# Rolling update configuration
+rollingUpdate:
+  maxSurge: 25%
+  maxUnavailable: 0
+
+image:
+  repository: a2a-erl
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: a2a.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Erlang/OTP specific configuration
+erlang:
+  nodeName: a2a
+  cookie: a2a_cookie
+  distribution: name
+
+# Application specific configuration
+app:
+  port: 8080
+  host: localhost
+  scheme: http
+  logLevel: info
+
+# Health check configuration
+healthCheck:
+  enabled: true
+  path: /.well-known/agent-card.json
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+
+# Test configuration
+tests:
+  enabled: true
+
+# Persistence configuration
+persistence:
+  enabled: false
+  data:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 1Gi
+  log:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 500Mi

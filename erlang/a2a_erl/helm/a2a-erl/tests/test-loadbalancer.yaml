@@ -1,0 +1,27 @@
+# LoadBalancer service test
+replicaCount: 2
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+service:
+  type: LoadBalancer
+  port: 8080
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false

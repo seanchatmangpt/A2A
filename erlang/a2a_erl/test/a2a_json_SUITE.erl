@@ -394,7 +394,7 @@ json_to_role_all_roles(_Config) ->
 
 timestamp_to_iso8601_basic(_Config) ->
     %% Unix timestamp for 2023-10-27 10:00:00.123 UTC
-    Timestamp = 1698384000123,
+    Timestamp = 1698426000123,
     IsoString = a2a_json:timestamp_to_iso8601(Timestamp),
     ?assertEqual(<<"2023-10-27T10:00:00.123Z">>, IsoString),
     ok.
@@ -410,7 +410,7 @@ iso8601_to_timestamp_basic(_Config) ->
     %% ISO 8601 string without milliseconds
     IsoString = <<"2023-10-27T10:00:00Z">>,
     Timestamp = a2a_json:iso8601_to_timestamp(IsoString),
-    Expected = 1698384000000,
+    Expected = 1698426000000,
     ?assertEqual(Expected, Timestamp),
     ok.
 
@@ -418,13 +418,13 @@ iso8601_to_timestamp_with_millis(_Config) ->
     %% ISO 8601 string with milliseconds
     IsoString = <<"2023-10-27T10:00:00.123Z">>,
     Timestamp = a2a_json:iso8601_to_timestamp(IsoString),
-    Expected = 1698384000123,
+    Expected = 1698426000123,
     ?assertEqual(Expected, Timestamp),
     ok.
 
 iso8601_timestamp_roundtrip(_Config) ->
     %% Test that encoding and decoding are consistent
-    OriginalTimestamp = 1698384000456,
+    OriginalTimestamp = 1698426000456,
     IsoString = a2a_json:timestamp_to_iso8601(OriginalTimestamp),
     DecodedTimestamp = a2a_json:iso8601_to_timestamp(IsoString),
     ?assertEqual(OriginalTimestamp, DecodedTimestamp),

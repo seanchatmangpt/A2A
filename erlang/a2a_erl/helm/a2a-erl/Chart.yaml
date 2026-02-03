@@ -1,0 +1,16 @@
+apiVersion: v2
+name: a2a-erl
+description: A Helm chart for A2A Agent-to-Agent Protocol Erlang/OTP Implementation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - a2a
+  - agent-to-agent
+  - erlang
+  - otp
+home: https://github.com/modelcontextprotocol/erlang
+maintainers:
+  - name: A2A Project
+sources:
+  - https://github.com/modelcontextprotocol/erlang

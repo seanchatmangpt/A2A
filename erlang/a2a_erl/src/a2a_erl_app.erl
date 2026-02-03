@@ -39,12 +39,19 @@ stop(_State) ->
 %%% ============================================================================
 
 start_cowboy() ->
-    %% Get configuration
-    Port = application:get_env(a2a_erl, port, 8080),
+    %% Get configuration with fallback for testing
+    Port = get_available_port(application:get_env(a2a_erl, port, 8080)),
 
     %% Define routes
     Dispatch = cowboy_router:compile([
         {'_', [
+            %% Health check endpoints (must be first for performance)
+            {"/health", a2a_health_handler, []},
+            {"/health/ready", a2a_health_handler, []},
+            {"/health/live", a2a_health_handler, []},
+            {"/health/degraded", a2a_health_handler, []},
+            {"/metrics", a2a_health_handler, []},
+
             %% Agent card discovery
             {"/.well-known/agent-card.json", a2a_http_handler, []},
 
@@ -73,12 +80,55 @@ start_cowboy() ->
         ]}
     ]),
 
-    %% Start HTTP listener
-    {ok, _} = cowboy:start_clear(
+    %% Start HTTP listener with retry on port conflict
+    start_cowboy_listener(Port, Dispatch, 5).
+
+start_cowboy_listener(Port, Dispatch, Retries) when Retries > 0 ->
+    case cowboy:start_clear(
         a2a_http_listener,
         [{port, Port}],
         #{env => #{dispatch => Dispatch}}
-    ),
+    ) of
+        {ok, _} ->
+            logger:info("A2A server started on port ~p", [Port]),
+            ok;
+        {error, {eaddrinuse, _}} ->
+            logger:warning("Port ~p in use, trying next port", [Port]),
+            NewPort = Port + 1,
+            start_cowboy_listener(NewPort, Dispatch, Retries - 1);
+        {error, Reason} ->
+            {error, Reason}
+    end;
 
-    logger:info("A2A server started on port ~p", [Port]),
-    ok.
+start_cowboy_listener(_, _, _) ->
+    {error, no_available_ports}.
+
+%% Get an available port, with fallback to testing ports
+get_available_port(DefaultPort) ->
+    %% Check if DEFAULT_PORT is available
+    case gen_udp:open(0, [{ip, {127,0,0,1}}, {port, DefaultPort}]) of
+        {ok, Socket} ->
+            gen_udp:close(Socket),
+            DefaultPort;
+        {error, eaddrinuse} ->
+            %% Try alternative ports
+            AltPorts = [18080, 18081, 18082, 18083, 18084],
+            try_next_port(AltPorts);
+        _ ->
+            DefaultPort
+    end.
+
+try_next_port([Port | Rest]) ->
+    case gen_udp:open(0, [{ip, {127,0,0,1}}, {port, Port}]) of
+        {ok, Socket} ->
+            gen_udp:close(Socket),
+            logger:info("Using alternative port ~p", [Port]),
+            Port;
+        {error, eaddrinuse} ->
+            try_next_port(Rest);
+        _ ->
+            try_next_port(Rest)
+    end;
+
+try_next_port([]) ->
+    0.

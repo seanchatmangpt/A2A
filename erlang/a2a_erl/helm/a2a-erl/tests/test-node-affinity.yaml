@@ -1,0 +1,42 @@
+# Node affinity and tolerations test
+replicaCount: 3
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "a2a"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - a2a-erl
+          topologyKey: kubernetes.io/hostname
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false

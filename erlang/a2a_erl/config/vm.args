@@ -1,8 +1,14 @@
 ## Name of the node
--name a2a@127.0.0.1
+## Use RELEASE_NODE environment variable to override
+## Format: name@host
+## For Docker Swarm: RELEASE_NODE=a2a1@a2a-1
+## The start script will substitute RELEASE_NODE from environment
+## Default to a2a@127.0.0.1 if not set
 
 ## Cookie for distributed erlang
--setcookie a2a_cookie
+## Use RELEASE_COOKIE environment variable to override
+## The start script will substitute RELEASE_COOKIE from environment
+## Default to a2a_cookie if not set
 
 ## Heartbeat management
 ## Disabled by default to avoid unexpected restarts

@@ -1,7 +1,6 @@
 # =============================================================================
 # Docker Compose configuration for A2A Erlang/OTP Application
 # =============================================================================
-version: '3.8'
 
 services:
   # -------------------------------------------------------------------------
@@ -21,7 +20,8 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
-      - "4369:4369"  # EPMD for distributed Erlang
+      # EPMD port (4369) only needed for clustering - uncomment if needed
+      # - "4369:4369"
     environment:
       # Release configuration
       RELEASE_NODE: a2a@${HOST:-localhost}
@@ -44,7 +44,7 @@ services:
       - a2a-network
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/.well-known/agent-card.json"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

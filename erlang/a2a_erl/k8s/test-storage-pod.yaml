@@ -1,0 +1,43 @@
+---
+# Test Pod to verify PVC functionality
+apiVersion: v1
+kind: Pod
+metadata:
+  name: a2a-storage-test
+  namespace: a2a-system
+  labels:
+    app: a2a-storage-test
+spec:
+  restartPolicy: Never
+  containers:
+  - name: storage-test
+    image: busybox:1.36
+    command: ['sh', '-c']
+    args:
+    - |
+      echo "=== A2A Storage Test ===" && \
+      echo "" && \
+      echo "Testing data volume mount..." && \
+      ls -la /opt/a2a_erl/data && \
+      echo "test-data-$(date +%s)" > /opt/a2a_erl/data/test.txt && \
+      echo "Data written: $(cat /opt/a2a_erl/data/test.txt)" && \
+      echo "" && \
+      echo "Testing log volume mount..." && \
+      ls -la /opt/a2a_erl/log && \
+      echo "test-log-$(date +%s)" > /opt/a2a_erl/log/test.log && \
+      echo "Log written: $(cat /opt/a2a_erl/log/test.log)" && \
+      echo "" && \
+      echo "=== Storage Test Complete ===" && \
+      sleep 30
+    volumeMounts:
+    - name: a2a-data
+      mountPath: /opt/a2a_erl/data
+    - name: a2a-log
+      mountPath: /opt/a2a_erl/log
+  volumes:
+  - name: a2a-data
+    persistentVolumeClaim:
+      claimName: a2a-data-pvc
+  - name: a2a-log
+    persistentVolumeClaim:
+      claimName: a2a-log-pvc

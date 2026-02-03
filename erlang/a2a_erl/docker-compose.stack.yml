@@ -1,0 +1,166 @@
+# =============================================================================
+# Docker Stack configuration for A2A Erlang/OTP with Service Discovery
+# Deploy with: docker stack deploy -c docker-compose.stack.yml a2a
+# =============================================================================
+# This configuration tests Docker Swarm service discovery between A2A containers
+# including Erlang distribution (EPMD) and HTTP communication
+# =============================================================================
+
+services:
+  # -------------------------------------------------------------------------
+  # A2A Service Instance 1
+  # -------------------------------------------------------------------------
+  a2a-1:
+    image: a2a-erl:runtime
+    environment:
+      # Enable rebar3 OS variable substitution in vm.args
+      RELX_REPLACE_OS_VARS: "true"
+      # Node name for distributed Erlang
+      # Use 127.0.0.1 for local EPMD (Docker Swarm overlay doesn't support EPMD well)
+      # Services communicate via HTTP DNS discovery instead
+      RELEASE_NODE: "a2a1@127.0.0.1"
+      RELEASE_COOKIE: a2a_swarm_cookie
+      RELEASE_MODE: interactive
+      RELEASE_DISTRIBUTION: name
+      PORT: 8080
+      HOST: 0.0.0.0
+      SCHEME: http
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+      # Bind EPMD to all interfaces
+      ERL_EPMD_ADDRESS: 127.0.0.1
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+    networks:
+      - a2a-overlay
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      endpoint_mode: dnsrr
+
+  # -------------------------------------------------------------------------
+  # A2A Service Instance 2
+  # -------------------------------------------------------------------------
+  a2a-2:
+    image: a2a-erl:runtime
+    environment:
+      # Enable rebar3 OS variable substitution in vm.args
+      RELX_REPLACE_OS_VARS: "true"
+      # Node name for distributed Erlang
+      # Use 127.0.0.1 for local EPMD (Docker Swarm overlay doesn't support EPMD well)
+      # Services communicate via HTTP DNS discovery instead
+      RELEASE_NODE: "a2a2@127.0.0.1"
+      RELEASE_COOKIE: a2a_swarm_cookie
+      RELEASE_MODE: interactive
+      RELEASE_DISTRIBUTION: name
+      PORT: 8080
+      HOST: 0.0.0.0
+      SCHEME: http
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+      # Bind EPMD to all interfaces
+      ERL_EPMD_ADDRESS: 127.0.0.1
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+    networks:
+      - a2a-overlay
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      endpoint_mode: dnsrr
+
+  # -------------------------------------------------------------------------
+  # A2A Service Instance 3
+  # -------------------------------------------------------------------------
+  a2a-3:
+    image: a2a-erl:runtime
+    environment:
+      # Enable rebar3 OS variable substitution in vm.args
+      RELX_REPLACE_OS_VARS: "true"
+      # Node name for distributed Erlang
+      # Use 127.0.0.1 for local EPMD (Docker Swarm overlay doesn't support EPMD well)
+      # Services communicate via HTTP DNS discovery instead
+      RELEASE_NODE: "a2a3@127.0.0.1"
+      RELEASE_COOKIE: a2a_swarm_cookie
+      RELEASE_MODE: interactive
+      RELEASE_DISTRIBUTION: name
+      PORT: 8080
+      HOST: 0.0.0.0
+      SCHEME: http
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+      # Bind EPMD to all interfaces
+      ERL_EPMD_ADDRESS: 127.0.0.1
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+    networks:
+      - a2a-overlay
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      endpoint_mode: dnsrr
+
+  # -------------------------------------------------------------------------
+  # Service Discovery Test Container
+  # -------------------------------------------------------------------------
+  discovery-test:
+    image: nicolaka/netshoot:latest
+    command: /bin/sh -c "sleep 3600"
+    networks:
+      - a2a-overlay
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: none
+
+# =============================================================================
+# Networks - Overlay for multi-host communication
+# =============================================================================
+networks:
+  a2a-overlay:
+    driver: overlay
+    attachable: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.0.0/24

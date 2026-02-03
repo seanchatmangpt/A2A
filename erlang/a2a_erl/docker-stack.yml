@@ -1,0 +1,80 @@
+# =============================================================================
+# Docker Stack configuration for A2A Erlang/OTP Application
+# Deploy with: docker stack deploy -c docker-stack.yml a2a
+# =============================================================================
+# NOTE: This file is optimized for Docker Swarm mode.
+# For local development, use docker-compose.yml instead.
+# =============================================================================
+
+services:
+  # -------------------------------------------------------------------------
+  # Main A2A Service
+  # -------------------------------------------------------------------------
+  a2a-erl:
+    image: a2a-erl:${VERSION:-0.1.0}
+    environment:
+      # Release configuration
+      RELEASE_NODE: a2a@${HOST:-tasks.a2a-erl}
+      RELEASE_COOKIE: ${COOKIE:-a2a_swarm_cookie}
+      RELEASE_MODE: interactive
+      RELEASE_DISTRIBUTION: name
+
+      # Application configuration
+      PORT: 8080
+      HOST: ${HOST:-0.0.0.0}
+      SCHEME: ${SCHEME:-http}
+
+      # OTP runtime tuning
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+
+    networks:
+      - a2a-network
+
+    ports:
+      - target: 8080
+        published: ${PORT:-8080}
+        protocol: tcp
+        mode: ingress
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  a2a-network:
+    driver: overlay
+    attachable: true

@@ -20,6 +20,7 @@
     encode_task_status/1,
     encode_stream_response/1,
     encode_agent_card/1,
+    encode_send_message_request/1,
     encode_jsonrpc_response/1,
     encode_jsonrpc_error/1,
     encode_jsonrpc_error/3
@@ -55,7 +56,7 @@
 %% @doc Generic encode - dispatches based on record type
 -spec encode(term()) -> binary().
 encode(Term) ->
-    json:encode(Term).
+    jiffy:encode(Term).
 
 %% @doc Encode a Task record to JSON map
 -spec encode_task(task()) -> map().
@@ -405,6 +406,74 @@ encode_jsonrpc_error(Code, Message, Data) ->
         D -> Base#{<<"data">> => D}
     end.
 
+%% @doc Encode SendMessageRequest to map
+-spec encode_send_message_request(#send_message_request{}) -> map().
+encode_send_message_request(#send_message_request{} = Req) ->
+    Base = #{
+        <<"message">> => encode_message(Req#send_message_request.message)
+    },
+    WithConfig = case Req#send_message_request.configuration of
+        undefined -> Base;
+        Config -> Base#{<<"configuration">> => encode_send_message_configuration(Config)}
+    end,
+    WithTenant = case Req#send_message_request.tenant of
+        undefined -> WithConfig;
+        Tenant -> WithConfig#{<<"tenant">> => Tenant}
+    end,
+    case Req#send_message_request.metadata of
+        M when map_size(M) =:= 0 -> WithTenant;
+        M -> WithTenant#{<<"metadata">> => M}
+    end.
+
+%% @doc Encode SendMessageConfiguration to map
+-spec encode_send_message_configuration(#send_message_configuration{}) -> map().
+encode_send_message_configuration(#send_message_configuration{} = Config) ->
+    Base = #{
+        <<"blocking">> => Config#send_message_configuration.blocking
+    },
+    WithModes = case Config#send_message_configuration.accepted_output_modes of
+        [] -> Base;
+        Modes -> Base#{<<"acceptedOutputModes">> => Modes}
+    end,
+    WithHistory = case Config#send_message_configuration.history_length of
+        undefined -> WithModes;
+        HL -> WithModes#{<<"historyLength">> => HL}
+    end,
+    case Config#send_message_configuration.push_notification_config of
+        undefined -> WithHistory;
+        PushConfig -> WithHistory#{<<"pushNotificationConfig">> => encode_push_notification_config(PushConfig)}
+    end.
+
+%% @doc Encode PushNotificationConfig to map
+-spec encode_push_notification_config(#push_notification_config{}) -> map().
+encode_push_notification_config(#push_notification_config{} = Config) ->
+    Base = #{
+        <<"url">> => Config#push_notification_config.url
+    },
+    WithId = case Config#push_notification_config.id of
+        undefined -> Base;
+        Id -> Base#{<<"id">> => Id}
+    end,
+    WithToken = case Config#push_notification_config.token of
+        undefined -> WithId;
+        Token -> WithId#{<<"token">> => Token}
+    end,
+    case Config#push_notification_config.authentication of
+        undefined -> WithToken;
+        Auth -> WithToken#{<<"authentication">> => encode_authentication_info(Auth)}
+    end.
+
+%% @doc Encode AuthenticationInfo to map
+-spec encode_authentication_info(#authentication_info{}) -> map().
+encode_authentication_info(#authentication_info{} = Auth) ->
+    Base = #{
+        <<"scheme">> => Auth#authentication_info.scheme
+    },
+    case Auth#authentication_info.credentials of
+        undefined -> Base;
+        Creds -> Base#{<<"credentials">> => Creds}
+    end.
+
 %%% ============================================================================
 %%% Decoding Functions
 %%% ============================================================================
@@ -413,7 +482,7 @@ encode_jsonrpc_error(Code, Message, Data) ->
 -spec decode(binary()) -> {ok, map()} | {error, term()}.
 decode(Json) ->
     try
-        {ok, json:decode(Json)}
+        {ok, jiffy:decode(Json, [return_maps])}
     catch
         _:Error -> {error, Error}
     end.
@@ -674,7 +743,15 @@ parse_timestamp_parts(YearS, MonthS, DayS, HourS, MinS, SecS, MillisS) ->
     Hour = list_to_integer(HourS),
     Min = list_to_integer(MinS),
     Sec = list_to_integer(SecS),
-    Millis = list_to_integer(string:pad(MillisS, 3, trailing, $0)),
+    %% Pad milliseconds to 3 digits - string:pad may return nested lists
+    MillisPadded = case string:pad(MillisS, 3, trailing, $0) of
+        Bin when is_binary(Bin) -> binary_to_list(Bin);
+        List when is_list(List) ->
+            %% string:pad may return nested list like ["123", 48, 48]
+            %% Need to flatten it to "12300"
+            lists:flatten(List)
+    end,
+    Millis = list_to_integer(MillisPadded),
 
     DateTime = {{Year, Month, Day}, {Hour, Min, Sec}},
     Seconds = calendar:datetime_to_gregorian_seconds(DateTime) -

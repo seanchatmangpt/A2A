@@ -1,0 +1,61 @@
+---
+# Test Pod to verify PVC persistence across restarts
+apiVersion: v1
+kind: Pod
+metadata:
+  name: a2a-storage-verify
+  namespace: a2a-system
+  labels:
+    app: a2a-storage-verify
+spec:
+  restartPolicy: Never
+  containers:
+  - name: storage-verify
+    image: busybox:1.36
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "=== A2A Storage Persistence Test ==="
+      echo ""
+      echo "Checking for previously written data..."
+      if [ -f /opt/a2a_erl/data/test.txt ]; then
+        echo "SUCCESS: Persistent data found:"
+        cat /opt/a2a_erl/data/test.txt
+      else
+        echo "No previous data found - writing new data"
+        echo "write-test-$(date +%s)" > /opt/a2a_erl/data/test.txt
+        echo "Wrote new data:"
+        cat /opt/a2a_erl/data/test.txt
+      fi
+      echo ""
+      if [ -f /opt/a2a_erl/log/test.log ]; then
+        echo "SUCCESS: Persistent log found:"
+        cat /opt/a2a_erl/log/test.log
+      else
+        echo "No previous log found - writing new log"
+        echo "log-test-$(date +%s)" > /opt/a2a_erl/log/test.log
+        echo "Wrote new log:"
+        cat /opt/a2a_erl/log/test.log
+      fi
+      echo ""
+      echo "Listing all data files:"
+      ls -la /opt/a2a_erl/data/
+      echo ""
+      echo "Listing all log files:"
+      ls -la /opt/a2a_erl/log/
+      echo ""
+      echo "=== Verification Complete ==="
+      sleep 10
+    volumeMounts:
+    - name: a2a-data
+      mountPath: /opt/a2a_erl/data
+    - name: a2a-log
+      mountPath: /opt/a2a_erl/log
+  volumes:
+  - name: a2a-data
+    persistentVolumeClaim:
+      claimName: a2a-data-pvc
+  - name: a2a-log
+    persistentVolumeClaim:
+      claimName: a2a-log-pvc

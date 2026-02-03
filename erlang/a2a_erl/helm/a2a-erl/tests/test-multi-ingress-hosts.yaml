@@ -1,0 +1,42 @@
+# Multiple ingress hosts test
+replicaCount: 2
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: a2a.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: api.a2a.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+    - host: admin.a2a.example.com
+      paths:
+        - path: /admin
+          pathType: Prefix
+  tls:
+    - secretName: a2a-wildcard-tls
+      hosts:
+        - a2a.example.com
+        - api.a2a.example.com
+        - admin.a2a.example.com
+
+autoscaling:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi

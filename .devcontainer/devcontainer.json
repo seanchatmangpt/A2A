@@ -10,6 +10,14 @@
         },
         "ghcr.io/devcontainers/features/node:1": {
             "version": "lts"
+        },
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": true,
+            "installOhMyZsh": false,
+            "upgradePackages": true
+        },
+        "ghcr.io/devcontainers/features/git:1": {
+            "version": "latest"
         }
     },
     "postCreateCommand": "bash .devcontainer/setup.sh",
@@ -18,16 +26,49 @@
             "extensions": [
                 "ms-python.python",
                 "ms-python.vscode-pylance",
+                "ms-python.debugger",
                 "bufbuild.vscode-buf",
-                "streetsidesoftware.code-spell-checker"
+                "streetsidesoftware.code-spell-checker",
+                "github.copilot",
+                "redhat.vscode-yaml",
+                "timonwong.shellcheck"
             ],
             "settings": {
-                "python.defaultInterpreterPath": "/usr/local/bin/python"
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.formatting.provider": "black",
+                "python.linting.enabled": true,
+                "python.linting.pylintEnabled": true,
+                "files.eol": "\n",
+                "files.trimTrailingWhitespace": true,
+                "files.insertFinalNewline": true
             }
         }
     },
     "forwardPorts": [
-        8000
+        8000,
+        8080,
+        4369
     ],
-    "remoteUser": "vscode"
+    "portsAttributes": {
+        "8000": {
+            "label": "Docs Server",
+            "onAutoForward": "notify"
+        },
+        "8080": {
+            "label": "Erlang HTTP",
+            "onAutoForward": "notify"
+        },
+        "4369": {
+            "label": "EPMD",
+            "onAutoForward": "silent"
+        }
+    },
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+    ],
+    "remoteUser": "vscode",
+    "runArgs": [
+        "--cap-add=SYS_PTRACE",
+        "--security-opt", "seccomp=unconfined"
+    ]
 }

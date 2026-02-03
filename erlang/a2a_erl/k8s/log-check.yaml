@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-check
+  namespace: a2a-system
+spec:
+  restartPolicy: Never
+  containers:
+  - name: log-check
+    image: busybox:1.36
+    command: ['sh', '-c', 'ls -la /opt/a2a_erl/log/ && echo "=== LOG CONTENT ===" && cat /opt/a2a_erl/log/* 2>/dev/null || true']
+    volumeMounts:
+    - name: a2a-log
+      mountPath: /opt/a2a_erl/log
+  volumes:
+  - name: a2a-log
+    persistentVolumeClaim:
+      claimName: a2a-log-pvc

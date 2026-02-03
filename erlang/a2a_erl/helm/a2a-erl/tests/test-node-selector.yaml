@@ -1,0 +1,24 @@
+# Node selector with multiple labels test
+replicaCount: 2
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+nodeSelector:
+  node.kubernetes.io/instance-type: "t3.medium"
+  topology.kubernetes.io/zone: "us-west-2a"
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false

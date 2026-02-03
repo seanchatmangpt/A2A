@@ -1,0 +1,101 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: a2a-ingress
+  namespace: a2a-system
+  labels:
+    app: a2a-erl
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/websocket-services: "a2a-service"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: a2a.local
+    http:
+      paths:
+      # Health check endpoints
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /health/ready
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /health/live
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Agent card endpoint - exact path
+      - path: /.well-known/agent-card.json
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Core A2A endpoints - use ImplementationSpecific for special chars
+      - path: /message:send
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /message:stream
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /tasks
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Task-specific paths with prefix matching
+      - path: /tasks/
+        pathType: Prefix
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /extendedAgentCard
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+  # Optional: TLS configuration
+  # tls:
+  # - hosts:
+  #   - a2a.local
+  #   secretName: a2a-tls-secret

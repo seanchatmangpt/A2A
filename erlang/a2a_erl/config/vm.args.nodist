@@ -1,0 +1,25 @@
+## No distribution mode for containerized deployments
+## This vm.args is used when RELEASE_DISTRIBUTION=none
+
+## Enable SMP
++S 4:4
+
+## Increase number of concurrent ports/sockets
++Q 65536
+
+## Increase process count
++P 1000000
+
+## Enable kernel poll
++K true
+
+## Use async threads
++A 64
+
+## Garbage collection
++hms 233
+
+## Allocator settings for memory efficiency
++MBas aobf
++MBlmbcs 512
++MEas aobf

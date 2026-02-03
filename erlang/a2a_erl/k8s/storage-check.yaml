@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-check
+  namespace: a2a-system
+spec:
+  restartPolicy: Never
+  containers:
+  - name: storage-check
+    image: busybox:1.36
+    command: ['sh', '-c', 'ls -la /opt/a2a_erl/data/ && echo "=== DATA CONTENT ===" && cat /opt/a2a_erl/data/* 2>/dev/null || true']
+    volumeMounts:
+    - name: a2a-data
+      mountPath: /opt/a2a_erl/data
+  volumes:
+  - name: a2a-data
+    persistentVolumeClaim:
+      claimName: a2a-data-pvc

@@ -1,0 +1,14 @@
+# Empty resources test - should use namespace defaults
+replicaCount: 1
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+resources: {}
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false

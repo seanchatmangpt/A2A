@@ -1,0 +1,28 @@
+# Custom rollback and rolling update configuration
+replicaCount: 1
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+# Configure more history for rollback
+revisionHistoryLimit: 20
+
+# Custom rolling update strategy
+rollingUpdate:
+  maxSurge: 50%
+  maxUnavailable: 1
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false

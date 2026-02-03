@@ -119,7 +119,7 @@ test_http_send_message_end_to_end(Config) ->
         <<"id">> => 1
     },
 
-    RequestBody = json:encode(JsonRpcReq),
+    RequestBody = json_encode(JsonRpcReq),
 
     %% Make HTTP POST request
     Response = http_post(<<BaseUrl/binary, "/message:send">>, RequestBody),
@@ -128,7 +128,7 @@ test_http_send_message_end_to_end(Config) ->
     ?assertEqual(200, maps:get(<<"status">>, Response)),
     Body = maps:get(<<"body">>, Response),
 
-    JsonResp = json:decode(Body),
+    JsonResp = json_decode(Body),
     ?assertEqual(<<"2.0">>, maps:get(<<"jsonrpc">>, JsonResp)),
     ?assertNotEqual(undefined, maps:get(<<"result">>, JsonResp, undefined)),
     ?assertEqual(undefined, maps:get(<<"error">>, JsonResp, undefined)),
@@ -146,7 +146,7 @@ test_http_send_message_end_to_end(Config) ->
 
     ?assertEqual(200, maps:get(<<"status">>, GetResponse)),
     GetBody = maps:get(<<"body">>, GetResponse),
-    GetJsonResp = json:decode(GetBody),
+    GetJsonResp = json_decode(GetBody),
 
     GetResult = maps:get(<<"result">>, GetJsonResp),
     ?assertEqual(TaskId, maps:get(<<"id">>, GetResult)),
@@ -465,11 +465,11 @@ test_error_handling_integration(Config) ->
     Response1 = http_post(<<BaseUrl/binary, "/message:send">>, MalformedJson),
     ?assertEqual(400, maps:get(<<"status">>, Response1)),
     Body1 = maps:get(<<"body">>, Response1),
-    JsonResp1 = json:decode(Body1),
+    JsonResp1 = json_decode(Body1),
     ?assertNotEqual(undefined, maps:get(<<"error">>, JsonResp1)),
 
     %% Test 2: Unknown method
-    UnknownMethodJson = json:encode(#{
+    UnknownMethodJson = json_encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => <<"unknown/method">>,
         <<"params">> => #{},
@@ -478,12 +478,12 @@ test_error_handling_integration(Config) ->
     Response2 = http_post(<<BaseUrl/binary, "/message:send">>, UnknownMethodJson),
     ?assertEqual(400, maps:get(<<"status">>, Response2)),
     Body2 = maps:get(<<"body">>, Response2),
-    JsonResp2 = json:decode(Body2),
+    JsonResp2 = json_decode(Body2),
     Error2 = maps:get(<<"error">>, JsonResp2),
     ?assertEqual(-32601, maps:get(<<"code">>, Error2)),
 
     %% Test 3: Invalid parameters
-    InvalidParamsJson = json:encode(#{
+    InvalidParamsJson = json_encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => <<"message/send">>,
         <<"params">> => #{<<"invalid">> => <<"params">>},
@@ -492,7 +492,7 @@ test_error_handling_integration(Config) ->
     Response3 = http_post(<<BaseUrl/binary, "/message:send">>, InvalidParamsJson),
     ?assertEqual(400, maps:get(<<"status">>, Response3)),
     Body3 = maps:get(<<"body">>, Response3),
-    JsonResp3 = json:decode(Body3),
+    JsonResp3 = json_decode(Body3),
     ?assertNotEqual(undefined, maps:get(<<"error">>, JsonResp3)),
 
     %% Test 4: GetTask with non-existent ID (404)
@@ -500,7 +500,7 @@ test_error_handling_integration(Config) ->
     Response4 = http_get(<<BaseUrl/binary, "/tasks/", NonExistentTaskId/binary>>),
     ?assertEqual(404, maps:get(<<"status">>, Response4)),
     Body4 = maps:get(<<"body">>, Response4),
-    JsonResp4 = json:decode(Body4),
+    JsonResp4 = json_decode(Body4),
     Error4 = maps:get(<<"error">>, JsonResp4),
     ?assertEqual(-32001, maps:get(<<"code">>, Error4)),
 
@@ -519,7 +519,7 @@ test_error_handling_integration(Config) ->
 
     %% Try to cancel again via HTTP
     CancelUrl = <<BaseUrl/binary, "/tasks/", TaskId5/binary, ":cancel">>,
-    CancelBody = json:encode(#{
+    CancelBody = json_encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => <<"tasks/cancel">>,
         <<"params">> => #{<<"id">> => TaskId5},
@@ -528,7 +528,7 @@ test_error_handling_integration(Config) ->
     Response5 = http_post(CancelUrl, CancelBody),
     ?assertEqual(400, maps:get(<<"status">>, Response5)),
     Body5 = maps:get(<<"body">>, Response5),
-    JsonResp5 = json:decode(Body5),
+    JsonResp5 = json_decode(Body5),
     Error5 = maps:get(<<"error">>, JsonResp5),
     ?assertEqual(-32002, maps:get(<<"code">>, Error5)),
 
@@ -537,7 +537,7 @@ test_error_handling_integration(Config) ->
     Response6 = http_get(SubscribeUrl),
     ?assertEqual(400, maps:get(<<"status">>, Response6)),
     Body6 = maps:get(<<"body">>, Response6),
-    JsonResp6 = json:decode(Body6),
+    JsonResp6 = json_decode(Body6),
     Error6 = maps:get(<<"error">>, JsonResp6),
     ?assertEqual(-32003, maps:get(<<"code">>, Error6)),
 
@@ -587,6 +587,16 @@ http_request(Method, Url, Headers, Body) ->
             };
         {error, Reason} ->
             ct:fail("HTTP request failed: ~p", [Reason])
+    end.
+
+%% @doc JSON encoding helper
+json_encode(Term) -> a2a_json:encode(Term).
+
+%% @doc JSON decoding helper - unwraps the {ok, Map} tuple
+json_decode(Json) ->
+    case a2a_json:decode(Json) of
+        {ok, Map} -> Map;
+        {error, Reason} -> error({json_decode_failed, Reason})
     end.
 
 %% @doc Delete task and verify it's removed

@@ -1,0 +1,20 @@
+{{- if .Values.tests.enabled | default false }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "a2a-erl.fullname" . }}-test-connection"
+  labels:
+    {{- include "a2a-erl.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  containers:
+  - name: wget
+    image: busybox:1.36
+    command:
+    - wget
+    - -O-
+    - {{ include "a2a-erl.fullname" . }}:{{ .Values.service.port }}{{ .Values.healthCheck.path }}
+  restartPolicy: Never
+{{- end }}

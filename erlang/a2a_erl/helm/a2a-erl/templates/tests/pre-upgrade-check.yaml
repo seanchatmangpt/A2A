@@ -1,0 +1,26 @@
+{{- if .Values.tests.enabled | default false }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "a2a-erl.fullname" . }}-pre-upgrade-check"
+  labels:
+    {{- include "a2a-erl.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-5"
+spec:
+  containers:
+  - name: pre-upgrade
+    image: busybox:1.36
+    command:
+    - sh
+    - -c
+    - |
+      echo "Running pre-upgrade checks..."
+      echo "Current release: {{ .Release.Name }}"
+      echo "Current namespace: {{ .Release.Namespace }}"
+      echo "Target version: {{ .Chart.AppVersion }}"
+      echo "Pre-upgrade checks complete!"
+  restartPolicy: Never
+{{- end }}

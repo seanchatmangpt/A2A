@@ -1,0 +1,33 @@
+# Ingress enabled test
+replicaCount: 2
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: a2a.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: a2a-tls
+      hosts:
+        - a2a.example.com

@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: a2a-service
+  namespace: a2a-system
+  labels:
+    app: a2a-erl
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+spec:
+  type: ClusterIP
+  selector:
+    app: a2a-erl
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  - name: epmd
+    port: 4369
+    targetPort: epmd
+    protocol: TCP
+  sessionAffinity: None
+---
+# Headless service for distributed Erlang
+apiVersion: v1
+kind: Service
+metadata:
+  name: a2a-headless
+  namespace: a2a-system
+  labels:
+    app: a2a-erl
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: a2a-erl
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+  - name: epmd
+    port: 4369
+    targetPort: epmd
+---
+# ServiceAccount for the application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: a2a-service-account
+  namespace: a2a-system
+  labels:
+    app: a2a-erl
+---
+# Role for pod viewing
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: a2a-pod-reader
+  namespace: a2a-system
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: a2a-pod-reader-binding
+  namespace: a2a-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: a2a-pod-reader
+subjects:
+- kind: ServiceAccount
+  name: a2a-service-account
+  namespace: a2a-system

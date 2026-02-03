@@ -1,0 +1,35 @@
+# Edge cases test - extreme values
+replicaCount: 1
+
+image:
+  repository: a2a-erl
+  tag: "0.1.0"
+
+# Very low resource limits
+resources:
+  limits:
+    cpu: 10m
+    memory: 32Mi
+  requests:
+    cpu: 5m
+    memory: 16Mi
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: false
+
+# Custom health check with short intervals
+healthCheck:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 2
+  successThreshold: 1
+  failureThreshold: 10
+
+# Override name
+nameOverride: "edge"
+fullnameOverride: "edge-test"

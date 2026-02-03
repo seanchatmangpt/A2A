@@ -1,0 +1,41 @@
+{{- if .Values.tests.enabled | default false }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "a2a-erl.fullname" . }}-post-upgrade-test"
+  labels:
+    {{- include "a2a-erl.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "5"
+spec:
+  containers:
+  - name: curl
+    image: curlimages/curl:8.11.1
+    command:
+    - sh
+    - -c
+    - |
+      echo "Running post-upgrade validation..."
+      # Test health endpoint
+      HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "a2a-erl.fullname" . }}:{{ .Values.service.port }}{{ .Values.healthCheck.path }})
+      if [ "$HEALTH_CHECK" -eq 200 ]; then
+        echo "Health check passed: $HEALTH_CHECK"
+      else
+        echo "Health check failed: $HEALTH_CHECK"
+        exit 1
+      fi
+
+      # Test agent card endpoint
+      AGENT_CARD=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "a2a-erl.fullname" . }}:{{ .Values.service.port }}/.well-known/agent-card.json)
+      if [ "$AGENT_CARD" -eq 200 ]; then
+        echo "Agent card endpoint passed: $AGENT_CARD"
+      else
+        echo "Agent card endpoint failed: $AGENT_CARD"
+        exit 1
+      fi
+
+      echo "Post-upgrade validation complete!"
+  restartPolicy: Never
+{{- end }}

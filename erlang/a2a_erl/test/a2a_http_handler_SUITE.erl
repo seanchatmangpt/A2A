@@ -702,9 +702,13 @@ content_type(Response) ->
     Headers = headers(Response),
     maps:get(<<"content-type">>, Headers, undefined).
 
-json_encode(Term) -> json:encode(Term).
+json_encode(Term) -> a2a_json:encode(Term).
 
-json_decode(Json) -> json:decode(Json).
+json_decode(Json) ->
+    case a2a_json:decode(Json) of
+        {ok, Map} -> Map;
+        {error, Reason} -> error({json_decode_failed, Reason})
+    end.
 
 cleanup_all_tasks() ->
     case ets:info(a2a_tasks) of

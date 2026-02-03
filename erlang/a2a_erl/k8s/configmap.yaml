@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a2a-config
+  namespace: a2a-system
+data:
+  # VM args for Erlang runtime
+  # Note: Node name and cookie are set via environment variables
+  # RELEASE_NODE and RELEASE_COOKIE instead of vm.args in Kubernetes
+  vm.args: |
+    ## Enable SMP
+    +S 4:4
+
+    ## Increase number of concurrent ports/sockets
+    +Q 65536
+
+    ## Increase process count
+    +P 1000000
+
+    ## Enable kernel poll
+    +K true
+
+    ## Use async threads
+    +A 64
+
+    ## Garbage collection
+    +hms 233
+
+    ## Allocator settings for memory efficiency
+    +MBas aobf
+    +MBlmbcs 512
+    +MEas aobf
+
+  # Application configuration
+  sys.config: |
+    [
+      {a2a_erl, [
+        %% HTTP Server Configuration
+        {port, 8080},
+        {host, "0.0.0.0"},
+        {scheme, "http"}
+      ]},
+
+      {kernel, [
+        %% Logger configuration
+        {logger_level, info},
+        {logger, [
+          {handler, default, logger_std_h,
+            #{level => info,
+              formatter => {logger_formatter, #{
+                single_line => true,
+                template => [time, " ", level, " ", msg, "\n"]
+              }}
+            }
+          }
+        ]}
+      ]},
+
+      {sasl, [
+        {sasl_error_logger, false}
+      ]}
+    ].

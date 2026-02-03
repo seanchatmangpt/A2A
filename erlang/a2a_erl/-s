@@ -1,0 +1,1 @@
+{error,badarg,[{erlang,iolist_to_binary,[[init,stop]],[{error_info,#{module=>erl_erts_errors}}]},{jiffy,decode,2,[{file,"/workspace/erlang/a2a_erl/_build/default/lib/jiffy/src/jiffy.erl"},{line,80}]},{init,start_it,1,[]},{init,start_em,1,[]},{init,do_boot,3,[]}]}

@@ -1,0 +1,97 @@
+Script started on 2026-02-03 22:13:02+00:00 [COMMAND="rebar3 cover -v" <not executed on terminal>]
+=ERROR REPORT==== 3-Feb-2026::22:13:03.512793 ===
+** State machine user_drv terminating
+** When server state  = {undefined,undefined}
+** Reason for termination = error:undef
+** Callback modules = [user_drv]
+** Callback mode = state_functions
+** Stacktrace =
+**  [{erlang,nif_error,[undef],[{error_info,#{module => erl_erts_errors}}]},
+     {prim_tty,isatty,1,[{file,"prim_tty.erl"},{line,1487}]},
+     {user_drv,init,1,[{file,"user_drv.erl"},{line,171}]},
+     {gen_statem,init_it,6,[{file,"gen_statem.erl"},{line,3316}]},
+     {proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,333}]}]
+
+=CRASH REPORT==== 3-Feb-2026::22:13:03.514883 ===
+  crasher:
+    initial call: user_drv:init/1
+    pid: <0.67.0>
+    registered_name: []
+    exception error: undefined function erlang:nif_error/1
+      in function  prim_tty:isatty/1 (prim_tty.erl:1487)
+      in call from user_drv:init/1 (user_drv.erl:171)
+      in call from gen_statem:init_it/6 (gen_statem.erl:3316)
+    ancestors: [<0.66.0>,kernel_sup,<0.47.0>]
+    message_queue_len: 0
+    messages: []
+    links: []
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 610
+    stack_size: 29
+    reductions: 370
+  neighbours:
+
+=CRASH REPORT==== 3-Feb-2026::22:13:13.826379 ===
+  crasher:
+    initial call: supervisor_bridge:user_sup/1
+    pid: <0.66.0>
+    registered_name: []
+    exception exit: nouser
+      in function  gen_server:init_it/6 (gen_server.erl:2257)
+    ancestors: [kernel_sup,<0.47.0>]
+    message_queue_len: 0
+    messages: []
+    links: [<0.49.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 376
+    stack_size: 29
+    reductions: 692
+  neighbours:
+
+=SUPERVISOR REPORT==== 3-Feb-2026::22:13:13.826711 ===
+    supervisor: {local,kernel_sup}
+    errorContext: start_error
+    reason: nouser
+    offender: [{pid,undefined},
+               {id,user},
+               {mfargs,{user_sup,start,[]}},
+               {restart_type,temporary},
+               {significant,false},
+               {shutdown,2000},
+               {child_type,supervisor}]
+
+=INFO REPORT==== 3-Feb-2026::22:13:13.835864 ===
+    application: kernel
+    exited: {{shutdown,{failed_to_start_child,user,nouser}},
+             {kernel,start,[normal,[]]}}
+    type: permanent
+
+=CRASH REPORT==== 3-Feb-2026::22:13:13.835887 ===
+  crasher:
+    initial call: application_master:init/3
+    pid: <0.46.0>
+    registered_name: []
+    exception exit: {{shutdown,{failed_to_start_child,user,nouser}},
+                     {kernel,start,[normal,[]]}}
+      in function  application_master:init/3 (application_master.erl:147)
+    ancestors: [application_controller,<0.10.0>]
+    message_queue_len: 1
+    messages: [{'EXIT',<0.47.0>,normal}]
+    links: [<0.45.0>]
+    dictionary: []
+    trap_exit: true
+    status: running
+    heap_size: 233
+    stack_size: 29
+    reductions: 63
+  neighbours:
+
+Kernel pid terminated (application_controller) ("{application_start_failure,kernel,{{shutdown,{failed_to_start_child,user,nouser}},{kernel,start,[normal,[]]}}}")
+
+Crash dump is being written to: erl_crash.dump...done
+
+Script done on 2026-02-03 22:13:14+00:00 [COMMAND_EXIT_CODE="1"]
