@@ -1,6 +1,6 @@
 {application, a2a_erl,
  [{description, "A2A Agent-to-Agent Protocol Implementation in Erlang/OTP"},
-  {vsn, "0.1.0"},
+  {vsn, "0.2.0"},
   {registered, [
       a2a_task_store,
       a2a_agent_card,

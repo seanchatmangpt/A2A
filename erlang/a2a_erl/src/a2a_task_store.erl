@@ -196,7 +196,15 @@ delete_push_config(TaskId, ConfigId) ->
 init([]) ->
     %% Create ETS tables with OTP 28 optimizations
     %% write_concurrency and read_concurrency for high performance
-    ets:new(?TASKS_TABLE, [
+    %% Clean up any existing tables first (in case of previous runs)
+    lists:foreach(fun(Table) ->
+        case ets:info(Table) of
+            undefined -> ok;
+            _ -> ets:delete(Table)
+        end
+    end, [?TASKS_TABLE, ?PIDS_TABLE, ?CONTEXTS_TABLE, ?PUSH_TABLE]),
+
+    _ = ets:new(?TASKS_TABLE, [
         named_table,
         public,
         set,
@@ -205,7 +213,7 @@ init([]) ->
         {read_concurrency, true}
     ]),
 
-    ets:new(?PIDS_TABLE, [
+    _ = ets:new(?PIDS_TABLE, [
         named_table,
         public,
         set,
@@ -215,7 +223,7 @@ init([]) ->
     ]),
 
     %% Bag for context -> task_id mapping (multiple tasks per context)
-    ets:new(?CONTEXTS_TABLE, [
+    _ = ets:new(?CONTEXTS_TABLE, [
         named_table,
         public,
         bag,
@@ -224,7 +232,7 @@ init([]) ->
         {read_concurrency, true}
     ]),
 
-    ets:new(?PUSH_TABLE, [
+    _ = ets:new(?PUSH_TABLE, [
         named_table,
         public,
         set,

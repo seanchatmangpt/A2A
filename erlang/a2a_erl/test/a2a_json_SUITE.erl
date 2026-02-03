@@ -460,12 +460,12 @@ encode_decode_task_roundtrip(_Config) ->
             #message{
                 message_id = <<"msg-1">>,
                 role = user,
-                parts = [#part{content = {text, <<"Start task">>}]
+                parts = [#part{content = {text, <<"Start task">>}}]
             },
             #message{
                 message_id = <<"msg-2">>,
                 role = agent,
-                parts = [#part{content = {text, <<"Working on it">>}]
+                parts = [#part{content = {text, <<"Working on it">>}}]
             }
         ],
         metadata = #{<<"priority">> => <<"high">>, <<"owner">> => <<"user123">>}
@@ -612,3 +612,11 @@ stream_response_task_payload(_Config) ->
     ?assertEqual(<<"task-stream-123">>, maps:get(<<"id">>, TaskMap)),
     ?assertEqual(<<"ctx-stream-456">>, maps:get(<<"contextId">>, TaskMap)),
     ok.
+
+%%%===================================================================
+%%% Helper Functions
+%%%===================================================================
+
+%% @doc Check if a key exists in a map
+is_key(Key, Map) ->
+    maps:is_key(Key, Map).

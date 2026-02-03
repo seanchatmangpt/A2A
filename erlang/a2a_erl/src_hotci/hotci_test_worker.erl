@@ -13,7 +13,7 @@
          terminate/2, code_change/3]).
 
 %% Records
--record.test_info, {
+-record(test_info, {
     id :: binary(),
     node_id :: binary(),
     test_name :: atom(),
@@ -24,13 +24,13 @@
     result :: term() | undefined,
     error :: term() | undefined,
     timeout :: integer()
-}.
+}).
 
 %% State record
--record.state, {
+-record(state, {
     test_info :: #test_info{},
     monitor_ref :: reference()
-}.
+}).
 
 -define(SERVER, ?MODULE).
 -define(DEFAULT_TIMEOUT, 30000).

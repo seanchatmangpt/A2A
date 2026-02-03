@@ -96,10 +96,8 @@ encode_task_status(#task_status{} = Status) ->
         Msg -> Base#{<<"message">> => encode_message(Msg)}
     end,
 
-    WithTimestamp = case Status#task_status.timestamp of
-        undefined -> WithMessage;
-        T -> WithMessage#{<<"timestamp">> => timestamp_to_iso8601(T)}
-    end,
+    WithTimestamp = WithMessage#{<<"timestamp">> =>
+        timestamp_to_iso8601(Status#task_status.timestamp)},
 
     WithTimestamp.
 

@@ -36,57 +36,7 @@ init([]) ->
 
     %% Child specifications
     ChildSpecs = [
-        %% HotCI Security System - highest priority
-        #{
-            id => a2a_hotci_security,
-            start => {a2a_hotci_security, start_link, []},
-            restart => permanent,
-            shutdown => 10000,
-            type => worker,
-            modules => [a2a_hotci_security]
-        },
-
-        %% Integrity Validator - must start early
-        #{
-            id => a2a_integrity_validator,
-            start => {a2a_integrity_validator, start_link, []},
-            restart => permanent,
-            shutdown => 8000,
-            type => worker,
-            modules => [a2a_integrity_validator]
-        },
-
-        %% Rollback Manager - critical for system stability
-        #{
-            id => a2a_rollback_manager,
-            start => {a2a_rollback_manager, start_link, []},
-            restart => permanent,
-            shutdown => 12000,
-            type => worker,
-            modules => [a2a_rollback_manager]
-        },
-
-        %% Disaster Recovery System - must be available
-        #{
-            id => a2a_disaster_recovery,
-            start => {a2a_disaster_recovery, start_link, []},
-            restart => permanent,
-            shutdown => 15000,
-            type => worker,
-            modules => [a2a_disaster_recovery]
-        },
-
-        %% Monitoring and Alerting System - system health
-        #{
-            id => a2a_monitoring,
-            start => {a2a_monitoring, start_link, []},
-            restart => permanent,
-            shutdown => 10000,
-            type => worker,
-            modules => [a2a_monitoring]
-        },
-
-        %% Task Store - must start after security systems
+        %% Task Store - ETS-backed task storage
         #{
             id => a2a_task_store,
             start => {a2a_task_store, start_link, []},

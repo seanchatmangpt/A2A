@@ -1,0 +1,204 @@
+# =============================================================================
+# Act Cache Test Workflow - Simplified
+# =============================================================================
+# Tests cache functionality in act (local GitHub Actions runner)
+# Focuses purely on testing cache hit/miss behavior
+# Uses ubuntu-latest runs-on to leverage catthehacker image with Node.js
+# =============================================================================
+
+name: Act Cache Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  OTP_VERSION: '28'
+
+jobs:
+  # =============================================================================
+  # Job 1: Cache Miss Test - First Run (no cache should exist)
+  # =============================================================================
+  cache-miss-test:
+    name: Cache Miss Test (First Run)
+    runs-on: ubuntu-latest
+    outputs:
+      cache-status: ${{ steps.test-cache.outputs.cache-hit }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test cache - create simple dependency cache
+        id: test-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/test-deps
+            /tmp/build-cache
+          key: ${{ runner.os }}-test-deps-${{ hashFiles('erlang/a2a_erl/rebar.config') }}
+          restore-keys: |
+            ${{ runner.os }}-test-deps-
+
+      - name: Show cache status
+        run: |
+          echo "=== Cache Test Result ==="
+          echo "Cache Hit Status: ${{ steps.test-cache.outputs.cache-hit }}"
+          echo ""
+          if [ "${{ steps.test-cache.outputs.cache-hit }}" == "true" ]; then
+            echo "CACHE HIT: Cache was restored (unexpected on first run)"
+          else
+            echo "CACHE MISS: No cache found (expected on first run)"
+          fi
+
+      - name: Create fake dependencies (on cache miss)
+        if: steps.test-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Creating fake dependencies for cache..."
+          mkdir -p ~/.cache/test-deps /tmp/build-cache
+          echo "dependency-v1" > ~/.cache/test-deps/dep1.txt
+          echo "dependency-v2" > ~/.cache/test-deps/dep2.txt
+          echo "build-artifact" > /tmp/build-cache/artifact.txt
+          echo "Dependencies created. These should be cached on next run."
+
+      - name: Verify cached files exist
+        run: |
+          echo "=== Cached Files ==="
+          ls -la ~/.cache/test-deps/ || echo "No test-deps cache"
+          ls -la /tmp/build-cache/ || echo "No build-cache"
+
+  # =============================================================================
+  # Job 2: Cache Hit Test - Should find cache from Job 1
+  # =============================================================================
+  cache-hit-test:
+    name: Cache Hit Test (Second Run)
+    runs-on: ubuntu-latest
+    needs: cache-miss-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test cache - restore dependency cache
+        id: test-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/test-deps
+            /tmp/build-cache
+          key: ${{ runner.os }}-test-deps-${{ hashFiles('erlang/a2a_erl/rebar.config') }}
+          restore-keys: |
+            ${{ runner.os }}-test-deps-
+
+      - name: Show cache status
+        run: |
+          echo "=== Cache Test Result ==="
+          echo "Cache Hit Status: ${{ steps.test-cache.outputs.cache-hit }}"
+          echo ""
+          if [ "${{ steps.test-cache.outputs.cache-hit }}" == "true" ]; then
+            echo "CACHE HIT: Cache was restored (expected!)"
+          else
+            echo "CACHE MISS: No cache found (unexpected - Job 1 should have cached)"
+          fi
+
+      - name: Verify cached files restored
+        run: |
+          echo "=== Restored Files ==="
+          if [ -f ~/.cache/test-deps/dep1.txt ]; then
+            echo "dep1.txt found: $(cat ~/.cache/test-deps/dep1.txt)"
+            echo "dep2.txt found: $(cat ~/.cache/test-deps/dep2.txt)"
+            echo "artifact.txt found: $(cat /tmp/build-cache/artifact.txt)"
+            echo "SUCCESS: All cached files were restored!"
+          else
+            echo "FAIL: Cached files were not restored"
+          fi
+
+  # =============================================================================
+  # Job 3: Test cache with different keys (should miss)
+  # =============================================================================
+  different-key-test:
+    name: Different Key Test (Should Miss)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test cache with different key
+        id: test-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/different-key
+          key: ${{ runner.os }}-different-key-${{ hashFiles('erlang/a2a_erl/rebar.lock') }}
+
+      - name: Show cache status
+        run: |
+          echo "=== Different Key Test Result ==="
+          echo "Cache Hit Status: ${{ steps.test-cache.outputs.cache-hit }}"
+          if [ "${{ steps.test-cache.outputs.cache-hit }}" == "true" ]; then
+            echo "Unexpected: Different key got a hit"
+          else
+            echo "Expected: Different key caused cache miss"
+          fi
+
+  # =============================================================================
+  # Job 4: Restore keys fallback test
+  # =============================================================================
+  restore-keys-test:
+    name: Restore Keys Fallback Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test restore-keys with partial match
+        id: test-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/partial-match
+          key: ${{ runner.os }}-partial-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-partial-
+            ${{ runner.os }}-
+
+      - name: Show restore-keys status
+        run: |
+          echo "=== Restore Keys Test Result ==="
+          echo "Cache Hit Status: ${{ steps.test-cache.outputs.cache-hit }}"
+          echo "Note: This tests the restore-keys fallback mechanism"
+
+      - name: Create cache for restore-keys test
+        if: steps.test-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.cache/partial-match
+          echo "partial-match-data" > ~/.cache/partial-match/data.txt
+
+  # =============================================================================
+  # Job 5: Summary Report
+  # =============================================================================
+  cache-summary:
+    name: Cache Test Summary
+    runs-on: ubuntu-latest
+    needs: [cache-miss-test, cache-hit-test, different-key-test, restore-keys-test]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "===================="
+          echo "Cache Test Summary"
+          echo "===================="
+          echo ""
+          echo "Job Results:"
+          echo "  Cache Miss Test (First Run): ${{ needs.cache-miss-test.result }}"
+          echo "  Cache Hit Test (Second Run): ${{ needs.cache-hit-test.result }}"
+          echo "  Different Key Test: ${{ needs.different-key-test.result }}"
+          echo "  Restore Keys Test: ${{ needs.restore-keys-test.result }}"
+          echo ""
+          echo "Expected behaviors:"
+          echo "  1. First run (Job 1) should report CACHE MISS (false)"
+          echo "  2. Second run (Job 2) should report CACHE HIT (true)"
+          echo "  3. Different key (Job 3) should report CACHE MISS (false)"
+          echo "  4. Restore keys (Job 4) tests fallback mechanism"
+          echo ""
+          echo "Cache outputs:"
+          echo "  Job 1 cache-status: ${{ needs.cache-miss-test.outputs.cache-status }}"

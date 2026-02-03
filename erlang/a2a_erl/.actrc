@@ -1,0 +1,38 @@
+# act configuration for A2A Erlang project
+# Optimized for ARM64 (Apple Silicon) with amd64 emulation
+
+# Set container architecture for Apple Silicon/M1/M2/M3
+--container-architecture linux/amd64
+
+# Platform mappings for ARM64 compatibility
+# Use catthehacker images which include nodejs and git for checkout actions
+-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04
+-P ubuntu-22.04=ghcr.io/catthehacker/ubuntu:act-22.04
+-P ubuntu-20.04=ghcr.io/catthehacker/ubuntu:act-20.04
+
+# Custom image with Erlang + Node.js for checkout@v4 compatibility
+-P erlang:28=a2a/erlang-act:28
+-P erlang:27=a2a/erlang-act:28
+-P erlang:26=a2a/erlang-act:28
+
+# Bind working directory for better performance
+-b
+
+# Use cache for faster runs
+--action-cache-path /Users/sac/.cache/act
+
+# Set default actor
+-a "act-runner"
+
+# Don't skip checkout
+--no-skip-checkout
+
+# Use host network for better connectivity
+--network host
+
+# Set secret for GitHub token
+-s GITHUB_TOKEN=act-test-token
+
+# Additional secrets for testing
+-s CUSTOM_SECRET=test-custom-secret-value
+-s SECRET_FOR_TESTS=another-secret-value

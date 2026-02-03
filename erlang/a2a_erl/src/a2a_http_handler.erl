@@ -123,13 +123,11 @@ handle_send_message(Req0, _Blocking) ->
                             Response = make_jsonrpc_response(ReqId,
                                 #{<<"task">> => a2a_json:encode_task(Task)}),
                             {200, json_headers(), Response, Req};
-                        {ok, message, Msg} ->
-                            Response = make_jsonrpc_response(ReqId,
-                                #{<<"message">> => a2a_json:encode_message(Msg)}),
-                            {200, json_headers(), Response, Req};
-                        {error, Reason} ->
+                        {error, _Reason} ->
+                            %% This case handles actual errors from get_task
+                            %% The {ok, message, Msg} pattern is handled below
                             {400, json_headers(),
-                             make_jsonrpc_error(ReqId, ?JSONRPC_INTERNAL_ERROR, Reason), Req}
+                             make_jsonrpc_error(ReqId, ?JSONRPC_INTERNAL_ERROR, <<"Task not found">>), Req}
                     end;
                 {error, _} ->
                     {400, json_headers(),

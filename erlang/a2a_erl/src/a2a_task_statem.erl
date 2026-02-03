@@ -288,9 +288,10 @@ working({call, From}, {send_message, Message}, Data) ->
         undefined -> ok;
         Module ->
             Self = self(),
-            spawn_link(fun() ->
+            _Pid = spawn_link(fun() ->
                 handle_message_with_handler(Self, Module, Data#data.handler_state, UpdatedMessage)
-            end)
+            end),
+            ok
     end,
 
     ok = a2a_task_store:update_task(NewTask),

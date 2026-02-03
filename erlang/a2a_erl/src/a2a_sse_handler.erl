@@ -250,11 +250,20 @@ create_streaming_task(Message) ->
 get_task_from_pid(Pid) ->
     case a2a_task_statem:get_task(Pid) of
         {ok, Task} -> Task;
-        _ -> #task{}
+        _ ->
+            %% Return a minimal valid task record
+            #task{
+                id = <<>>,
+                context_id = <<>>,
+                status = #task_status{
+                    state = pending,
+                    timestamp = 0
+                }
+            }
     end.
 
 %% Send error response and stop
-error_response(Req0, Status, Message) ->
+error_response(Req0, StatusCode, Message) ->
     Body = json:encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"error">> => #{
@@ -263,7 +272,11 @@ error_response(Req0, Status, Message) ->
         },
         <<"id">> => null
     }),
-    Req = cowboy_req:reply(Status, #{
+    Req = cowboy_req:reply(StatusCode, #{
         <<"content-type">> => <<"application/json">>
     }, Body, Req0),
-    {ok, Req, #state{}}.
+    %% Return a valid state that will terminate immediately
+    {stop, {normal, Req}, #state{
+        req = Req,
+        mode = stream
+    }}.

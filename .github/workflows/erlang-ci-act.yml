@@ -1,0 +1,146 @@
+# =============================================================================
+# Erlang CI Pipeline - Act Compatible for Local Testing
+# =============================================================================
+# Uses catthehacker/act-latest image, builds rebar3 from source
+# =============================================================================
+
+name: Erlang CI (Act - Local Testing)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  REBAR3_CACHE_KEY: rebar3-deps-v1
+
+jobs:
+  # =============================================================================
+  # Job 0: Cache Test - Validates cache hit/miss behavior
+  # =============================================================================
+  cache-validation:
+    name: Cache Validation Test
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache-rebar3.outputs.cache-hit }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache rebar3 dependencies
+        id: cache-rebar3
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/a2a_erl/_build
+          key: ${{ runner.os }}-rebar3-${{ env.REBAR3_CACHE_KEY }}-${{ hashFiles('erlang/a2a_erl/rebar.config') }}
+          restore-keys: |
+            ${{ runner.os }}-rebar3-${{ env.REBAR3_CACHE_KEY }}-
+            ${{ runner.os }}-rebar3-
+
+      - name: Display cache status
+        run: |
+          echo "=== Cache Status ==="
+          echo "Cache Hit: ${{ steps.cache-rebar3.outputs.cache-hit }}"
+          if [ "${{ steps.cache-rebar3.outputs.cache-hit }}" == "true" ]; then
+            echo "Status: CACHE HIT - Dependencies restored from cache"
+          else
+            echo "Status: CACHE MISS - Dependencies will be downloaded and cached"
+          fi
+
+  # =============================================================================
+  # Job 1: Unit Tests (uses cache)
+  # =============================================================================
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: cache-validation
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore rebar3 cache
+        id: cache-rebar3
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/a2a_erl/_build
+          key: ${{ runner.os }}-rebar3-${{ env.REBAR3_CACHE_KEY }}-${{ hashFiles('erlang/a2a_erl/rebar.config') }}
+          restore-keys: |
+            ${{ runner.os }}-rebar3-${{ env.REBAR3_CACHE_KEY }}-
+            ${{ runner.os }}-rebar3-
+
+      - name: Install Erlang
+        run: |
+          apt-get update
+          apt-get install -y erlang
+          erl -version
+
+      - name: Build and install rebar3 from source
+        run: |
+          git clone https://github.com/erlang/rebar3.git /tmp/rebar3
+          cd /tmp/rebar3
+          ./bootstrap
+          cp rebar3 /usr/local/bin/rebar3
+          rebar3 version
+
+      - name: Show cache hit status
+        run: |
+          echo "Unit Test Job Cache Hit: ${{ steps.cache-rebar3.outputs.cache-hit }}"
+
+      - name: Run unit tests
+        run: |
+          cd erlang/a2a_erl
+          mkdir -p results
+          rebar3 ct --verbose true --logdir ./results --label erlang-ci --cover true
+
+      - name: Generate coverage report
+        if: success()
+        run: |
+          cd erlang/a2a_erl
+          rebar3 cover -v
+
+      - name: Show test results summary
+        if: always()
+        run: |
+          cd erlang/a2a_erl
+          if [ -d "results" ]; then
+            echo "=== Test Results Summary ==="
+            for log in results/*.log; do
+              if [ -f "$log" ]; then
+                echo "=== $(basename $log) ==="
+                cat "$log"
+              fi
+            done
+          else
+            echo "No results directory found"
+          fi
+
+  # =============================================================================
+  # Job 2: Cache Summary
+  # =============================================================================
+  cache-summary:
+    name: Cache Summary
+    runs-on: ubuntu-latest
+    needs: [cache-validation, unit-test]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "======================"
+          echo "Cache Test Summary"
+          echo "======================"
+          echo ""
+          echo "Cache Validation Job Cache Hit: ${{ needs.cache-validation.outputs.cache-hit }}"
+          echo ""
+          echo "Expected behavior:"
+          echo "  First run: Cache miss (empty/false)"
+          echo "  Subsequent runs: Cache hit (true)"
+          echo ""
+          echo "Act cache server stores caches between workflow runs."
+          echo "Use --cache-server-path to specify cache location."
