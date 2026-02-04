@@ -23,17 +23,17 @@ test_section() {
 
 test_pass() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 }
 
 test_fail() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
 test_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
-    ((WARN_COUNT++))
+    WARN_COUNT=$((WARN_COUNT + 1))
 }
 
 # Test 1: Old +K true (kernel poll) still works
@@ -172,7 +172,7 @@ fi
 test_section "Test 10: Scheduler settings compatibility"
 cat > /tmp/test_vm_args_sched.args << 'EOF'
 +S 4:4
-+sbt ns
++sbt u
 +A 64
 +P 1000000
 +Q 65536
