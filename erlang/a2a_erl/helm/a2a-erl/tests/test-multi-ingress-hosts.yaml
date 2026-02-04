@@ -10,19 +10,47 @@ ingress:
   className: nginx
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/websocket-services: "a2a-service"
   hosts:
     - host: a2a.example.com
       paths:
-        - path: /
+        - path: /health
+          pathType: Exact
+        - path: /health/ready
+          pathType: Exact
+        - path: /health/live
+          pathType: Exact
+        - path: /metrics
+          pathType: Exact
+        - path: /.well-known/agent-card.json
+          pathType: Exact
+        - path: /message:send
+          pathType: Exact
+        - path: /message:stream
+          pathType: Exact
+        - path: /tasks
+          pathType: Exact
+        - path: /tasks/
           pathType: Prefix
+        - path: /extendedAgentCard
+          pathType: Exact
     - host: api.a2a.example.com
       paths:
-        - path: /api
+        - path: /message:send
+          pathType: Exact
+        - path: /message:stream
+          pathType: Exact
+        - path: /tasks
+          pathType: Exact
+        - path: /tasks/
           pathType: Prefix
     - host: admin.a2a.example.com
       paths:
-        - path: /admin
-          pathType: Prefix
+        - path: /health
+          pathType: Exact
+        - path: /metrics
+          pathType: Exact
   tls:
     - secretName: a2a-wildcard-tls
       hosts:

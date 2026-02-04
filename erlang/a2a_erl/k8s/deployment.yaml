@@ -31,12 +31,23 @@ spec:
         image: a2a-erl:runtime
         imagePullPolicy: IfNotPresent
         command: ['/bin/sh', '-c']
-        args: ['export RELEASE_NODE="a2a@${POD_IP}" && export RELEASE_COOKIE="a2a_cluster_cookie" && export PORT="8080" && export HOST="0.0.0.0" && export SCHEME="http" && echo "Starting with RELEASE_NODE=$RELEASE_NODE" && cd /opt/a2a_erl && exec bin/a2a_erl foreground']
+        args: ['export RELEASE_NODE="a2a@${POD_IP}" && echo "Starting with RELEASE_NODE=$RELEASE_NODE" && echo "RELEASE_COOKIE=$RELEASE_COOKIE" && cd /opt/a2a_erl && exec bin/a2a_erl foreground']
         env:
         - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: RELEASE_COOKIE
+          valueFrom:
+            secretKeyRef:
+              name: a2a-secret
+              key: erlang-cookie
+        - name: PORT
+          value: "8080"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: SCHEME
+          value: "http"
         ports:
         - name: http
           containerPort: 8080
@@ -53,7 +64,7 @@ spec:
             cpu: "1000m"
         livenessProbe:
           httpGet:
-            path: /.well-known/agent-card.json
+            path: /health
             port: http
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -61,7 +72,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /.well-known/agent-card.json
+            path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -69,12 +80,34 @@ spec:
           failureThreshold: 3
         startupProbe:
           httpGet:
-            path: /.well-known/agent-card.json
+            path: /health
             port: http
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 12
+        volumeMounts:
+        - name: config
+          mountPath: /opt/a2a_erl/config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: log
+          mountPath: /opt/a2a_erl/log
+        - name: data
+          mountPath: /opt/a2a_erl/data
+      volumes:
+      - name: config
+        configMap:
+          name: a2a-config
+      - name: tmp
+        emptyDir: {}
+      - name: log
+        persistentVolumeClaim:
+          claimName: a2a-log-pvc
+      - name: data
+        persistentVolumeClaim:
+          claimName: a2a-data-pvc
       restartPolicy: Always
       dnsPolicy: ClusterFirst
 ---

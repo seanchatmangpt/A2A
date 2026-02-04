@@ -1,4 +1,4 @@
-# Ingress enabled test
+# Ingress enabled test with A2A protocol paths
 replicaCount: 2
 
 image:
@@ -22,11 +22,31 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/websocket-services: "a2a-service"
   hosts:
     - host: a2a.example.com
       paths:
-        - path: /
+        - path: /health
+          pathType: Exact
+        - path: /health/ready
+          pathType: Exact
+        - path: /health/live
+          pathType: Exact
+        - path: /metrics
+          pathType: Exact
+        - path: /.well-known/agent-card.json
+          pathType: Exact
+        - path: /message:send
+          pathType: Exact
+        - path: /message:stream
+          pathType: Exact
+        - path: /tasks
+          pathType: Exact
+        - path: /tasks/
           pathType: Prefix
+        - path: /extendedAgentCard
+          pathType: Exact
   tls:
     - secretName: a2a-tls
       hosts:

@@ -1,0 +1,126 @@
+# Custom values file for testing overrides
+replicaCount: 3
+
+image:
+  repository: custom-a2a-erl
+  tag: "2.0.0"
+  pullPolicy: Always
+
+nameOverride: "my-a2a"
+fullnameOverride: "my-custom-a2a-full"
+
+service:
+  type: LoadBalancer
+  port: 9090
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+resources:
+  limits:
+    cpu: 4000m
+    memory: 4Gi
+  requests:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector:
+  disktype: ssd
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "a2a"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - a2a-erl
+          topologyKey: kubernetes.io/hostname
+
+# Nested values - Erlang config
+erlang:
+  nodeName: custom_a2a
+  cookie: custom_secret_cookie_12345
+  distribution: name
+  smp: "8:8"
+  maxPorts: 131072
+  maxProcesses: 2000000
+  asyncThreads: 128
+
+# Nested values - App config
+app:
+  port: 9090
+  host: 0.0.0.0
+  scheme: https
+  logLevel: debug
+
+# Nested values - Health check
+healthCheck:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 60
+  periodSeconds: 20
+  timeoutSeconds: 5
+  successThreshold: 2
+  failureThreshold: 5
+
+# Nested values - Persistence
+persistence:
+  enabled: true
+  data:
+    enabled: true
+    storageClass: fast-ssd
+    accessMode: ReadWriteOnce
+    size: 10Gi
+  log:
+    enabled: true
+    storageClass: standard
+    accessMode: ReadWriteOnce
+    size: 2Gi
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+
+# Secret config
+secret:
+  create: false
+  existingSecret: my-external-secret
+
+# Service account
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/my-role"
+  name: my-service-account
+
+# Rolling update
+rollingUpdate:
+  maxSurge: 50%
+  maxUnavailable: 1
+
+revisionHistoryLimit: 5
+
+# Tests
+tests:
+  enabled: false

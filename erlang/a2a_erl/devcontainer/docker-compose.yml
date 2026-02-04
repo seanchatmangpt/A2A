@@ -1,0 +1,53 @@
+# =============================================================================
+# Docker Compose for A2A Erlang DevContainer
+# =============================================================================
+# This compose file is used by VS Code DevContainers to provide a complete
+# development environment for the A2A Erlang/OTP implementation.
+# =============================================================================
+
+services:
+  a2a-erl-dev:
+    build:
+      context: ..
+      dockerfile: devcontainer/Dockerfile
+    image: a2a-erl-dev:latest
+    container_name: a2a-erl-devcontainer
+    hostname: a2a-dev
+
+    # Override the default command to keep container running
+    command: sleep infinity
+
+    # Mount workspace
+    volumes:
+      - ..:/workspace:cached
+
+    # Expose development ports
+    ports:
+      - "8080:8080"   # HTTP server
+      - "4369:4369"   # EPMD
+
+    # Development environment variables
+    environment:
+      TERM: xterm-256color
+      DEBIAN_FRONTEND: noninteractive
+      ERL_MAX_PORTS: 65536
+      ERL_MAX_ETS_TABLES: 2000
+      REBAR_GLOBAL_CONFIG_DIR: /workspace/.rebar3
+
+    # Capabilities for debugging
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+
+    # Use the development user
+    user: dev
+
+    # Working directory
+    working_dir: /workspace
+
+    # Keep container running for development
+    stdin_open: true
+    tty: true
+
+# No networks needed - using default bridge

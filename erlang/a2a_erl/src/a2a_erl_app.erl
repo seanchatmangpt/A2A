@@ -23,7 +23,7 @@ start(_StartType, _StartArgs) ->
     case a2a_erl_sup:start_link() of
         {ok, Pid} ->
             %% Start Cowboy HTTP server
-            start_cowboy(),
+            _ = start_cowboy(),
             {ok, Pid};
         Error ->
             Error

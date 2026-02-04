@@ -1,0 +1,511 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "A2A Erlang Helm Chart Values",
+  "description": "Values schema for a2a-erl Helm chart",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "description": "Number of replicas",
+      "type": "integer",
+      "minimum": 0,
+      "default": 1
+    },
+    "revisionHistoryLimit": {
+      "description": "Number of old ReplicaSets to retain for rollback",
+      "type": "integer",
+      "minimum": 0,
+      "default": 10
+    },
+    "rollingUpdate": {
+      "description": "Rolling update configuration",
+      "type": "object",
+      "properties": {
+        "maxSurge": {
+          "description": "Max surge during rolling update",
+          "type": ["string", "integer"],
+          "default": "25%"
+        },
+        "maxUnavailable": {
+          "description": "Max unavailable during rolling update",
+          "type": ["string", "integer"],
+          "default": 0
+        }
+      }
+    },
+    "image": {
+      "description": "Container image configuration",
+      "type": "object",
+      "properties": {
+        "repository": {
+          "description": "Image repository",
+          "type": "string",
+          "default": "a2a-erl"
+        },
+        "pullPolicy": {
+          "description": "Image pull policy",
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "default": "IfNotPresent"
+        },
+        "tag": {
+          "description": "Image tag",
+          "type": "string",
+          "default": "0.1.0"
+        }
+      },
+      "required": ["repository"]
+    },
+    "imagePullSecrets": {
+      "description": "Image pull secrets",
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "default": []
+    },
+    "nameOverride": {
+      "description": "Override chart name",
+      "type": "string",
+      "default": ""
+    },
+    "fullnameOverride": {
+      "description": "Override full resource name",
+      "type": "string",
+      "default": ""
+    },
+    "serviceAccount": {
+      "description": "Service account configuration",
+      "type": "object",
+      "properties": {
+        "create": {
+          "description": "Create service account",
+          "type": "boolean",
+          "default": false
+        },
+        "annotations": {
+          "description": "Service account annotations",
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "default": {}
+        },
+        "name": {
+          "description": "Service account name",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "podAnnotations": {
+      "description": "Pod annotations",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    },
+    "podSecurityContext": {
+      "description": "Pod security context",
+      "type": "object",
+      "properties": {
+        "fsGroup": {
+          "description": "File system group ID",
+          "type": "integer",
+          "default": 1000
+        },
+        "runAsNonRoot": {
+          "description": "Run as non-root",
+          "type": "boolean",
+          "default": true
+        },
+        "runAsUser": {
+          "description": "User ID to run as",
+          "type": "integer",
+          "default": 1000
+        }
+      }
+    },
+    "securityContext": {
+      "description": "Container security context",
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "description": "Allow privilege escalation",
+          "type": "boolean",
+          "default": false
+        },
+        "capabilities": {
+          "description": "Linux capabilities",
+          "type": "object",
+          "properties": {
+            "drop": {
+              "description": "Capabilities to drop",
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["ALL"]
+            }
+          }
+        },
+        "readOnlyRootFilesystem": {
+          "description": "Read-only root filesystem",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "service": {
+      "description": "Service configuration",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Service type",
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"],
+          "default": "ClusterIP"
+        },
+        "port": {
+          "description": "Service port",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 8080
+        },
+        "annotations": {
+          "description": "Service annotations",
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "default": {}
+        }
+      }
+    },
+    "ingress": {
+      "description": "Ingress configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable ingress",
+          "type": "boolean",
+          "default": false
+        },
+        "className": {
+          "description": "Ingress class name",
+          "type": "string",
+          "default": "nginx"
+        },
+        "annotations": {
+          "description": "Ingress annotations",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "hosts": {
+          "description": "Ingress hosts",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": { "type": "string" },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "description": "TLS configuration",
+          "type": "array",
+          "items": { "type": "object" },
+          "default": []
+        }
+      }
+    },
+    "resources": {
+      "description": "Resource limits and requests",
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": ["string", "integer"] },
+            "memory": { "type": "string" }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": ["string", "integer"] },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    },
+    "autoscaling": {
+      "description": "Horizontal Pod Autoscaler configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable autoscaling",
+          "type": "boolean",
+          "default": false
+        },
+        "minReplicas": {
+          "description": "Minimum replicas",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "maxReplicas": {
+          "description": "Maximum replicas",
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "targetCPUUtilizationPercentage": {
+          "description": "Target CPU utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        },
+        "targetMemoryUtilizationPercentage": {
+          "description": "Target memory utilization percentage",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        }
+      }
+    },
+    "nodeSelector": {
+      "description": "Node selector",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    },
+    "tolerations": {
+      "description": "Tolerations",
+      "type": "array",
+      "items": { "type": "object" },
+      "default": []
+    },
+    "affinity": {
+      "description": "Affinity rules",
+      "type": "object",
+      "default": {}
+    },
+    "erlang": {
+      "description": "Erlang/OTP specific configuration",
+      "type": "object",
+      "properties": {
+        "nodeName": {
+          "description": "Erlang node name",
+          "type": "string",
+          "default": "a2a"
+        },
+        "cookie": {
+          "description": "Erlang node cookie",
+          "type": "string",
+          "default": "a2a_cookie"
+        },
+        "distribution": {
+          "description": "Erlang distribution type",
+          "type": "string",
+          "default": "name"
+        },
+        "smp": {
+          "description": "SMP configuration (e.g., '4:4')",
+          "type": "string",
+          "default": "4:4"
+        },
+        "maxPorts": {
+          "description": "Maximum number of ports",
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "default": 65536
+        },
+        "maxProcesses": {
+          "description": "Maximum number of processes",
+          "type": "integer",
+          "minimum": 1024,
+          "default": 1000000
+        },
+        "asyncThreads": {
+          "description": "Number of async threads",
+          "type": "integer",
+          "minimum": 0,
+          "default": 64
+        }
+      }
+    },
+    "secret": {
+      "description": "Secret configuration",
+      "type": "object",
+      "properties": {
+        "create": {
+          "description": "Create secret",
+          "type": "boolean",
+          "default": true
+        },
+        "existingSecret": {
+          "description": "Name of existing secret",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "app": {
+      "description": "Application configuration",
+      "type": "object",
+      "properties": {
+        "port": {
+          "description": "Application port",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 8080
+        },
+        "host": {
+          "description": "Application host",
+          "type": "string",
+          "default": "localhost"
+        },
+        "scheme": {
+          "description": "URL scheme",
+          "type": "string",
+          "enum": ["http", "https"],
+          "default": "http"
+        },
+        "logLevel": {
+          "description": "Log level",
+          "type": "string",
+          "enum": ["emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"],
+          "default": "info"
+        }
+      }
+    },
+    "healthCheck": {
+      "description": "Health check configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable health checks",
+          "type": "boolean",
+          "default": true
+        },
+        "path": {
+          "description": "Health check path",
+          "type": "string",
+          "default": "/health"
+        },
+        "initialDelaySeconds": {
+          "description": "Initial delay seconds",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        },
+        "periodSeconds": {
+          "description": "Period seconds",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        },
+        "timeoutSeconds": {
+          "description": "Timeout seconds",
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "successThreshold": {
+          "description": "Success threshold",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "failureThreshold": {
+          "description": "Failure threshold",
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        }
+      }
+    },
+    "tests": {
+      "description": "Test pod configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable test pods",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "persistence": {
+      "description": "Persistence configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable persistence",
+          "type": "boolean",
+          "default": false
+        },
+        "data": {
+          "description": "Data persistence",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enable data persistence",
+              "type": "boolean",
+              "default": false
+            },
+            "storageClass": {
+              "description": "Storage class",
+              "type": "string",
+              "default": ""
+            },
+            "accessMode": {
+              "description": "Access mode",
+              "type": "string",
+              "default": "ReadWriteOnce"
+            },
+            "size": {
+              "description": "Storage size",
+              "type": "string",
+              "default": "1Gi"
+            }
+          }
+        },
+        "log": {
+          "description": "Log persistence",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enable log persistence",
+              "type": "boolean",
+              "default": false
+            },
+            "storageClass": {
+              "description": "Storage class",
+              "type": "string",
+              "default": ""
+            },
+            "accessMode": {
+              "description": "Access mode",
+              "type": "string",
+              "default": "ReadWriteOnce"
+            },
+            "size": {
+              "description": "Storage size",
+              "type": "string",
+              "default": "500Mi"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,35 +1,30 @@
 {
   "name": "A2A Erlang Development",
-  "dockerContext": "..",
-  "dockerFile": "Dockerfile",
-  "build": {
-    "context": "..",
-    "dockerfile": "devcontainer/Dockerfile"
-  },
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "a2a-erl-dev",
+  "workspaceFolder": "/workspace",
   "customizations": {
     "vscode": {
       "extensions": [
         "erlang-ls.erlang-ls",
-        "forumotion.vscode-erlang-formatter",
+        "szTheory.erlang-formatter",
         "redhat.vscode-yaml",
-        "ms-vscode.makefile-tools"
+        "ms-vscode.makefile-tools",
+        "github.copilot",
+        "streetsidesoftware.code-spell-checker"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash",
         "files.eol": "\n",
         "files.trimTrailingWhitespace": true,
-        "files.insertFinalNewline": true
+        "files.insertFinalNewline": true,
+        "erlang.languageServer.enabled": true,
+        "[erlang]": {
+          "editor.defaultFormatter": "szTheory.erlang-formatter",
+          "editor.formatOnSave": true
+        },
+        "erlangFormatter.formatter": "rebar3_format"
       }
-    }
-  },
-  "features": {
-    "ghcr.io/devcontainers/features/common-utils:2": {
-      "installZsh": true,
-      "installOhMyZsh": true,
-      "upgradePackages": true
-    },
-    "ghcr.io/devcontainers/features/git:1": {
-      "version": "latest"
     }
   },
   "forwardPorts": [8080, 4369],
@@ -43,14 +38,13 @@
       "onAutoForward": "silent"
     }
   },
-  "mounts": [
-    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
-    "source=${localWorkspaceFolder}/_build,target=/workspace/_build,type=bind,consistency=cached"
-  ],
   "postCreateCommand": "rebar3 compile",
   "remoteUser": "dev",
-  "runArgs": [
-    "--cap-add=SYS_PTRACE",
-    "--security-opt", "seccomp=unconfined"
-  ]
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": false,
+      "upgradePackages": true
+    }
+  }
 }

@@ -64,7 +64,7 @@ nodes:
   image: kindest/node:${K8S_VERSION}
   extraPortMappings:
   - containerPort: 30080
-    hostPort: 8080
+    hostPort: 28080
     protocol: TCP
   kubeadmConfigPatches:
   - |

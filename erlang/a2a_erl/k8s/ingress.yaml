@@ -1,3 +1,4 @@
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -28,20 +29,6 @@ spec:
             name: a2a-service
             port:
               number: 8080
-      - path: /health/ready
-        pathType: Exact
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      - path: /health/live
-        pathType: Exact
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
       - path: /metrics
         pathType: Exact
         backend:
@@ -49,46 +36,10 @@ spec:
             name: a2a-service
             port:
               number: 8080
-      # Agent card endpoint - exact path
-      - path: /.well-known/agent-card.json
-        pathType: Exact
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      # Core A2A endpoints - use ImplementationSpecific for special chars
-      - path: /message:send
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      - path: /message:stream
-        pathType: ImplementationSpecific
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      - path: /tasks
-        pathType: Exact
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      # Task-specific paths with prefix matching
-      - path: /tasks/
+      # Agent card and A2A protocol endpoints - catch-all with regex
+      # Using a catch-all path to handle all endpoints including those with special characters
+      - path: /
         pathType: Prefix
-        backend:
-          service:
-            name: a2a-service
-            port:
-              number: 8080
-      - path: /extendedAgentCard
-        pathType: ImplementationSpecific
         backend:
           service:
             name: a2a-service

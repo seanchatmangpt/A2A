@@ -41,6 +41,11 @@ ENV PORT=8080 \
 
 EXPOSE 8080
 
+# Health check for Docker/Kubernetes
+# Interval: 30s, Timeout: 10s, Retries: 3, Start period: 40s
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
 # Use foreground mode directly without distribution
 ENTRYPOINT ["bin/a2a_erl", "foreground"]
 CMD []

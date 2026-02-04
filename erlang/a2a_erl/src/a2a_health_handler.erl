@@ -29,14 +29,6 @@
     get_metrics/0
 ]).
 
--record(health_state, {
-    status :: up | degraded | down,
-    timestamp :: integer(),
-    uptime :: integer(),
-    version :: binary(),
-    checks :: map()
-}).
-
 -record(health_checks, {
     task_store :: boolean(),
     agent_card :: boolean(),
@@ -44,6 +36,14 @@
     sse_handler :: boolean(),
     push_notifier :: boolean(),
     database :: boolean()
+}).
+
+-record(health_state, {
+    status :: up | degraded | down,
+    timestamp :: integer(),
+    uptime :: integer(),
+    version :: binary(),
+    checks :: #health_checks{} | map()
 }).
 
 %%% ============================================================================
@@ -79,9 +79,6 @@ handle_request(<<"GET">>, <<"/health/degraded">>, Req) ->
 
 handle_request(<<"GET">>, <<"/metrics">>, Req) ->
     handle_metrics(Req);
-
-handle_request(<<"GET">>, <<"/health">>, Req) ->
-    handle_basic_health(Req);
 
 handle_request(_Method, _Path, Req) ->
     {405, json_headers(), error_response(<<"Method not allowed">>), Req}.
@@ -473,16 +470,15 @@ encode_health_response(#health_state{} = Health) ->
     }).
 
 %% @doc Get check value from checks record
-get_check_value(Checks, Field) when is_map(Checks) ->
-    maps:get(atom_to_binary(Field), Checks, false);
-get_check_value(#health_checks{} = Checks, Field) ->
+-spec get_check_value(#health_checks{}, atom()) -> boolean().
+get_check_value(#health_checks{} = Rec, Field) ->
     case Field of
-        task_store -> Checks#health_checks.task_store;
-        agent_card -> Checks#health_checks.agent_card;
-        http_listener -> Checks#health_checks.http_listener;
-        sse_handler -> Checks#health_checks.sse_handler;
-        push_notifier -> Checks#health_checks.push_notifier;
-        database -> Checks#health_checks.database
+        task_store -> Rec#health_checks.task_store;
+        agent_card -> Rec#health_checks.agent_card;
+        http_listener -> Rec#health_checks.http_listener;
+        sse_handler -> Rec#health_checks.sse_handler;
+        push_notifier -> Rec#health_checks.push_notifier;
+        database -> Rec#health_checks.database
     end.
 
 %% @doc Convert status atom to binary
@@ -495,16 +491,16 @@ get_timestamp() ->
     erlang:system_time(millisecond).
 
 %% @doc Get application uptime in milliseconds
+-spec get_uptime() -> non_neg_integer().
 get_uptime() ->
     case application:get_key(a2a_erl, start_time) of
         {ok, StartTime} ->
             erlang:monotonic_time(millisecond) - StartTime;
         undefined ->
             %% Fallback to system start time
-            case erlang:statistics(wall_clock) of
-                {UpTime, _} -> UpTime;
-                _ -> 0
-            end
+            %% erlang:statistics(wall_clock) always returns {UpTime, WallClockReductions}
+            {UpTime, _} = erlang:statistics(wall_clock),
+            UpTime
     end.
 
 %% @doc Get application version
@@ -539,6 +535,7 @@ get_memory_info() ->
     }.
 
 %% @doc Get detailed memory information
+-spec get_detailed_memory_info() -> map().
 get_detailed_memory_info() ->
     #{
         <<"total">> => erlang:memory(total),
@@ -547,16 +544,18 @@ get_detailed_memory_info() ->
         <<"atom">> => erlang:memory(atom),
         <<"binary">> => erlang:memory(binary),
         <<"code">> => erlang:memory(code),
-        <<"ets">> => erlang:memory(ets),
-        <<"maximum">> => erlang:memory(maximum)
+        <<"ets">> => erlang:memory(ets)
     }.
 
 %% @doc Get process information
+-spec get_process_info() -> map().
 get_process_info() ->
+    %% erlang:statistics(run_queue) returns a non_neg_integer() in OTP 27+
+    RunQueue = erlang:statistics(run_queue),
     #{
         <<"count">> => erlang:system_info(process_count),
         <<"limit">> => erlang:system_info(process_limit),
-        <<"calls">> => element(1, erlang:statistics(run_queue))
+        <<"run_queue">> => RunQueue
     }.
 
 %% @doc Get port information

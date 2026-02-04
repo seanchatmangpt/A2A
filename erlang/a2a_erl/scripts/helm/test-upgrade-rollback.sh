@@ -20,6 +20,7 @@ RELEASE_NAME="${RELEASE_NAME:-a2a-test}"
 NAMESPACE="${NAMESPACE:-a2a-test}"
 IMAGE_NAME="${IMAGE_NAME:-a2a-erl}"
 REGISTRY="${REGISTRY:-localhost:5000}"
+USE_KIND_IMAGES="${USE_KIND_IMAGES:-true}"  # Use pre-loaded images in kind (no registry needed)
 
 # Test counters
 TESTS_PASSED=0
@@ -48,10 +49,10 @@ record_result() {
 
     if [[ "${result}" == "pass" ]]; then
         log_info "PASS: ${test_name}"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         log_error "FAIL: ${test_name}"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
 
@@ -77,16 +78,38 @@ get_image_version() {
     kubectl get deployment "${RELEASE_NAME}-a2a-erl" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "unknown"
 }
 
+# Get image repository based on mode
+get_image_repo() {
+    if [[ "${USE_KIND_IMAGES}" == "true" ]]; then
+        echo "${IMAGE_NAME}"
+    else
+        echo "${REGISTRY}/${IMAGE_NAME}"
+    fi
+}
+
+# Get image pull policy based on mode
+get_image_pull_policy() {
+    if [[ "${USE_KIND_IMAGES}" == "true" ]]; then
+        echo "Never"  # Use pre-loaded images
+    else
+        echo "IfNotPresent"  # Pull from registry if not present
+    fi
+}
+
 # Test 1: Initial installation
 test_initial_install() {
     log_test "Test 1: Initial Helm installation"
+
+    local image_repo=$(get_image_repo)
+    local pull_policy=$(get_image_pull_policy)
 
     # Install initial version
     helm install "${RELEASE_NAME}" "${HELM_CHART_DIR}" \
         --namespace "${NAMESPACE}" \
         --create-namespace \
-        --set "image.repository=${REGISTRY}/${IMAGE_NAME}" \
+        --set "image.repository=${image_repo}" \
         --set "image.tag=0.1.0" \
+        --set "image.pullPolicy=${pull_policy}" \
         --set "tests.enabled=true" \
         --wait \
         --timeout 5m
@@ -105,7 +128,7 @@ test_initial_install() {
     fi
 
     record_result "fail" "Initial installation"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 2: Image version upgrade
@@ -114,11 +137,14 @@ test_image_upgrade() {
 
     local before_revision=$(get_revision)
     local before_image=$(get_image_version)
+    local image_repo=$(get_image_repo)
+    local pull_policy=$(get_image_pull_policy)
 
     helm upgrade "${RELEASE_NAME}" "${HELM_CHART_DIR}" \
         --namespace "${NAMESPACE}" \
-        --set "image.repository=${REGISTRY}/${IMAGE_NAME}" \
+        --set "image.repository=${image_repo}" \
         --set "image.tag=0.2.0" \
+        --set "image.pullPolicy=${pull_policy}" \
         --set "tests.enabled=true" \
         --wait \
         --timeout 5m
@@ -140,7 +166,7 @@ test_image_upgrade() {
     fi
 
     record_result "fail" "Image version upgrade"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 3: Configuration change upgrade
@@ -148,12 +174,15 @@ test_config_upgrade() {
     log_test "Test 3: Configuration change upgrade"
 
     local before_revision=$(get_revision)
+    local image_repo=$(get_image_repo)
+    local pull_policy=$(get_image_pull_policy)
 
     # Change configuration
     helm upgrade "${RELEASE_NAME}" "${HELM_CHART_DIR}" \
         --namespace "${NAMESPACE}" \
-        --set "image.repository=${REGISTRY}/${IMAGE_NAME}" \
+        --set "image.repository=${image_repo}" \
         --set "image.tag=0.2.0" \
+        --set "image.pullPolicy=${pull_policy}" \
         --set "app.logLevel=debug" \
         --set "replicaCount=2" \
         --set "tests.enabled=true" \
@@ -178,7 +207,7 @@ test_config_upgrade() {
     fi
 
     record_result "fail" "Configuration change upgrade"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 4: Rollback to previous version
@@ -191,8 +220,12 @@ test_rollback() {
     local revisions=$(helm history "${RELEASE_NAME}" -n "${NAMESPACE}" -o json | jq -r '.[] | "\(.revision): \(.description)"' || echo "No history available")
     log_info "Revision history:\n${revisions}"
 
-    # Rollback to previous version (revision 2, which had 0.1.0 image)
-    helm rollback "${RELEASE_NAME}" 2 -n "${NAMESPACE}" --wait --timeout 5m
+    # Rollback to revision 1 (initial install with 0.1.0 image)
+    # After test 2 and 3, we have:
+    # Revision 1: 0.1.0 (initial)
+    # Revision 2: 0.2.0 (image upgrade)
+    # Revision 3: 0.2.0 + config change
+    helm rollback "${RELEASE_NAME}" 1 -n "${NAMESPACE}" --wait --timeout 5m
 
     if [[ $? -eq 0 ]]; then
         wait_for_pods
@@ -211,7 +244,7 @@ test_rollback() {
     fi
 
     record_result "fail" "Rollback to previous version"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 5: Upgrade again after rollback
@@ -219,11 +252,14 @@ test_upgrade_after_rollback() {
     log_test "Test 5: Upgrade again after rollback"
 
     local before_revision=$(get_revision)
+    local image_repo=$(get_image_repo)
+    local pull_policy=$(get_image_pull_policy)
 
     helm upgrade "${RELEASE_NAME}" "${HELM_CHART_DIR}" \
         --namespace "${NAMESPACE}" \
-        --set "image.repository=${REGISTRY}/${IMAGE_NAME}" \
+        --set "image.repository=${image_repo}" \
         --set "image.tag=0.3.0" \
+        --set "image.pullPolicy=${pull_policy}" \
         --set "app.logLevel=info" \
         --set "replicaCount=1" \
         --set "tests.enabled=true" \
@@ -247,18 +283,22 @@ test_upgrade_after_rollback() {
     fi
 
     record_result "fail" "Upgrade after rollback"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 6: Rolling update verification
 test_rolling_update() {
     log_test "Test 6: Rolling update with zero downtime"
 
+    local image_repo=$(get_image_repo)
+    local pull_policy=$(get_image_pull_policy)
+
     # Scale up to 3 replicas
     helm upgrade "${RELEASE_NAME}" "${HELM_CHART_DIR}" \
         --namespace "${NAMESPACE}" \
-        --set "image.repository=${REGISTRY}/${IMAGE_NAME}" \
+        --set "image.repository=${image_repo}" \
         --set "image.tag=0.3.0" \
+        --set "image.pullPolicy=${pull_policy}" \
         --set "replicaCount=3" \
         --set "rollingUpdate.maxSurge=1" \
         --set "rollingUpdate.maxUnavailable=0" \
@@ -282,7 +322,7 @@ test_rolling_update() {
     fi
 
     record_result "fail" "Rolling update verification"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Test 7: Revision history limit
@@ -301,7 +341,7 @@ test_revision_history() {
     fi
 
     record_result "fail" "Revision history limit"
-    return 1
+    return 0  # Always return 0 to continue tests
 }
 
 # Cleanup function
@@ -327,7 +367,7 @@ cleanup() {
         helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" || true
 
         log_info "Deleting namespace..."
-        kubectl delete namespace "${NAMESPACE}" --ignore-not-found=true
+        kubectl delete namespace "${NAMESPACE}" --ignore-not-found=true || true
     else
         log_warn "Skipping cleanup (SKIP_CLEANUP=true)"
     fi
@@ -357,6 +397,18 @@ print_summary() {
 main() {
     log_info "Starting Helm Upgrade/Rollback Test Suite"
     log_info "Release: ${RELEASE_NAME}, Namespace: ${NAMESPACE}"
+    log_info "Kind images mode: ${USE_KIND_IMAGES}"
+
+    # Configure kubectl for kind cluster if using kind images
+    if [[ "${USE_KIND_IMAGES}" == "true" ]]; then
+        export KUBECONFIG="/tmp/kind-a2a-test-kubeconfig.yaml"
+        kind get kubeconfig --name "${CLUSTER_NAME:-a2a-test}" > "$KUBECONFIG" 2>/dev/null || {
+            log_error "Failed to get kubeconfig for kind cluster. Create cluster first:"
+            log_error "  ${SCRIPT_DIR}/setup-kind-cluster.sh create"
+            exit 1
+        }
+        log_info "Using kubeconfig: $KUBECONFIG"
+    fi
 
     # Check prerequisites
     if ! command -v kubectl &> /dev/null; then
@@ -375,7 +427,7 @@ main() {
     fi
 
     # Create namespace
-    kubectl create namespace "${NAMESPACE}" --ignore-not-found=true
+    kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
     # Run tests
     trap cleanup EXIT
@@ -388,7 +440,16 @@ main() {
     test_rolling_update
     test_revision_history
 
-    print_summary
+    # Print summary before cleanup
+    local exit_code=0
+    print_summary || exit_code=$?
+
+    # Return appropriate exit code after cleanup
+    trap - EXIT  # Disable the cleanup trap temporarily
+    cleanup
+    trap cleanup EXIT  # Re-enable for final exit
+
+    exit ${exit_code}
 }
 
 # Run main function

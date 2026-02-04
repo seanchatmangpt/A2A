@@ -5,6 +5,30 @@ metadata:
   labels:
     {{- include "a2a-erl.labels" . | nindent 4 }}
 data:
+  vm.args: |
+    ## Enable SMP
+    +S {{ .Values.erlang.smp | default "4:4" }}
+
+    ## Increase number of concurrent ports/sockets
+    +Q {{ .Values.erlang.maxPorts | default 65536 }}
+
+    ## Increase process count
+    +P {{ .Values.erlang.maxProcesses | default 1000000 }}
+
+    ## Enable kernel poll
+    +K true
+
+    ## Use async threads
+    +A {{ .Values.erlang.asyncThreads | default 64 }}
+
+    ## Garbage collection
+    +hms 233
+
+    ## Allocator settings for memory efficiency
+    +MBas aobf
+    +MBlmbcs 512
+    +MEas aobf
+
   sys.config: |
     [
       {a2a_erl, [

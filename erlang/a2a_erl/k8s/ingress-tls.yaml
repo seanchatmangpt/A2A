@@ -1,0 +1,107 @@
+---
+# A2A Erlang Ingress with TLS enabled
+# This is an example configuration with TLS termination at the ingress controller
+#
+# Prerequisites:
+# 1. Create TLS secret:
+#    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+#      -keyout tls.key -out tls.crt -subj "/CN=a2a.local"
+#    kubectl create secret tls a2a-tls-secret \
+#      --cert=tls.crt --key=tls.key -n a2a-system
+#
+# 2. For production, use cert-manager or provide valid certificates
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: a2a-ingress-tls
+  namespace: a2a-system
+  labels:
+    app: a2a-erl
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/websocket-services: "a2a-service"
+    # TLS configuration
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"
+    nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "3600s"
+    nginx.ingress.kubernetes.io/upstream-keepalive-requests: "10000"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - a2a.local
+    secretName: a2a-tls-secret
+  rules:
+  - host: a2a.local
+    http:
+      paths:
+      # Health check endpoint (consistent with docker-compose and Helm)
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Agent card endpoint - exact path
+      - path: /.well-known/agent-card.json
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Core A2A protocol endpoints
+      # Note: NGINX Ingress with use-regex handles paths with colons correctly
+      # The paths are matched as regex patterns when use-regex is "true"
+      - path: /message:send
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      - path: /message:stream
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Task endpoints
+      - path: /tasks
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Task-specific paths with prefix matching
+      - path: /tasks/
+        pathType: Prefix
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080
+      # Extended agent card endpoint
+      - path: /extendedAgentCard
+        pathType: Exact
+        backend:
+          service:
+            name: a2a-service
+            port:
+              number: 8080

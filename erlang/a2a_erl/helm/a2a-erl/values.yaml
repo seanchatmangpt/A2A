@@ -45,13 +45,35 @@ service:
 
 ingress:
   enabled: false
-  className: ""
-  annotations: {}
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/websocket-services: "a2a-service"
   hosts:
     - host: a2a.local
       paths:
-        - path: /
+        - path: /health
+          pathType: Exact
+        - path: /metrics
+          pathType: Exact
+        - path: /.well-known/agent-card.json
+          pathType: Exact
+        - path: /message:send
+          pathType: Exact
+        - path: /message:stream
+          pathType: Exact
+        - path: /tasks
+          pathType: Exact
+        - path: /tasks/
           pathType: Prefix
+        - path: /extendedAgentCard
+          pathType: Exact
   tls: []
 
 resources:
@@ -79,7 +101,18 @@ affinity: {}
 erlang:
   nodeName: a2a
   cookie: a2a_cookie
+  # Cookie must match across all environments for consistent clustering
   distribution: name
+  smp: "4:4"
+  maxPorts: 65536
+  maxProcesses: 1000000
+  asyncThreads: 64
+
+# Secret configuration
+secret:
+  create: true
+  # If create is false, provide an existing secret name
+  existingSecret: ""
 
 # Application specific configuration
 app:
@@ -91,7 +124,7 @@ app:
 # Health check configuration
 healthCheck:
   enabled: true
-  path: /.well-known/agent-card.json
+  path: /health
   initialDelaySeconds: 30
   periodSeconds: 30
   timeoutSeconds: 10

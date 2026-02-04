@@ -61,7 +61,7 @@ end_per_testcase(_TestCase, _Config) ->
 %% helm_chart_exists: Verify Helm chart exists and is valid
 %%--------------------------------------------------------------------
 helm_chart_exists(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     ?assertNotEqual({error, enoent}, file:read_file_info(ChartDir)),
 
     ChartYaml = filename:join(ChartDir, "Chart.yaml"),
@@ -86,7 +86,7 @@ helm_chart_exists(_Config) ->
 %% helm_chart_has_rolling_update: Verify deployment has rolling update config
 %%--------------------------------------------------------------------
 helm_chart_has_rolling_update(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     DeploymentTemplate = filename:join([ChartDir, "templates", "deployment.yaml"]),
 
     {ok, Content} = file:read_file(DeploymentTemplate),
@@ -105,7 +105,7 @@ helm_chart_has_rolling_update(_Config) ->
 %% helm_chart_has_revision_limit: Verify deployment has revision history limit
 %%--------------------------------------------------------------------
 helm_chart_has_revision_limit(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     DeploymentTemplate = filename:join([ChartDir, "templates", "deployment.yaml"]),
 
     {ok, Content} = file:read_file(DeploymentTemplate),
@@ -123,7 +123,7 @@ helm_chart_has_revision_limit(_Config) ->
 %% helm_values_has_rolling_config: Verify values.yaml has rolling update config
 %%--------------------------------------------------------------------
 helm_values_has_rolling_config(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     ValuesFile = filename:join(ChartDir, "values.yaml"),
 
     {ok, Content} = file:read_file(ValuesFile),
@@ -143,7 +143,7 @@ helm_values_has_rolling_config(_Config) ->
 %% helm_has_upgrade_hooks: Verify chart has upgrade hooks
 %%--------------------------------------------------------------------
 helm_has_upgrade_hooks(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     TemplatesDir = filename:join(ChartDir, "templates"),
     TestsDir = filename:join(TemplatesDir, "tests"),
 
@@ -181,7 +181,7 @@ helm_has_upgrade_hooks(_Config) ->
 %% helm_has_test_pod: Verify chart has test connection pod
 %%--------------------------------------------------------------------
 helm_has_test_pod(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     TemplatesDir = filename:join(ChartDir, "templates"),
     TestsDir = filename:join(TemplatesDir, "tests"),
     TestConnection = filename:join(TestsDir, "test-connection.yaml"),
@@ -201,7 +201,7 @@ helm_has_test_pod(_Config) ->
 %% helm_configmap_has_checksum: Verify configmap checksum annotation
 %%--------------------------------------------------------------------
 helm_configmap_has_checksum(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     DeploymentTemplate = filename:join([ChartDir, "templates", "deployment.yaml"]),
 
     {ok, Content} = file:read_file(DeploymentTemplate),
@@ -217,7 +217,7 @@ helm_configmap_has_checksum(_Config) ->
 %% helm_deployment_has_probes: Verify deployment has liveness and readiness probes
 %%--------------------------------------------------------------------
 helm_deployment_has_probes(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     DeploymentTemplate = filename:join([ChartDir, "templates", "deployment.yaml"]),
 
     {ok, Content} = file:read_file(DeploymentTemplate),
@@ -238,7 +238,7 @@ helm_deployment_has_probes(_Config) ->
 %% helm_values_has_test_config: Verify values.yaml has test config
 %%--------------------------------------------------------------------
 helm_values_has_test_config(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     ValuesFile = filename:join(ChartDir, "values.yaml"),
 
     {ok, Content} = file:read_file(ValuesFile),
@@ -254,7 +254,7 @@ helm_values_has_test_config(_Config) ->
 %% helm_deployment_has_resource_limits: Verify deployment has resource limits
 %%--------------------------------------------------------------------
 helm_deployment_has_resource_limits(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     DeploymentTemplate = filename:join([ChartDir, "templates", "deployment.yaml"]),
 
     {ok, Content} = file:read_file(DeploymentTemplate),
@@ -269,7 +269,7 @@ helm_deployment_has_resource_limits(_Config) ->
 %% helm_health_check_configurable: Verify health check is configurable
 %%--------------------------------------------------------------------
 helm_health_check_configurable(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     ValuesFile = filename:join(ChartDir, "values.yaml"),
 
     {ok, Content} = file:read_file(ValuesFile),
@@ -290,7 +290,7 @@ helm_health_check_configurable(_Config) ->
 %% helm_helper_templates_exist: Verify helper templates exist
 %%--------------------------------------------------------------------
 helm_helper_templates_exist(_Config) ->
-    ChartDir = filename:absname("../../../helm/a2a-erl"),
+    ChartDir = filename:join([filename:dirname(filename:dirname(code:which(a2a_erl))), "..", "helm", "a2a-erl"]),
     HelpersFile = filename:join([ChartDir, "templates", "_helpers.tpl"]),
 
     {ok, Content} = file:read_file(HelpersFile),

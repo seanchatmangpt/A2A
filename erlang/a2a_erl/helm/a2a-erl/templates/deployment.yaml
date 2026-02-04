@@ -21,6 +21,9 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if or .Values.secret.create .Values.secret.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -44,9 +47,9 @@ spec:
         args:
         - |
           export RELEASE_NODE=${ERLANG_NODE}@$(hostname -i)
-          export RELEASE_COOKIE={{ .Values.erlang.cookie }}
           echo "Starting A2A Erlang Application..."
           echo "Node: ${RELEASE_NODE}"
+          echo "RELEASE_COOKIE: ${RELEASE_COOKIE:0:8}..."  # Show first 8 chars only
           echo "Port: ${PORT}"
           exec /opt/a2a_erl/bin/a2a_erl foreground
         ports:
@@ -64,8 +67,22 @@ spec:
               fieldPath: status.podIP
         - name: ERLANG_NODE
           value: {{ .Values.erlang.nodeName }}
+        {{- if .Values.secret.existingSecret }}
+        - name: RELEASE_COOKIE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secret.existingSecret }}
+              key: erlang-cookie
+        {{- else if .Values.secret.create }}
+        - name: RELEASE_COOKIE
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "a2a-erl.fullname" . }}-secret
+              key: erlang-cookie
+        {{- else }}
         - name: RELEASE_COOKIE
           value: {{ .Values.erlang.cookie }}
+        {{- end }}
         - name: RELEASE_DISTRIBUTION
           value: {{ .Values.erlang.distribution }}
         - name: PORT
@@ -101,6 +118,9 @@ spec:
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
         volumeMounts:
+        - name: config
+          mountPath: /opt/a2a_erl/config
+          readOnly: true
         - name: tmp
           mountPath: /tmp
         - name: log
@@ -110,6 +130,9 @@ spec:
           mountPath: /opt/a2a_erl/data
         {{- end }}
       volumes:
+      - name: config
+        configMap:
+          name: {{ include "a2a-erl.fullname" . }}-config
       - name: tmp
         emptyDir: {}
       {{- if .Values.persistence.log.enabled }}

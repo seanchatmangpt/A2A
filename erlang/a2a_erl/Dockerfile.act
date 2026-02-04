@@ -1,23 +1,16 @@
 # Dockerfile for act testing with ARM64 support
 # Combines Erlang/OTP and Node.js for GitHub Actions compatibility
-FROM erlang:28
+# Keep version in sync with main Dockerfile (erlang:27-alpine)
+FROM erlang:27-alpine
 
 # Install Node.js for GitHub Actions checkout@v4 compatibility
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+RUN apk update && \
+    apk add --no-cache \
     curl \
-    gnupg \
-    ca-certificates \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install git for checkout operations
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    nodejs \
+    npm \
+    git \
+    ca-certificates
 
 # Verify installations
 RUN erl -version && \

@@ -3,6 +3,7 @@
 # =============================================================================
 # Development container for A2A Agent-to-Agent Protocol Erlang implementation
 # Based on Alpine Linux with Erlang/OTP 28
+# NOTE: Uses OTP 28 for forward compatibility testing (vs OTP 27 in production)
 # =============================================================================
 
 FROM erlang:28-alpine

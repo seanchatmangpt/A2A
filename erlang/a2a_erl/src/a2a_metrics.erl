@@ -97,7 +97,7 @@
     canceled = 0 :: non_neg_integer(),
     rejected = 0 :: non_neg_integer(),
     state_transitions = 0 :: non_neg_integer(),
-    avg_processing_time_ms = 0 :: float(),
+    avg_processing_time_ms = 0.0 :: float(),
     last_updated :: integer() | undefined
 }).
 
@@ -107,7 +107,7 @@
     total_received = 0 :: non_neg_integer(),
     total_processed = 0 :: non_neg_integer(),
     total_errors = 0 :: non_neg_integer(),
-    avg_processing_time_ms = 0 :: float(),
+    avg_processing_time_ms = 0.0 :: float(),
     last_error_reason :: binary() | undefined,
     last_updated :: integer() | undefined
 }).
@@ -118,7 +118,7 @@
     total_requests = 0 :: non_neg_integer(),
     successful_responses = 0 :: non_neg_integer(),
     error_responses = 0 :: non_neg_integer(),
-    avg_response_time_ms = 0 :: float(),
+    avg_response_time_ms = 0.0 :: float(),
     endpoints = #{} :: map(),  % #{binary() => #{count => integer(), avg_time => float()}}
     status_codes = #{} :: map(), % #{integer() => integer()}
     last_updated :: integer() | undefined
@@ -130,7 +130,7 @@
     total_connections = 0 :: non_neg_integer(),
     active_connections = 0 :: non_neg_integer(),
     total_events_sent = 0 :: non_neg_integer(),
-    avg_connection_duration_ms = 0 :: float(),
+    avg_connection_duration_ms = 0.0 :: float(),
     last_updated :: integer() | undefined
 }).
 
@@ -140,7 +140,7 @@
     total_sent = 0 :: non_neg_integer(),
     total_failed = 0 :: non_neg_integer(),
     success_rate = 1.0 :: float(),
-    avg_send_time_ms = 0 :: float(),
+    avg_send_time_ms = 0.0 :: float(),
     last_error_reason :: term() | undefined,
     last_updated :: integer() | undefined
 }).
@@ -149,7 +149,7 @@
 
 -record(system_metrics, {
     process_count = 0 :: non_neg_integer(),
-    memory_used_mb = 0 :: float(),
+    memory_used_mb = 0.0 :: float(),
     total_run_time_ms = 0 :: non_neg_integer(),
     task_table_size = 0 :: non_neg_integer(),
     last_updated :: integer() | undefined
@@ -393,11 +393,11 @@ init(Opts) ->
     %% Record initial system metrics
     {ok, State#state{snapshot_timer = Timer}, {continue, record_initial_metrics}}.
 
--spec handle_continue(atom(), state()) -> {ok, state()}.
+-spec handle_continue(atom(), state()) -> {noreply, state()}.
 handle_continue(record_initial_metrics, State) ->
     %% Record initial system metrics
     NewState = do_record_system_metrics(State),
-    {ok, NewState}.
+    {noreply, NewState}.
 
 -spec handle_call(term(), {pid(), term()}, state()) ->
     {reply, term(), state()} | {noreply, state()}.
@@ -716,14 +716,13 @@ handle_cast({push_notification_sent, TaskId, SendTimeMs}, State) ->
     PushMetrics = Metrics#metrics.push,
     OldAvg = PushMetrics#push_metrics.avg_send_time_ms,
     Sent = PushMetrics#push_metrics.total_sent + 1,
-    NewAvg = update_average(OldAvg, Sent - 1, SendTimeMs),
+    NewAvg = update_average(OldAvg, PushMetrics#push_metrics.total_sent, SendTimeMs),
 
     %% Calculate success rate
-    Total = Sent + PushMetrics#push_metrics.total_failed,
-    SuccessRate = case Total of
-        0 -> 1.0;
-        _ -> Sent / Total
-    end,
+    Failed = PushMetrics#push_metrics.total_failed,
+    Total = Sent + Failed,
+    %% Total is at least 1 since Sent was incremented, so we can safely divide
+    SuccessRate = Sent / Total,
 
     NewPushMetrics = PushMetrics#push_metrics{
         total_sent = Sent,
@@ -744,11 +743,10 @@ handle_cast({push_notification_failed, TaskId, Reason, AttemptDurationMs}, State
     Failed = PushMetrics#push_metrics.total_failed + 1,
 
     %% Calculate success rate
-    Total = PushMetrics#push_metrics.total_sent + Failed,
-    SuccessRate = case Total of
-        0 -> 1.0;
-        _ -> PushMetrics#push_metrics.total_sent / Total
-    end,
+    Sent = PushMetrics#push_metrics.total_sent,
+    Total = Sent + Failed,
+    %% Total is at least 1 since Failed was incremented
+    SuccessRate = Sent / Total,
 
     NewPushMetrics = PushMetrics#push_metrics{
         total_failed = Failed,
@@ -790,7 +788,7 @@ handle_info(_Info, State) ->
 -spec terminate(term(), state()) -> ok.
 terminate(_Reason, #state{snapshot_timer = Timer}) ->
     %% Cancel timer if exists
-    case Timer of
+    _ = case Timer of
         undefined -> ok;
         T -> erlang:cancel_timer(T)
     end,
@@ -819,7 +817,7 @@ do_record_system_metrics(State) ->
 
     %% Get memory usage (in MB)
     MemoryWords = erlang:memory(total),
-    MemoryMB = MemoryWords * erlang:wordsize() / (1024 * 1024),
+    MemoryMB = MemoryWords * erlang:system_info(wordsize) / (1024 * 1024),
 
     %% Get total run time
     TotalRunTime = erlang:system_time(millisecond) - StartTime,
@@ -876,10 +874,10 @@ do_get_metric(_, _) ->
     undefined.
 
 %% @doc Update running average
--spec update_average(float(), non_neg_integer(), non_neg_integer()) -> float().
-update_average(OldAvg, Count, NewValue) when Count =:= 0 ->
+-spec update_average(float(), non_neg_integer(), number()) -> float().
+update_average(_OldAvg, 0, NewValue) ->
     NewValue * 1.0;
-update_average(OldAvg, Count, NewValue) ->
+update_average(OldAvg, Count, NewValue) when is_integer(Count), Count > 0 ->
     (OldAvg * Count + NewValue) / (Count + 1).
 
 %% @doc Format error reason for logging

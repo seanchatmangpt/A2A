@@ -20,35 +20,42 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     container:
-      image: erlang:28
+      image: erlang:27
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install rebar3 from source
+      - name: Install rebar3
         run: |
-          apt-get update && apt-get install -y git curl
-          curl -O -L https://s3.amazonaws.com/rebar3/rebar3
-          chmod +x rebar3
-          ./rebar3 version || echo "Pre-built binary failed, building from source..."
-          git clone https://github.com/erlang/rebar3.git /tmp/rebar3
-          cd /tmp/rebar3
-          escript bootstrap
-          cp rebar3 /usr/local/bin/rebar3
-          /usr/local/bin/rebar3 version
+          set -e
+          apt-get update -qq && apt-get install -y -qq git curl ca-certificates
+          curl -fsSL https://s3.amazonaws.com/rebar3/rebar3 -o /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+          # Check rebar3 is available (version command may fail in non-interactive env)
+          which rebar3 && ls -la /usr/local/bin/rebar3
 
       - name: Verify Erlang/OTP installation
         run: |
           echo "=== Erlang/OTP Version ==="
           erl -version
           echo ""
-          echo "=== rebar3 Version ==="
-          rebar3 version
+          echo "=== rebar3 available ==="
+          which rebar3 && ls -la /usr/local/bin/rebar3
 
       - name: Compile project
         run: |
           cd erlang/a2a_erl
           rebar3 compile
+
+      - name: Run xref analysis
+        run: |
+          cd erlang/a2a_erl
+          rebar3 xref
+
+      - name: Run dialyzer type check
+        run: |
+          cd erlang/a2a_erl
+          rebar3 dialyzer
 
       - name: Run unit tests
         run: |

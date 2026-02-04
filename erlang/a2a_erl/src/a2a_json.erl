@@ -56,7 +56,7 @@
 %% @doc Generic encode - dispatches based on record type
 -spec encode(term()) -> binary().
 encode(Term) ->
-    jiffy:encode(Term).
+    json:encode(Term).
 
 %% @doc Encode a Task record to JSON map
 -spec encode_task(task()) -> map().
@@ -380,7 +380,7 @@ encode_jsonrpc_response(#jsonrpc_response{} = Resp) ->
         Error ->
             Map#{<<"error">> => Error}
     end,
-    json:encode(Final).
+    iolist_to_binary(json:encode(Final)).
 
 %% @doc Encode JSON-RPC error
 -spec encode_jsonrpc_error(#jsonrpc_error{}) -> map().
@@ -479,10 +479,13 @@ encode_authentication_info(#authentication_info{} = Auth) ->
 %%% ============================================================================
 
 %% @doc Generic decode
+%% Note: In OTP 27+, json:decode/1 returns a map directly, not {ok, Map}
+%% If decoding fails, it throws an exception
 -spec decode(binary()) -> {ok, map()} | {error, term()}.
 decode(Json) ->
     try
-        {ok, jiffy:decode(Json, [return_maps])}
+        Result = json:decode(Json),
+        {ok, Result}
     catch
         _:Error -> {error, Error}
     end.
@@ -744,13 +747,7 @@ parse_timestamp_parts(YearS, MonthS, DayS, HourS, MinS, SecS, MillisS) ->
     Min = list_to_integer(MinS),
     Sec = list_to_integer(SecS),
     %% Pad milliseconds to 3 digits - string:pad may return nested lists
-    MillisPadded = case string:pad(MillisS, 3, trailing, $0) of
-        Bin when is_binary(Bin) -> binary_to_list(Bin);
-        List when is_list(List) ->
-            %% string:pad may return nested list like ["123", 48, 48]
-            %% Need to flatten it to "12300"
-            lists:flatten(List)
-    end,
+    MillisPadded = lists:flatten(string:pad(MillisS, 3, trailing, $0)),
     Millis = list_to_integer(MillisPadded),
 
     DateTime = {{Year, Month, Day}, {Hour, Min, Sec}},

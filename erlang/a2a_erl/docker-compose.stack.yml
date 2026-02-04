@@ -32,6 +32,12 @@ services:
       ERL_AFLAGS: "-proto_dist inet_tcp"
     networks:
       - a2a-overlay
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       mode: replicated
       replicas: 1
@@ -76,6 +82,12 @@ services:
       ERL_AFLAGS: "-proto_dist inet_tcp"
     networks:
       - a2a-overlay
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       mode: replicated
       replicas: 1
@@ -120,6 +132,12 @@ services:
       ERL_AFLAGS: "-proto_dist inet_tcp"
     networks:
       - a2a-overlay
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       mode: replicated
       replicas: 1

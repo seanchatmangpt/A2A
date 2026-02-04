@@ -74,7 +74,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
     image: a2a-erl:dev
     container_name: a2a-erl-dev
     ports:
@@ -102,7 +101,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
     image: a2a-erl:dev
     container_name: a2a-erl-test
     volumes:

@@ -1,6 +1,7 @@
 apiVersion: v2
 name: a2a-erl
-description: A Helm chart for A2A Agent-to-Agent Protocol Erlang/OTP Implementation
+description: Helm chart for A2A Agent-to-Agent Protocol Erlang/OTP
+icon: https://erlang.org/doc/man/erlang-icon.png
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

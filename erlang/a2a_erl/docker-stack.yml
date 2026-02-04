@@ -2,20 +2,20 @@
 # Docker Stack configuration for A2A Erlang/OTP Application
 # Deploy with: docker stack deploy -c docker-stack.yml a2a
 # =============================================================================
-# NOTE: This file is optimized for Docker Swarm mode.
+# NOTE: This file is optimized for Docker Swarm mode with rolling updates.
 # For local development, use docker-compose.yml instead.
 # =============================================================================
 
 services:
   # -------------------------------------------------------------------------
-  # Main A2A Service
+  # Main A2A Service - Rolling Update Configuration
   # -------------------------------------------------------------------------
   a2a-erl:
     image: a2a-erl:${VERSION:-0.1.0}
     environment:
       # Release configuration
       RELEASE_NODE: a2a@${HOST:-tasks.a2a-erl}
-      RELEASE_COOKIE: ${COOKIE:-a2a_swarm_cookie}
+      RELEASE_COOKIE: ${COOKIE:-a2a_cookie}
       RELEASE_MODE: interactive
       RELEASE_DISTRIBUTION: name
 
@@ -38,35 +38,70 @@ services:
         mode: ingress
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/.well-known/agent-card.json"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
       retries: 3
       start_period: 40s
 
     deploy:
       mode: replicated
-      replicas: 1
+      replicas: 3
+
+      # -------------------------------------------------------------------------
+      # Rolling Update Configuration
+      # -------------------------------------------------------------------------
       update_config:
-        parallelism: 1
-        delay: 10s
-        failure_action: rollback
-        order: start-first
+        parallelism: 1           # Update 1 replica at a time
+        delay: 30s               # Wait 30s between updates for health stabilization
+        failure_action: rollback  # Rollback on failure
+        monitor: 60s             # Monitor for 60s after each update
+        max_failure_ratio: 0.25  # Allow up to 25% failures before rollback
+        order: start-first        # Start new before stopping old (zero-downtime)
+
+      # -------------------------------------------------------------------------
+      # Rollback Configuration
+      # -------------------------------------------------------------------------
       rollback_config:
-        parallelism: 1
-        delay: 5s
+        parallelism: 1           # Rollback 1 replica at a time
+        delay: 10s               # Wait 10s between rollbacks
+        monitor: 60s             # Monitor for 60s after each rollback
+        order: stop-first        # Stop new before starting old
+
+      # -------------------------------------------------------------------------
+      # Restart Policy
+      # -------------------------------------------------------------------------
       restart_policy:
-        condition: on-failure
+        condition: on-failure    # Restart only on failure (not on healthy stop)
         delay: 5s
         max_attempts: 3
         window: 120s
+
+      # -------------------------------------------------------------------------
+      # Resource Limits
+      # -------------------------------------------------------------------------
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '1'
+          memory: 1G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.25'
+          memory: 256M
+
+      # -------------------------------------------------------------------------
+      # Placement Constraints (optional - uncomment for multi-node)
+      # -------------------------------------------------------------------------
+      # placement:
+      #   constraints:
+      #     - node.labels.a2a == true
+      #   preferences:
+      #     - spread: node.labels.zone
+
+      # -------------------------------------------------------------------------
+      # Update Failure Tracking
+      # -------------------------------------------------------------------------
+      # labels:
+      #   com.docker.stack.namespace: a2a
 
     logging:
       driver: "json-file"
@@ -74,7 +109,70 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # -------------------------------------------------------------------------
+  # Visualizer - For monitoring Swarm cluster (optional)
+  # -------------------------------------------------------------------------
+  visualizer:
+    image: dockersamples/visualizer:latest
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+    ports:
+      - target: 8081
+        published: 8081
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    networks:
+      - a2a-network
+    profiles:
+      - visualizer
+
 networks:
   a2a-network:
     driver: overlay
     attachable: true
+
+# =============================================================================
+# Usage Examples:
+# =============================================================================
+#
+# Deploy the stack:
+#   docker stack deploy -c docker-stack.yml a2a
+#
+# Scale the service:
+#   docker service scale a2a_a2a-erl=5
+#
+# Update the service (force rolling update):
+#   docker service update --force a2a_a2a-erl
+#
+# Update with new image:
+#   docker service update --image a2a-erl:v1.1.0 a2a_a2a-erl
+#
+# Update with parallel replicas:
+#   docker service update --update-parallelism 2 --update-delay 20s a2a_a2a-erl
+#
+# Update with new environment variable:
+#   docker service update --env-add NEW_VAR=value a2a_a2a-erl
+#
+# View service status:
+#   docker service ps a2a_a2a-erl --no-trunc
+#
+# View service logs:
+#   docker service logs a2a_a2a-erl -f
+#
+# Rollback to previous version:
+#   docker service rollback a2a_a2a-erl
+#
+# Remove the stack:
+#   docker stack rm a2a
+#
+# View visualizer:
+#   docker service update a2a_visualizer --profile visualizer
+#   open http://localhost:8081
+#
+# =============================================================================

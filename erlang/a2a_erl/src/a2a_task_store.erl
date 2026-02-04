@@ -24,6 +24,7 @@
     get_task_pid/1,
     list_tasks/1,
     delete_task/1,
+    task_count/0,
     %% Push notification config
     add_push_config/2,
     get_push_config/2,
@@ -159,6 +160,11 @@ delete_task(TaskId) ->
         [] ->
             ok
     end.
+
+%% @doc Get the total count of tasks in the store
+-spec task_count() -> non_neg_integer().
+task_count() ->
+    ets:info(?TASKS_TABLE, size).
 
 %% @doc Add push notification config for a task
 -spec add_push_config(binary(), task_push_notification_config()) -> ok.

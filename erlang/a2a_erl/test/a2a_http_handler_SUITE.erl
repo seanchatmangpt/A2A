@@ -705,7 +705,13 @@ content_type(Response) ->
 json_encode(Term) -> a2a_json:encode(Term).
 
 json_decode(Json) ->
-    case a2a_json:decode(Json) of
+    %% Convert iolist to binary if needed (json:encode returns iolist)
+    JsonBinary = case io_lib:char_list(Json) of
+        true -> list_to_binary(Json);
+        false when is_binary(Json) -> Json;
+        false -> iolist_to_binary(Json)
+    end,
+    case a2a_json:decode(JsonBinary) of
         {ok, Map} -> Map;
         {error, Reason} -> error({json_decode_failed, Reason})
     end.
