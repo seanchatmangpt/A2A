@@ -1,0 +1,282 @@
+%%====================================================================
+%% Module: {{ module_name }}_config
+%% Description: MCP configuration management
+%%====================================================================
+
+-module({{ module_name }}_config).
+-export([get_server_config/0, get_client_config/0, get_tools_config/0]).
+-export([get_env/2, get_env/3]).
+
+%%====================================================================
+%% Server Configuration
+%%====================================================================
+
+get_server_config() ->
+    #{
+        port => get_env(mcp_server_port, 8090),
+        host => get_env(mcp_server_host, "localhost"),
+        protocol => get_env(mcp_protocol, "http"),
+        protocol_version => get_env(mcp_protocol_version, "2024-11-05"),
+        max_connections => get_env(mcp_max_connections, 100),
+        heartbeat_interval => get_env(mcp_heartbeat_interval, 30000),
+        hotci_enabled => get_env(mcp_hotci_enabled, true),
+        hotci_monitor_interval => get_env(mcp_hotci_monitor_interval, 60000),
+        hotci_upgrade_monitor => get_env(mcp_hotci_upgrade_monitor, true),
+        hotci_rollback_timeout => get_env(mcp_hotci_rollback_timeout, 300000),
+        tools => get_tools_config(),
+        logging => #{
+            level => get_env(mcp_log_level, info),
+            file => get_env(mcp_log_file, "logs/mcp_server.log"),
+            max_size => get_env(mcp_log_max_size, 10485760),  % 10MB
+            max_files => get_env(mcp_log_max_files, 5)
+        },
+        monitoring => #{
+            metrics_enabled => get_env(mcp_metrics_enabled, true),
+            metrics_port => get_env(mcp_metrics_port, 8081),
+            metrics_endpoint => get_env(mcp_metrics_endpoint, "/metrics"),
+            health_check_port => get_env(mcp_health_check_port, 8080),
+            health_check_endpoint => get_env(mcp_health_check_endpoint, "/health")
+        }
+    }.
+
+%%====================================================================
+%% Client Configuration
+%%====================================================================
+
+get_client_config() ->
+    #{
+        server_uri => get_env(mcp_server_uri, "http://localhost:8090"),
+        reconnect_interval => get_env(mcp_reconnect_interval, 5000),
+        max_reconnect_attempts => get_env(mcp_max_reconnect_attempts, 10),
+        hotci_enabled => get_env(mcp_hotci_enabled, true),
+        hotci_monitor_interval => get_env(mcp_hotci_monitor_interval, 60000),
+        request_timeout => get_env(mcp_request_timeout, 30000),
+        retry_policy => #{
+            max_attempts => get_env(mcp_retry_max_attempts, 3),
+            backoff_multiplier => get_env(mcp_retry_backoff_multiplier, 2),
+            initial_delay => get_env(mcp_retry_initial_delay, 1000)
+        },
+        connection_pool => #{
+            size => get_env(mcp_pool_size, 5),
+            max_overflow => get_env(mcp_pool_max_overflow, 10),
+            idle_timeout => get_env(mcp_pool_idle_timeout, 30000)
+        }
+    }.
+
+%%====================================================================
+%% Tools Configuration
+%%====================================================================
+
+get_tools_config() ->
+    [
+        #{
+            name => "file_system",
+            description => "File system operations",
+            handler => {{ module_name }}_file_tool,
+            input_schema => #{
+                type => "object",
+                properties => #{
+                    operation => #{
+                        type => "string",
+                        enum => ["read", "write", "list", "delete"]
+                    },
+                    path => #{
+                        type => "string",
+                        description => "File or directory path"
+                    }
+                },
+                required => ["operation", "path"]
+            },
+            output_schema => #{
+                type => "object",
+                properties => #{
+                    result => #{
+                        type => "object"
+                    },
+                    error => #{
+                        type => "object"
+                    }
+                }
+            },
+            timeout => get_env(mcp_tool_timeout, 30000),
+            max_retries => get_env(mcp_tool_max_retries, 3),
+            enabled => get_env(mcp_tool_file_enabled, true)
+        },
+        #{
+            name => "math",
+            description => "Mathematical operations",
+            handler => {{ module_name }}_math_tool,
+            input_schema => #{
+                type => "object",
+                properties => #{
+                    operation => #{
+                        type => "string",
+                        enum => ["add", "subtract", "multiply", "divide", "power"]
+                    },
+                    a => #{
+                        type => "number"
+                    },
+                    b => #{
+                        type => "number"
+                    }
+                },
+                required => ["operation", "a", "b"]
+            },
+            output_schema => #{
+                type => "object",
+                properties => #{
+                    result => #{
+                        type => "number"
+                    }
+                }
+            },
+            timeout => get_env(mcp_tool_timeout, 10000),
+            max_retries => get_env(mcp_tool_max_retries, 2),
+            enabled => get_env(mcp_tool_math_enabled, true)
+        },
+        #{
+            name => "text",
+            description => "Text processing operations",
+            handler => {{ module_name }}_text_tool,
+            input_schema => #{
+                type => "object",
+                properties => #{
+                    operation => #{
+                        type => "string",
+                        enum => ["uppercase", "lowercase", "length", "reverse", "split"]
+                    },
+                    text => #{
+                        type => "string"
+                    },
+                    delimiter => #{
+                        type => "string",
+                        description => "Delimiter for split operation"
+                    }
+                },
+                required => ["operation", "text"]
+            },
+            output_schema => #{
+                type => "object",
+                properties => #{
+                    result => #{
+                        type => ["string", "number", "array"]
+                    }
+                }
+            },
+            timeout => get_env(mcp_tool_timeout, 5000),
+            max_retries => get_env(mcp_tool_max_retries, 2),
+            enabled => get_env(mcp_tool_text_enabled, true)
+        },
+        #{
+            name => "http",
+            description => "HTTP client operations",
+            handler => {{ module_name }}_http_tool,
+            input_schema => #{
+                type => "object",
+                properties => #{
+                    method => #{
+                        type => "string",
+                        enum => ["GET", "POST", "PUT", "DELETE", "HEAD"]
+                    },
+                    url => #{
+                        type => "string",
+                        format => "uri"
+                    },
+                    headers => #{
+                        type => "object",
+                        properties => #{
+                            "content-type" => #{
+                                type => "string"
+                            },
+                            "authorization" => #{
+                                type => "string"
+                            }
+                        }
+                    },
+                    body => #{
+                        type => ["object", "string", "array"]
+                    },
+                    timeout => #{
+                        type => "number",
+                        default => 30000
+                    }
+                },
+                required => ["method", "url"]
+            },
+            output_schema => #{
+                type => "object",
+                properties => #{
+                    status => #{
+                        type => "number"
+                    },
+                    headers => #{
+                        type => "object"
+                    },
+                    body => #{
+                        type: ["string", "object"]
+                    },
+                    error => #{
+                        type => "object"
+                    }
+                }
+            },
+            timeout => get_env(mcp_tool_http_timeout, 30000),
+            max_retries => get_env(mcp_tool_http_max_retries, 3),
+            enabled => get_env(mcp_tool_http_enabled, true)
+        }
+    ].
+
+%%====================================================================
+%% Environment Helper Functions
+%%====================================================================
+
+get_env(Key, Default) ->
+    case application:get_env({{ application_name }}, Key) of
+        undefined -> Default;
+        {ok, Value} -> Value
+    end.
+
+get_env(Key, SubKey, Default) ->
+    case application:get_env({{ application_name }}, Key) of
+        undefined -> Default;
+        {ok, Value} when is_map(Value) ->
+            maps:get(SubKey, Value, Default);
+        {ok, _} -> Default
+    end.
+
+%%====================================================================
+%% Configuration Validation
+%%====================================================================
+
+validate_server_config(Config) ->
+    Required = [port, host, protocol],
+    lists:foldl(fun(Key, Acc) ->
+        case maps:is_key(Key, Config) of
+            true -> Acc;
+            false -> [Key | Acc]
+        end
+    end, [], Required).
+
+validate_tools_config(Tools) ->
+    lists:foldr(fun(Tool, {Errors, Index}) ->
+        case validate_tool_config(Tool, Index) of
+            valid -> {Errors, Index + 1};
+            {error, Reason} -> {[{Index, Reason} | Errors], Index + 1}
+        end
+    end, {[], 0}, Tools).
+
+validate_tool_config(Tool, Index) ->
+    case maps:is_required([name, description, handler, input_schema, output_schema], Tool) of
+        true ->
+            case maps:get(enabled, Tool, true) of
+                true -> valid;
+                false -> valid  % Skip validation for disabled tools
+            end;
+        false ->
+            {error, missing_required_fields}
+    end.
+
+is_required(Fields, Map) ->
+    lists:all(fun(Field) ->
+        maps:is_key(Field, Map)
+    end, Fields).

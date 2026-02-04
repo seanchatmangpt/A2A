@@ -1,0 +1,133 @@
+{
+  "environment": "staging",
+  "config_version": "0.1.0",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8443,
+    "max_connections": 500,
+    "timeout": 45,
+    "ssl_enabled": true
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/var/log/a2a/staging.log",
+    "max_size": 20971520,
+    "backup_count": 7,
+    "json_format": true
+  },
+  "security": {
+    "jwt_secret": "${JWT_SECRET}",
+    "jwt_algorithm": "RS256",
+    "jwt_expiration": 3600,
+    "api_key": "${API_KEY}",
+    "ssl_cert_path": "/etc/ssl/certs/a2a-staging.crt",
+    "ssl_key_path": "/etc/ssl/private/a2a-staging.key",
+    "allowed_origins": ["https://staging.example.com", "https://api-staging.example.com"]
+  },
+  "database": {
+    "url": "${DATABASE_URL}",
+    "host": "${DB_HOST}",
+    "port": 5432,
+    "name": "a2a_staging",
+    "username": "${DB_USERNAME}",
+    "password": "${DB_PASSWORD}",
+    "pool_size": 30,
+    "max_overflow": 50,
+    "pool_timeout": 45
+  },
+  "mcp": {
+    "server_name": "craftplan-mcp-staging",
+    "host": "0.0.0.0",
+    "port": 9000,
+    "protocol_version": "2024-11-05",
+    "capabilities": {
+      "tools": {
+        "plan": {},
+        "execute": {},
+        "monitor": {},
+        "validate": {}
+      },
+      "resources": {
+        "tasks": {},
+        "agents": {},
+        "projects": {}
+      },
+      "logging": {
+        "level": "INFO"
+      }
+    },
+    "max_request_size": 5242880,
+    "request_timeout": 450
+  },
+  "a2a": {
+    "agent_name": "a2a-agent-staging",
+    "namespace": "staging",
+    "service_url": "https://a2a-service-staging.example.com",
+    "event_bus_url": "https://event-bus-staging.example.com",
+    "task_timeout": 900,
+    "max_retries": 4,
+    "retry_delay": 15,
+    "storage_backend": "redis"
+  },
+  "bridge": {
+    "mcp_server": {
+      "server_name": "craftplan-mcp-staging",
+      "host": "0.0.0.0",
+      "port": 9000,
+      "protocol_version": "2024-11-05",
+      "capabilities": {
+        "tools": {
+          "plan": {},
+          "execute": {},
+          "monitor": {},
+          "validate": {}
+        },
+        "resources": {
+          "tasks": {},
+          "agents": {},
+          "projects": {}
+        },
+        "logging": {
+          "level": "INFO"
+        }
+      },
+      "max_request_size": 5242880,
+      "request_timeout": 450
+    },
+    "a2a_agent": {
+      "agent_name": "a2a-agent-staging",
+      "namespace": "staging",
+      "service_url": "https://a2a-service-staging.example.com",
+      "event_bus_url": "https://event-bus-staging.example.com",
+      "task_timeout": 900,
+      "max_retries": 4,
+      "retry_delay": 15,
+      "storage_backend": "redis"
+    },
+    "auto_start": true,
+    "heartbeat_interval": 45,
+    "max_bridge_sessions": 50,
+    "message_queue_size": 5000,
+    "metrics_enabled": true
+  },
+  "custom_config": {
+    "staging_mode": true,
+    "feature_flags": {
+      "new_pipeline": true,
+      "advanced_monitoring": true,
+      "multi_tenancy": false
+    },
+    "monitoring": {
+      "enabled": true,
+      "metrics_port": 9090,
+      "health_check_path": "/health",
+      "readiness_check_path": "/ready"
+    },
+    "backup": {
+      "enabled": true,
+      "interval": "30m",
+      "retention": "3d"
+    }
+  }
+}

@@ -1,0 +1,377 @@
+---
+description: "Helm values configuration with comprehensive settings"
+output_dir: "{{ chart_name }}/values.yaml"
+file_extension: ""
+variables:
+  chart_name: "{{ module.name | lower }}"
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  image: "{{ module.name }}"
+  image_tag: "{{ version | default('latest') }}"
+  image_pull_policy: "{{ image_pull_policy | default('IfNotPresent') }}"
+  service_account_name: "{{ service_account_name | default('default') }}"
+  security_context_enabled: "{{ security_context_enabled | default(true) }}"
+  hotci_enabled: "{{ module.hotci_enabled | default(false) }}"
+  app_port: "{{ port | default(8080) }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+---
+{%- comment -%}
+Helm values.yaml with comprehensive configuration options
+{%- endcomment -%}
+
+# Global settings
+global:
+  # Chart-wide configuration
+  fullnameOverride: ""
+  nameOverride: ""
+  labels:
+    app: {{ app_name }}
+    chart: {{ chart_name }}
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+
+  # Pod Disruption Budgets
+  pdb:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: 1
+
+  # Service Mesh Integration
+  serviceMesh:
+    enabled: false
+    inject: false
+    istioGateway: ""
+
+  # Monitoring
+  monitoring:
+    enabled: true
+    prometheus:
+      enabled: true
+      scrapeInterval: "30s"
+      scrapeTimeout: "10s"
+    grafana:
+      enabled: true
+      dashboard:
+        enabled: true
+        label: "grafana_dashboard"
+
+# Replica configuration
+replicaCount: {{ replica_count | default(3) }}
+
+# Image configuration
+image:
+  repository: {{ image }}
+  pullPolicy: {{ image_pull_policy }}
+  # Optionally specify an image tag
+  tag: {{ image_tag | default("latest") }}
+  # Image pull secrets
+  pullSecrets: []
+  # Additional image labels
+  labels: {}
+
+# Service configuration
+service:
+  enabled: true
+  type: {{ service_type | default('ClusterIP') }}
+  ports:
+    http: {{ app_port }}
+    metrics: {{ metrics_port }}
+  annotations:
+    {% if service_type == 'LoadBalancer' %}
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-attributes: "idle_timeout=300,connection_logs.enabled=true"
+    {% endif %}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ metrics_port }}"
+    prometheus.io/path: "/metrics"
+  # ExternalTrafficPolicy for NodePort/LoadBalancer
+  externalTrafficPolicy: {{ external_traffic_policy | default('Cluster') }}
+  # Session affinity
+  sessionAffinity: {{ session_affinity | default('None') }}
+  # LoadBalancer IP (if using static IP)
+  loadBalancerIP: {{ load_balancer_ip | default('') }}
+  # NodePort port range
+  nodePorts:
+    http: {{ node_port | default(30080) }}
+    metrics: {{ metrics_node_port | default(30081) }}
+
+# Ingress configuration
+ingress:
+  enabled: {{ ingress_enabled | default(true) }}
+  className: {{ ingress_class | default('nginx') }}
+  annotations:
+    kubernetes.io/ingress.class: {{ ingress_class | default('nginx') }}
+    cert-manager.io/cluster-issuer: {{ cert_manager_issuer | default('letsencrypt-prod') }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-key: "$remote_addr"
+    # External DNS annotations
+    external-dns.alpha.kubernetes.io/hostname: {{ ingress_host | default(app_name + '.local') }}
+  hosts:
+    - host: {{ ingress_host | default(app_name + '.local') }}
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: {{ app_name }}
+              port:
+                number: {{ app_port }}
+        - path: /metrics
+          pathType: Prefix
+          backend:
+            service:
+              name: {{ app_name }}-monitoring
+              port:
+                number: {{ metrics_port }}
+  tls: []
+  # Example TLS secret:
+  # - secretName: {{ app_name }}-tls
+  #   hosts:
+  #     - {{ ingress_host | default(app_name + '.local') }}
+
+# Resource configuration
+resources:
+  limits:
+    cpu: {{ cpu_limit | default('500m') }}
+    memory: {{ memory_limit | default('512Mi') }}
+  requests:
+    cpu: {{ cpu_request | default('100m') }}
+    memory: {{ memory_request | default('128Mi') }}
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: {{ min_replicas | default(2) }}
+  maxReplicas: {{ max_replicas | default(10) }}
+  targetCPUUtilizationPercentage: {{ cpu_target_utilization | default(70) }}
+  targetMemoryUtilizationPercentage: {{ memory_target_utilization | default(80) }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ scale_down_stabilization | default(300) }}
+      policies:
+      - type: Percent
+        value: {{ scale_down_percent | default(10) }}
+        periodSeconds: {{ scale_down_period | default(60) }}
+    scaleUp:
+      stabilizationWindowSeconds: {{ scale_up_stabilization | default(60) }}
+      policies:
+      - type: Percent
+        value: {{ scale_up_percent | default(50) }}
+        periodSeconds: {{ scale_up_period | default(60) }}
+
+# Pod configuration
+pod:
+  # Additional pod annotations
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ metrics_port }}"
+    prometheus.io/path: "/metrics"
+
+  # Additional pod labels
+  labels: {}
+
+  # Node affinity
+  nodeAffinity: {}
+
+  # Pod affinity/anti-affinity
+  affinity: {}
+
+  # Tolerations for taints
+  tolerations: []
+
+  # Pod topology spread constraints
+  topologySpreadConstraints: []
+
+  # Security context
+  securityContext:
+    enabled: {{ security_context_enabled }}
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
+  containerSecurityContext:
+    enabled: {{ security_context_enabled }}
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    capabilities:
+      drop:
+      - ALL
+      add: []
+    seccompProfile:
+      type: RuntimeDefault
+
+# Volume configuration
+volumes:
+  # ConfigMap for application configuration
+  configMap:
+    enabled: true
+    name: {{ app_name }}-config
+    items: []
+
+  # Log volume
+  logVolume:
+    enabled: true
+    mountPath: /app/log
+    type: emptyDir
+
+  # Temporary volume
+  tmpVolume:
+    enabled: true
+    mountPath: /app/tmp
+    type: emptyDir
+
+  # HotCI data volume (if enabled)
+  hotciVolume:
+    enabled: {{ hotci_enabled }}
+    mountPath: /app/hotci_data
+    persistentVolumeClaim:
+      enabled: true
+      accessModes: ["ReadWriteOnce"]
+      size: "{{ hotci_pvc_size | default('1Gi') }}"
+      storageClass: "{{ hotci_storage_class | default('') }}"
+      annotations: {}
+      labels: {}
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: {{ service_account_name }}
+  annotations: {}
+  automount: true
+
+# Health checks configuration
+livenessProbe:
+  httpGet:
+    path: {{ health_check_path | default('/health') }}
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+readinessProbe:
+  httpGet:
+    path: {{ health_check_path | default('/health') }}
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+startupProbe:
+  httpGet:
+    path: {{ health_check_path | default('/health') }}
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+  successThreshold: 1
+
+# Environment configuration
+env:
+  # General environment variables
+  general:
+    NODE_ENV: "production"
+    PORT: "{{ app_port }}"
+    ERL_AFLAGS: "+pc unicode +sbwt none +sbwtdcpu none +sbwtdio none"
+    ERL_FULLSWEEP_AFTER: "0"
+
+  # Kubernetes environment variables
+  kubernetes:
+    POD_NAME: ""
+    POD_NAMESPACE: ""
+    POD_IP: ""
+    NODE_NAME: ""
+
+  # Application-specific environment variables
+  application:
+    # Add your application-specific environment variables here
+    # DATABASE_URL: "postgresql://user:pass@postgres:5432/db"
+    # REDIS_URL: "redis://redis:6379"
+
+  # HotCI environment variables (if enabled)
+  hotci:
+    enabled: {{ hotci_enabled }}
+    HOTCI_ENABLED: "true"
+    HOTCI_DATA_PATH: "/app/hotci_data"
+
+# Configuration map data
+configMap:
+  data:
+    # Add your configuration files here
+    # app.config: |
+    #   # Erlang application configuration
+    #   {port, {{ app_port }}}
+    #   {log_level, info}
+
+# Secret data
+secret:
+  # Create a Kubernetes secret for sensitive data
+  create: false
+  name: {{ app_name }}-secret
+  type: Opaque
+  data: {}
+  # Example:
+  # data:
+  #   password: <base64-encoded-password>
+
+# Networking configuration
+networkPolicy:
+  enabled: true
+  ingress: []
+  egress: []
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels: {}
+      namespace: {{ namespace }}
+      interval: "30s"
+      scrapeTimeout: "10s"
+      path: "/metrics"
+      port: "metrics"
+      selector: {}
+      namespaceSelector: {}
+      relabelings: []
+      metricRelabelings: []
+
+  grafana:
+    enabled: true
+    dashboard:
+      enabled: true
+      namespace: {{ namespace }}
+      name: {{ app_name }}-dashboard
+      path: "/dashboards/{{ app_name }}.json"
+
+# HotCI configuration (if enabled)
+{%- if hotci_enabled %}
+hotci:
+  enabled: true
+  checkInterval: {{ hotci_check_interval | default("30s") }}
+  upgradeValidation: {{ hotci_upgrade_validation | default(true) }}
+  rollbackTimeout: {{ hotci_rollback_timeout | default("30000") }}
+  monitoringInterval: {{ hotci_monitoring_interval | default("10000") }}
+{%- endif %}

@@ -1,0 +1,354 @@
+---
+description: "GitHub Actions workflow for deployment to Kubernetes"
+output_dir: ".github/workflows"
+file_extension: ".yaml"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  docker_image: "{{ module.name }}"
+  docker_registry: "{{ docker_registry | default('ghcr.io') }}"
+  docker_username: "{{ docker_username | default('github-username') }}"
+  k8s_cluster: "{{ k8s_cluster | default('production') }}"
+  environment: "{{ environment | default('production') }}"
+---
+{%- comment -%}
+GitHub Actions workflow for deployment to Kubernetes with comprehensive automation
+{%- endcomment -%}
+
+name: Deploy {{ app_name }} to {{ environment }}
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      version:
+        description: 'Version to deploy (if not specified, uses latest)'
+        required: false
+        type: string
+      force:
+        description: 'Force deployment even if tests fail'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: {{ docker_registry }}
+  IMAGE_NAME: {{ docker_image }}
+  APP_NAME: {{ app_name }}
+  NAMESPACE: {{ namespace }}
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Erlang
+      uses: erlef/setup-beam@v1
+      with:
+        version: '27.0'
+        otp-version: '27'
+
+    - name: Set up rebar3
+      uses: rebar3/rebar3-action@v3
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/rebar3
+          _build
+        key: ${{ runner.os }}-rebar3-${{ hashFiles('rebar.config.lock') }}
+
+    - name: Compile dependencies
+      run: |
+        rebar3 deps compile
+
+    - name: Run unit tests
+      run: |
+        rebar3 eunit
+
+    - name: Run integration tests
+      run: |
+        rebar3 as test ct
+
+    - name: Run linting
+      run: |
+        rebar3 lint
+
+    - name: Run security scan
+      run: |
+        rebar3 as security security-check
+
+    - name: Generate test coverage
+      run: |
+        rebar3 cover
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: cover/
+        retention-days: 30
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: tests
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.image-tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{short}}
+          type=raw,value={{github.ref_name}},enable={{is_default_branch}}
+          type=raw,value={{github.ref_name}}-${{ github.sha }}
+          type=raw,value={{github.sha}}
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,prefix={{major}}.{{minor}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.production
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+    - name: Download Docker image
+      run: |
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@v0.18.0
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-scan-results
+        path: trivy-results.sarif
+        retention-days: 30
+
+    - name: Upload Trivy scan to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-results.sarif
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [tests, build-and-push]
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'workflow_dispatch'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Configure kubeconfig
+      run: |
+        echo "${{ secrets.KUBECONFIG_STAGING }}" > kubeconfig
+        chmod 600 kubeconfig
+
+    - name: Update deployment
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: apply
+        files: k8s/base/*
+        namespace: {{ namespace }}
+        args: -f k8s/staging/ --wait
+
+    - name: Verify deployment
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: rollout
+        args: status deployment/{{ app_name }} -n {{ namespace }} --timeout=5m
+
+    - name: Run integration tests
+      run: |
+        # Run integration tests against staging environment
+
+    - name: Rollback if tests fail
+      if: failure()
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: rollout
+        args: undo deployment/{{ app_name }} -n {{ namespace }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [tests, build-and-push]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Configure kubeconfig
+      run: |
+        echo "${{ secrets.KUBECONFIG_PRODUCTION }}" > kubeconfig
+        chmod 600 kubeconfig
+
+    - name: Canary deployment
+      run: |
+        # Deploy canary with 10% traffic
+        helm upgrade --install {{ app_name }}-canary ./helm \
+          --namespace {{ namespace }} \
+          --set image.tag=${{ needs.build-and-push.outputs.image-tag }} \
+          --set replicaCount=1 \
+          --set service.canary.enabled=true \
+          --wait
+
+    - name: Run canary tests
+      run: |
+        # Run canary validation tests
+
+    - name: Promote to production
+      if: success()
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: apply
+        files: k8s/production/*
+        namespace: {{ namespace }}
+        args: -f k8s/production/ --wait
+
+    - name: Verify production deployment
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: rollout
+        args: status deployment/{{ app_name }} -n {{ namespace }} --timeout=5m
+
+    - name: Rollback if deployment fails
+      if: failure()
+      uses: steebchen/kubectl@v2.0.0
+      with:
+        config-path: kubeconfig
+        command: rollback
+        args: deployment/{{ app_name }} -n {{ namespace }} --to-revision=0
+
+    - name: Create rollback issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'Rollback: {{ app_name }} deployment failed',
+            body: 'Automatic rollback was triggered for {{ app_name }} deployment at ${new Date().toISOString()}',
+            labels: ['bug', 'rollback', 'auto-generated']
+          })
+
+  notifications:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+
+    steps:
+    - name: Send Slack notification
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: 'Deployment of {{ app_name }} to {{ environment }} completed'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Update deployment status in GitHub
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `Deployment status: ${{ job.status }}`
+          })
+
+  cleanup:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+    - name: Cleanup old Docker images
+      run: |
+        # Remove old Docker images from registry
+        # Implementation depends on registry
+
+    - name: Cleanup temporary files
+      run: |
+        # Clean up temporary files from the workspace

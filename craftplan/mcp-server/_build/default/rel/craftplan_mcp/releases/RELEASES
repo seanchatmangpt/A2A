@@ -1,0 +1,15 @@
+%% coding: utf-8
+[{release,"craftplan_mcp","1.0.0","16.2",
+          [{kernel,"10.5","./lib/kernel-10.5"},
+           {stdlib,"7.2","./lib/stdlib-7.2"},
+           {crypto,"5.8","./lib/crypto-5.8"},
+           {cowlib,"2.13.0","./lib/cowlib-2.13.0"},
+           {asn1,"5.4.2","./lib/asn1-5.4.2"},
+           {public_key,"1.20","./lib/public_key-1.20"},
+           {ssl,"11.5","./lib/ssl-11.5"},
+           {ranch,"1.8.0","./lib/ranch-1.8.0"},
+           {cowboy,"2.12.0","./lib/cowboy-2.12.0"},
+           {xmerl,"2.1.7","./lib/xmerl-2.1.7"},
+           {jiffy,"1.1.1","./lib/jiffy-1.1.1"},
+           {craftplan_mcp,"1.0.0","./lib/craftplan_mcp-1.0.0"}],
+          permanent}].

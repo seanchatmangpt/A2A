@@ -1,0 +1,22 @@
+apiVersion: v2
+name: elrmcp-bridge
+description: A Helm chart for elrmcp MCP Bridge
+version: 1.0.0
+appVersion: "1.0.0"
+
+sources:
+  - https://github.com/your-org/elrmcp-bridge
+
+maintainers:
+  - name: Your Name
+    email: your.email@example.com
+
+keywords:
+  - elrmcp
+  - craftplan
+  - mcp
+  - bridge
+  - erlang
+
+home: https://github.com/your-org/elrmcp-bridge
+icon: https://example.com/icon.png

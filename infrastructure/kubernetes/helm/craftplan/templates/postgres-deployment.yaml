@@ -1,0 +1,83 @@
+{{- if .Values.postgres.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-postgres
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: postgres
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.postgres.annotations }}
+    {{- toYaml .Values.postgres.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.postgres.replicas }}
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: postgres
+        {{- if .Values.postgres.podLabels }}
+        {{- toYaml .Values.postgres.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.postgres.podAnnotations }}
+        {{- toYaml .Values.postgres.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+        checksum/secrets: {{ include "craftplan.secret" . | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            {{- if .Values.postgres.env }}
+            {{- toYaml .Values.postgres.env | nindent 12 }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          {{- if .Values.postgres.resources }}
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.postgres.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          {{- end }}
+      {{- if .Values.postgres.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "craftplan.pvcName" . }}-postgres
+      {{- end }}
+{{- end }}

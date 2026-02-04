@@ -1,0 +1,96 @@
+{{- if .Values.craftplan.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.configMapName" . }}-craftplan
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+data:
+  app.config.json: |
+    {
+      "server": {
+        "host": "{{ .Values.craftplan.env.HOST }}",
+        "port": {{ .Values.craftplan.env.PORT }},
+        "scheme": "{{ .Values.craftplan.env.SCHEME }}"
+      },
+      "environment": "{{ .Values.craftplan.env.ENVIRONMENT }}",
+      "database": {
+        "url": "{{ .Values.craftplan.env.DATABASE_URL }}"
+      },
+      "cache": {
+        "redis_url": "{{ .Values.craftplan.env.REDIS_URL }}"
+      },
+      "storage": {
+        "backend": "{{ .Values.craftplan.env.STORAGE_BACKEND }}",
+        "s3": {
+          "endpoint": "{{ .Values.craftplan.env.S3_ENDPOINT }}",
+          "bucket": "{{ .Values.craftplan.env.S3_BUCKET }}",
+          "region": "{{ .Values.craftplan.env.S3_REGION }}"
+        }
+      },
+      "security": {
+        "secret_key_base": "{{ .Values.craftplan.env.SECRET_KEY_BASE }}",
+        "jwt_secret": "{{ .Values.craftplan.env.JWT_SECRET }}"
+      },
+      "features": {
+        "metrics": {{ .Values.craftplan.env.ENABLE_METRICS | default "true" }},
+        "tracing": {{ .Values.craftplan.env.ENABLE_TRACING | default "true" }},
+        "logging": {{ .Values.craftplan.env.ENABLE_LOGGING | default "true" }}
+      },
+      "monitoring": {
+        "prometheus": {
+          "enabled": {{ .Values.global.monitoring.enabled | default "true" }},
+          "port": {{ .Values.global.monitoring.prometheus.port | default 9090 }}
+        },
+        "grafana": {
+          "enabled": {{ .Values.global.monitoring.grafana.enabled | default "true" }},
+          "port": {{ .Values.global.monitoring.grafana.port | default 3000 }}
+        }
+      }
+    }
+  logging.yml: |
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      json:
+        format: "%(asctime)s %(name)s %(levelname)s %(message)s"
+      simple:
+        format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: json
+        stream: ext://sys.stdout
+      file:
+        class: logging.handlers.RotatingFileHandler
+        formatter: json
+        filename: /var/log/craftplan/app.log
+        maxBytes: 10485760
+        backupCount: 5
+    loggers:
+      craftplan:
+        level: {{ .Values.logging.level | default "INFO" }}
+        handlers: [console, file]
+        propagate: false
+    root:
+      level: {{ .Values.logging.level | default "INFO" }}
+      handlers: [console, file]
+  monitoring.yml: |
+    version: 1
+    services:
+      prometheus:
+        enabled: {{ .Values.global.monitoring.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.prometheus.port | default 9090 }}
+        scrape_interval: 15s
+        scrape_timeout: 10s
+      grafana:
+        enabled: {{ .Values.global.monitoring.grafana.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.grafana.port | default 3000 }}
+        admin_password: "{{ .Values.secrets.grafana.adminPassword }}"
+      loki:
+        enabled: {{ .Values.global.monitoring.loki.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.loki.port | default 3100 }}
+        url: "http://loki:3100"
+{{- end }}

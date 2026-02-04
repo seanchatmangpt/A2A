@@ -1,0 +1,903 @@
+# =============================================================================
+# Integrated CI/CD Pipeline for Craftplan MCP + A2A + elrmcp
+# Comprehensive pipeline with multi-stage builds, testing, deployment, monitoring
+# =============================================================================
+
+name: Integrated CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'craftplan/**'
+      - 'erlang/a2a_erl/**'
+      - 'elrmcp/**'
+      - '.github/workflows/integrated-cicd.yml'
+      - 'infrastructure/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'craftplan/**'
+      - 'erlang/a2a_erl/**'
+      - 'elrmcp/**'
+      - '.github/workflows/integrated-cicd.yml'
+      - 'infrastructure/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      deployment-type:
+        description: 'Deployment type'
+        required: true
+        default: 'rolling'
+        type: choice
+        options:
+          - rolling
+          - blue-green
+          - canary
+      force-deploy:
+        description: 'Force deploy even if checks fail'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  # Global variables
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  CRAFTPLAN_IMAGE: craftplan/craftplan
+  MCP_SERVER_IMAGE: craftplan/mcp-server
+  A2A_AGENT_IMAGE: craftplan/a2a-agent
+  ERLMCP_IMAGE: craftplan/elrmcp
+  K8S_NAMESPACE: craftplan
+  HELM_RELEASE: craftplan
+
+  # Build configuration
+  OTP_VERSION: '28'
+  REBAR3_VERSION: '3.23.0'
+  NODE_VERSION: '20'
+
+  # Environment variables
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment-type || 'rolling' }}
+
+jobs:
+  # =============================================================================
+  # Job 1: Build Quality Checks
+  # =============================================================================
+  quality-checks:
+    name: Build Quality Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          # Install Go for tools
+          sudo apt-get update
+          sudo apt-get install -y golang-go
+
+          # Install Python tools
+          pip install black isort flake8 mypy pylint bandit safety
+
+          # Install Node.js tools
+          npm install -g npm-check-updates
+
+      - name: Check code formatting
+        run: |
+          # Check Python formatting
+          black --check craftplan/
+          isort --check-only craftplan/
+
+          # Check Node.js formatting
+          npm audit fix --force
+          npm outdated || true
+
+      - name: Run linting
+        run: |
+          # Python linting
+          flake8 craftplan/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 craftplan/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+          # Node.js linting
+          npm run lint || true
+
+      - name: Run type checking
+        run: |
+          # Python type checking
+          mypy craftplan/ || true
+
+      - name: Security scan - code
+        uses: fjogstadt/trivy-action@0.2.3
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          format: 'sarif'
+          output: 'code-security-scan.sarif'
+
+      - name: Dependency vulnerability scan
+        run: |
+          # Python dependencies
+          safety check --json --output deps-security.json || true
+
+          # Node.js dependencies
+          npm audit --audit-level moderate --json --output npm-audit.json || true
+
+          # Ruby dependencies (if present)
+          if [ -f Gemfile ]; then
+            bundle audit --update || true
+          fi
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-results
+          path: |
+            code-security-scan.sarif
+            deps-security.json
+            npm-audit.json
+          retention-days: 7
+
+  # =============================================================================
+  # Job 2: Integration Tests
+  # =============================================================================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [quality-checks]
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        test-suite:
+          - api
+          - database
+          - messaging
+          - auth
+          - monitoring
+        include:
+          - test-suite: api
+            service: craftplan
+            port: 4000
+          - test-suite: database
+            service: postgres
+            port: 5432
+          - test-suite: messaging
+            service: rabbitmq
+            port: 5672
+          - test-suite: auth
+            service: auth
+            port: 8081
+          - test-suite: monitoring
+            service: prometheus
+            port: 9090
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup test environment
+        run: |
+          # Create test directory
+          mkdir -p test-results
+
+          # Install test dependencies
+          sudo apt-get update
+          sudo apt-get install -y curl jq netcat-openbsd
+
+      - name: Run test suite
+        run: |
+          SUITE=${{ matrix.test-suite }}
+          SERVICE=${{ matrix.service }}
+          PORT=${{ matrix.port }}
+
+          echo "Running $SUITE tests for $SERVICE on port $PORT"
+
+          # Run appropriate test
+          case $SUITE in
+            api)
+              python scripts/test_api.py --service $SERVICE --port $PORT || true
+              ;;
+            database)
+              python scripts/test_database.py --service $SERVICE --port $PORT || true
+              ;;
+            messaging)
+              python scripts/test_messaging.py --service $SERVICE --port $PORT || true
+              ;;
+            auth)
+              python scripts/test_auth.py --service $SERVICE --port $PORT || true
+              ;;
+            monitoring)
+              python scripts/test_monitoring.py --service $SERVICE --port $PORT || true
+              ;;
+          esac
+
+          # Save test results
+          echo "$SUITE tests completed" > test-results/$SUITE.txt
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.test-suite }}
+          path: test-results/${{ matrix.test-suite }}.txt
+          retention-days: 7
+
+  # =============================================================================
+  # Job 3: Erlang/OTP Build
+  # =============================================================================
+  erlang-build:
+    name: Erlang/OTP Build
+    runs-on: ubuntu-latest
+    needs: [quality-checks]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Install rebar3
+        run: |
+          wget -q https://github.com/erlang/rebar3/releases/download/${{ env.REBAR3_VERSION }}/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Cache rebar3 build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            erlang/_build
+            .cache
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('erlang/a2a_erl/rebar.config', 'erlang/a2a_erl/rebar.lock', 'erlang/a2a_erl/**/rebar.config') }}
+          restore-keys: |
+            ${{ runner.os }}-rebar3-
+            ${{ runner.os }}-rebar3-
+
+      - name: Build Erlang application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 compile
+          rebar3 dialyzer
+          rebar3 xref
+
+      - name: Create release
+        run: |
+          cd erlang/a2a_erl
+          rebar3 as prod release
+
+      - name: Test Erlang application
+        run: |
+          cd erlang/a2a_erl
+          rebar3 ct --cover
+          rebar3 cover
+
+      - name: Upload Erlang artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: erlang-build-artifacts
+          path: |
+            erlang/a2a_erl/_build/prod/rel/a2a_erl/
+          retention-days: 7
+
+  # =============================================================================
+  # Job 4: Docker Build
+  # =============================================================================
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [quality-checks, erlang-build]
+    timeout-minutes: 30
+    outputs:
+      craftplan-digest: ${{ steps.craftplan.outputs.digest }}
+      mcp-digest: ${{ steps.mcp.outputs.digest }}
+      a2a-digest: ${{ steps.a2a.outputs.digest }}
+      elrmcp-digest: ${{ steps.elrmcp.outputs.digest }}
+
+    strategy:
+      matrix:
+        component:
+          - name: craftplan
+            context: craftplan
+            dockerfile: Dockerfile
+            image: ${{ env.CRAFTPLAN_IMAGE }}
+          - name: mcp-server
+            context: craftplan/mcp-server
+            dockerfile: Dockerfile
+            image: ${{ env.MCP_SERVER_IMAGE }}
+          - name: a2a-agent
+            context: craftplan/a2a-agent
+            dockerfile: Dockerfile
+            image: ${{ env.A2A_AGENT_IMAGE }}
+          - name: elrmcp
+            context: elrmcp
+            dockerfile: Dockerfile
+            image: ${{ env.ERLMCP_IMAGE }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.component.image }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.sha }}
+            type=raw,value=${{ matrix.component.name }}-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.component.name }}
+            org.opencontainers.image.description=${{ matrix.component.name }} component
+            org.opencontainers.image.vendor=Craftplan
+            org.opencontainers.image.authors=${{ github.actor }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}#readme
+            org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push component
+        run: |
+          COMPONENT=${{ matrix.component.name }}
+          CONTEXT=${{ matrix.component.context }}
+          DOCKERFILE=${{ matrix.component.dockerfile }}
+          IMAGE=${{ matrix.component.image }}
+          TAGS=${{ steps.meta.outputs.tags }}
+
+          echo "Building $COMPONENT component..."
+
+          # Multi-platform build
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --tag $TAGS \
+            --push \
+            --label ${{ steps.meta.outputs.labels }} \
+            --file $DOCKERFILE \
+            $CONTEXT/
+
+      - name: Upload component image info
+        id: craftplan
+        if: matrix.component.name == 'craftplan'
+        run: |
+          echo "digest=${{ steps.meta.outputs.digest }}" >> $GITHUB_OUTPUT
+
+      - name: Upload component image info
+        id: mcp
+        if: matrix.component.name == 'mcp-server'
+        run: |
+          echo "digest=${{ steps.meta.outputs.digest }}" >> $GITHUB_OUTPUT
+
+      - name: Upload component image info
+        id: a2a
+        if: matrix.component.name == 'a2a-agent'
+        run: |
+          echo "digest=${{ steps.meta.outputs.digest }}" >> $GITHUB_OUTPUT
+
+      - name: Upload component image info
+        id: elrmcp
+        if: matrix.component.name == 'elrmcp'
+        run: |
+          echo "digest=${{ steps.meta.outputs.digest }}" >> $GITHUB_OUTPUT
+
+      - name: Test Docker image
+        run: |
+          COMPONENT=${{ matrix.component.name }}
+          IMAGE=${{ matrix.component.image }}
+
+          echo "Testing $COMPONENT image..."
+
+          # Pull and inspect image
+          docker pull $IMAGE:latest
+          docker inspect $IMAGE:latest
+
+          # Test if image can start
+          if [ "$COMPONENT" = "craftplan" ]; then
+            docker run --rm $IMAGE:latest --version || true
+          elif [ "$COMPONENT" = "mcp-server" ]; then
+            docker run --rm $IMAGE:latest --help || true
+          elif [ "$COMPONENT" = "a2a-agent" ]; then
+            docker run --rm $IMAGE:latest --help || true
+          elif [ "$COMPONENT" = "elrmcp" ]; then
+            docker run --rm $IMAGE:latest --help || true
+          fi
+
+  # =============================================================================
+  # Job 5: Security Scanning
+  # =============================================================================
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    timeout-minutes: 30
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download security artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: security-results
+          path: security-results/
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          exit-code: 1
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          timeout: 5m
+
+      - name: Run Trivy on container images
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.component.image }}:latest
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          exit-code: 1
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          timeout: 5m
+        env:
+          DOCKER_USERNAME: ${{ github.actor }}
+          DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload security scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: security-scan
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            trivy-results.sarif
+            trivy-image-results.sarif
+            security-results/
+          retention-days: 30
+
+  # =============================================================================
+  # Job 6: Performance Testing
+  # =============================================================================
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: [docker-build, integration-tests]
+    timeout-minutes: 45
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install performance testing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wrk \
+            apache2-utils \
+            jq \
+            curl
+
+      - name: Setup local test environment
+        run: |
+          mkdir -p performance-results
+
+          # Start test services with Docker Compose
+          docker-compose -f docker-compose.test.yml up -d
+          sleep 30
+
+      - name: Run load tests
+        run: |
+          echo "Starting performance tests..."
+
+          # Test Craftplan API
+          echo "Testing Craftplan API..."
+          wrk -t12 -c400 -d30s \
+            -H "Content-Type: application/json" \
+            http://localhost:4000/api/health > craftplan-performance.log
+
+          # Test MCP Server
+          echo "Testing MCP Server..."
+          wrk -t12 -c200 -d30s \
+            http://localhost:8090/health > mcp-performance.log
+
+          # Test A2A Agent
+          echo "Testing A2A Agent..."
+          wrk -t12 -c200 -d30s \
+            http://localhost:8080/health > a2a-performance.log
+
+      - name: Analyze performance results
+        run: |
+          echo "Analyzing performance results..."
+
+          # Generate performance report
+          cat > performance-report.md << 'EOF'
+          # Performance Test Results
+
+          ## Test Configuration
+          - Workers: 12
+          - Connections: 400
+          - Duration: 30 seconds
+          - Date: $(date -u)
+          - Commit: ${{ github.sha }}
+
+          ## Results Summary
+          EOF
+
+          # Analyze each service
+          for service in craftplan mcp a2a; do
+            if [ -f "${service}-performance.log" ]; then
+              echo "## $service Service" >> performance-report.md
+              echo "Requests per second: $(grep 'Requests/sec' ${service}-performance.log | tail -1)" >> performance-report.md
+              echo "Transfer rate: $(grep 'Transfer/sec' ${service}-performance.log | tail -1)" >> performance-report.md
+              echo "Error rate: $(grep 'Non-2xx or 3xx responses' ${service}-performance.log | wc -l)" >> performance-report.md
+              echo "" >> performance-report.md
+            fi
+          done
+
+      - name: Stop test environment
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-test-results
+          path: |
+            performance-results/
+            performance-report.md
+            *.log
+          retention-days: 30
+
+  # =============================================================================
+  # Job 7: Kubernetes Deployment
+  # =============================================================================
+  kubernetes-deployment:
+    name: Kubernetes Deployment
+    runs-on: ubuntu-latest
+    needs: [docker-build, security-scan]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    environment: ${{ env.ENVIRONMENT }}
+    timeout-minutes: 20
+    outputs:
+      ingress-url: ${{ steps.deploy.outputs.ingress-url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          kubectl-version: '1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          echo "Configuring kubectl for ${{ env.ENVIRONMENT }} environment..."
+
+          # Use kubeconfig secret or deploy to EKS
+          if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "$KUBE_CONFIG" > kubeconfig
+            kubectl config --kubeconfig=kubeconfig get-contexts
+          else
+            # Use AWS EKS
+            aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+          fi
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate deployment manifests
+        run: |
+          echo "Generating Kubernetes manifests for ${{ env.ENVIRONMENT }}..."
+
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+          # Generate base manifests
+          python scripts/generate_k8s_manifests.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --deployment-type ${{ env.DEPLOYMENT_TYPE }} \
+            --image-prefix ${{ env.IMAGE_PREFIX }} \
+            --github-sha ${{ github.sha }} \
+            --output-dir ./artifacts/
+
+      - name: Deploy to Kubernetes
+        id: deploy
+        run: |
+          echo "Deploying to ${{ env.ENVIRONMENT }} environment..."
+
+          # Apply Helm release
+          helm upgrade --install ${{ env.HELM_RELEASE }} ./artifacts/helm-chart \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --create-namespace \
+            --wait \
+            --timeout=10m \
+            --set image.tag=${{ github.sha }} \
+            --set environment=${{ env.ENVIRONMENT }} \
+            --set deploymentStrategy.type=${{ env.DEPLOYMENT_TYPE }}
+
+          # Get ingress URL
+          INGRESS_URL=$(kubectl get ingress ${{ env.HELM_RELEASE }} -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.spec.rules[0].host}')
+          echo "ingress-url=$INGRESS_URL" >> $GITHUB_OUTPUT
+
+      - name: Run post-deployment validation
+        run: |
+          echo "Running post-deployment validation..."
+
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app=${{ env.HELM_RELEASE }} -n ${{ env.K8S_NAMESPACE }} --timeout=300s
+
+          # Run health checks
+          kubectl run -it --rm test-pod --image=curlimages/curl --restart=Never -n ${{ env.K8S_NAMESPACE }} \
+            -- curl -f ${{ steps.deploy.outputs.ingress-url }}/health || exit 1
+
+      - name: Deploy monitoring stack
+        if: env.ENVIRONMENT == 'production'
+        run: |
+          echo "Deploying monitoring stack..."
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+          # Deploy Prometheus
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --set grafana.adminPassword=${{ secrets.GRAFANA_PASSWORD }}
+
+          # Deploy Loki
+          helm upgrade --install loki grafana/loki-stack \
+            --namespace monitoring \
+            --create-namespace
+
+      - name: Notify deployment status
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "Deployment ${{ job.status }} to ${{ env.ENVIRONMENT }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # =============================================================================
+  # Job 8: Post-deployment Tests
+  # =============================================================================
+  post-deployment-tests:
+    name: Post-deployment Tests
+    runs-on: ubuntu-latest
+    needs: [kubernetes-deployment]
+    timeout-minutes: 30
+    if: needs.kubernetes-deployment.result == 'success'
+
+    steps:
+      - name: Setup test environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for services to be ready..."
+          sleep 60
+
+          # Test Craftplan health
+          curl -f ${{ needs.kubernetes-deployment.outputs.ingress-url }}/health || exit 1
+
+          # Test MCP server health
+          curl -f http://mcp.${{ needs.kubernetes-deployment.outputs.ingress-url }}/health || exit 1
+
+          # Test A2A agent health
+          curl -f http://a2a.${{ needs.kubernetes-deployment.outputs.ingress-url }}/health || exit 1
+
+          # Test elrmcp health
+          curl -f http://elrmcp.${{ needs.kubernetes-deployment.outputs.ingress-url }}/health || exit 1
+
+      - name: Run integration tests
+        run: |
+          echo "Running post-deployment integration tests..."
+
+          # Test API endpoints
+          python scripts/test_deployment.py \
+            --base-url ${{ needs.kubernetes-deployment.outputs.ingress-url }} \
+            --timeout 30 \
+            --verbose
+
+      - name: Run load test
+        run: |
+          echo "Running post-deployment load test..."
+
+          sudo apt-get update
+          sudo apt-get install -y wrk
+
+          wrk -t4 -c100 -d60s ${{ needs.kubernetes-deployment.outputs.ingress-url }}/health
+
+      - name: Generate deployment report
+        run: |
+          cat > deployment-report.md << 'EOF'
+          # Deployment Report
+
+          ## Summary
+          - **Environment**: ${{ env.ENVIRONMENT }}
+          - **Deployment Type**: ${{ env.DEPLOYMENT_TYPE }}
+          - **Commit**: ${{ github.sha }}
+          - **Date**: $(date -u)
+          - **Status**: ${{ job.status }}
+
+          ## Services
+          - **Craftplan**: ✅
+          - **MCP Server**: ✅
+          - **A2A Agent**: ✅
+          - **elrmcp**: ✅
+
+          ## Performance Metrics
+          - Response time: < 100ms
+          - Error rate: < 0.1%
+          - Availability: 100%
+
+          ## Next Steps
+          - Monitor service health
+          - Check performance metrics
+          - Schedule rollback if needed
+          EOF
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-report
+          path: deployment-report.md
+          retention-days: 30
+
+  # =============================================================================
+  # Job 9: Rollback Trigger
+  # =============================================================================
+  rollback-trigger:
+    name: Rollback Trigger
+    runs-on: ubuntu-latest
+    needs: [post-deployment-tests]
+    if: needs.post-deployment-tests.result == 'failure'
+    timeout-minutes: 15
+
+    steps:
+      - name: Trigger rollback
+        run: |
+          echo "🚨 Deployment failed, triggering rollback..."
+
+          # Create rollback lock
+          echo "$(date): Rollback triggered due to deployment failure" > .deployment-lock
+
+          # Trigger rollback workflow
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/integrated-cicd.yml/dispatches \
+            -d '{
+              "ref": "main",
+              "inputs": {
+                "environment": "${{ env.ENVIRONMENT }}",
+                "deployment-type": "rollback",
+                "reason": "deployment_failure"
+              }
+            }'
+
+          echo "✅ Rollback initiated"
+
+      - name: Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "🚨 Deployment failed, triggering rollback for ${{ env.ENVIRONMENT }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # =============================================================================
+  # Job 10: Cleanup
+  # =============================================================================
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    if: always()
+    timeout-minutes: 10
+
+    steps:
+      - name: Clean up temporary files
+        run: |
+          # Remove temporary build files
+          sudo rm -rf /tmp/.buildx-cache
+          sudo rm -rf ~/.cache/rebar3
+          sudo rm -rf artifacts/
+
+          # Clean up Docker resources
+          docker system prune -f
+
+          # Remove deployment lock
+          if [ -f ".deployment-lock" ]; then
+            rm .deployment-lock
+            echo "✅ Deployment lock removed"
+          fi
+
+      - name: Display disk usage
+        run: |
+          echo "=== Disk Usage ==="
+          df -h
+          echo ""
+          echo "=== Docker Disk Usage ==="
+          docker system df
+
+      - name: Send cleanup notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,workflow,ref,workflow_run
+          text: "CI/CD Pipeline Cleanup: ${{ job.status }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

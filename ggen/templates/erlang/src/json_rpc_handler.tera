@@ -1,0 +1,433 @@
+---
+description: "Generate Erlang JSON-RPC handler module"
+output_dir: "src/"
+file_extension: ".erl"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating Erlang JSON-RPC handler modules.
+Usage: Generate from modules with behaviour_type = "json_rpc_handler"
+{%- endcomment -%}
+
+{%- if module.behaviour_type == "json_rpc_handler" -%}
+-module({{ module.module_name }}).
+
+%%====================================================================
+%% Exports
+%%====================================================================
+
+-export([
+    init/2,
+    allowed_methods/2,
+    content_types_provided/2,
+    content_types_accepted/2,
+    malformed_request/2,
+    is_authorized/2,
+    forbidden/2
+]).
+
+-export([
+    process_request/2
+]).
+
+%%====================================================================
+%% Records
+%%====================================================================
+
+-record(state, {
+{%- if module.hotci_enabled -%}
+    request_id :: binary(),
+    hotci_enabled :: boolean(),
+{%- endif -%}
+{%- if module.properties | length > 0 -%}
+    {%- for prop in module.properties %}
+    {{ prop.name }} :: {{ prop.type | default("term()") }},
+    {%- endfor -%}
+{%- endif -%}
+    %% JSON-RPC state
+    jsonrpc :: binary(),
+    method :: binary(),
+    params :: term(),
+    id :: term()
+}).
+
+%%====================================================================
+%% JSON-RPC Constants
+%%====================================================================
+
+-define(JSONRPC_VERSION, <<"2.0">>).
+-define(ERROR_PARSE_ERROR, -32700).
+-define(ERROR_INVALID_REQUEST, -32600).
+-define(ERROR_METHOD_NOT_FOUND, -32601).
+-define(ERROR_INVALID_PARAMS, -32602).
+-define(ERROR_INTERNAL_ERROR, -32603).
+
+%%====================================================================
+%% Cowboy Callbacks
+%%====================================================================
+
+init(Req, Opts) ->
+    %% Extract request information
+    Method = cowboy_req:method(Req),
+    Headers = cowboy_req:headers(Req),
+
+    %% Initialize state
+    State = #state{
+        method = Method,
+        headers = Headers,
+        {%- if module.hotci_enabled %}
+        request_id = generate_request_id(),
+        hotci_enabled = application:get_env(a2a_erl, enable_hotci, false),
+        {%- endif %}
+        {%- if module.properties | length > 0 -%}
+        {%- for prop in module.properties %}
+        {{ prop.name }} = {{ prop.default_value | default("undefined") }},
+        {%- endfor -%}
+        {%- endif -%}
+    },
+
+    {cowboy_rest, Req, State}.
+
+allowed_methods(Req, State) ->
+    {[<<"POST">>], Req, State}. % Only POST allowed for JSON-RPC
+
+content_types_provided(Req, State) ->
+    {[
+        {<<"application/json">>, process_request}
+    ], Req, State}.
+
+content_types_accepted(Req, State) ->
+    {[
+        {<<"application/json">>, process_request}
+    ], Req, State}.
+
+malformed_request(Req, State) ->
+    %% Check if request has valid JSON-RPC structure
+    case cowboy_req:has_body(Req) of
+        true ->
+            {ok, Body, Req2} = cowboy_req:read_body(Req),
+            case validate_json_rpc(Body) of
+                {ok, ParsedState} ->
+                    {false, Req2, ParsedState#state{body = Body}};
+                {error, _} ->
+                    {true, Req2, State}
+            end;
+        false ->
+            {true, Req, State}
+    end.
+
+is_authorized(Req, State) ->
+    check_authorization(Req, State).
+
+forbidden(Req, State) ->
+    {false, Req, State}.
+
+%%====================================================================
+%% JSON-RPC Processing
+%%====================================================================
+
+process_request(Req, #state{body = Body} = State) ->
+    %% Parse JSON-RPC request
+    case parse_json_rpc(Body) of
+        {ok, JsonRpc} ->
+            handle_json_rpc_request(JsonRpc, Req, State);
+        {error, Error} ->
+            Response = create_error_response(?ERROR_PARSE_ERROR, Error),
+            cowboy_req:reply(400, #{
+                <<"content-type">> => <<"application/json">>
+            }, Response, Req)
+    end.
+
+%%====================================================================
+%% JSON-RPC Request Handling
+%%====================================================================
+
+handle_json_rpc_request(#{<<"jsonrpc">> := ?JSONRPC_VERSION,
+                          <<"method">> := Method,
+                          <<"params">> := Params,
+                          <<"id">> := Id} = Request,
+                     Req, State) ->
+    %% Handle valid JSON-RPC request
+    Response = handle_method(Method, Params, Id, State),
+    cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>
+    }, Response, Req);
+
+handle_json_rpc_request(#{<<"jsonrpc">> := JsonRpc}, Req, State) ->
+    %% Invalid JSON-RPC version
+    Response = create_error_response(?ERROR_INVALID_REQUEST,
+                                    "Invalid JSON-RPC version: " ++ binary_to_list(JsonRpc)),
+    cowboy_req:reply(400, #{
+        <<"content-type">> => <<"application/json">>
+    }, Response, Req);
+
+handle_json_rpc_request(Request, Req, State) ->
+    %% Missing required fields
+    Response = create_error_response(?ERROR_INVALID_REQUEST,
+                                    "Invalid JSON-RPC request"),
+    cowboy_req:reply(400, #{
+        <<"content-type">> => <<"application/json">>
+    }, Response, Req).
+
+%%====================================================================
+%% Method Dispatch
+%%====================================================================
+
+handle_method(Method, Params, Id, State) ->
+    %% Dispatch to appropriate method handler
+    case Method of
+        {%- if module.routes %}
+        {%- for route in module.routes %}
+        <<{{ route.method | default("{{ route.name }}") }}>> ->
+            handle_{{ route.name | underscore }}(Params, Id, State);
+        {%- endfor %}
+        {%- else %}
+        <<"system.listMethods">> ->
+            handle_list_methods(Params, Id, State);
+        {%- endif %}
+        _ ->
+            create_error_response(?ERROR_METHOD_NOT_FOUND,
+                                 "Method not found: " ++ binary_to_list(Method))
+    end.
+
+{%- if module.routes %}
+{%- for route in module.routes %}
+handle_{{ route.name | underscore }}(Params, Id, State) ->
+    %% Handle {{ route.name }} method
+    try
+        {%- if route.params %}
+        {%- for param in route.params %}
+        {{ param.name }} = get_param(Params, <<{{ param.name }}>>),
+        {%- endfor %}
+        {%- endif %}
+
+        %% Process the method
+        Result = process_{{ route.name | underscore }}_method(
+            {%- if route.params %}
+            {%- for param in route.params %}
+            {{ param.name }},
+            {%- endfor %}
+            {%- endif %}
+            State
+        ),
+
+        %% Create successful response
+        create_success_response(Result, Id)
+    catch
+        Error:Reason ->
+            %% Handle method execution errors
+            ErrorMsg = binary_to_list(iolist_to_binary(io_lib:format("~p: ~p", [Error, Reason]))),
+            create_error_response(?ERROR_INVALID_PARAMS, ErrorMsg)
+    end.
+{%- endfor %}
+{%- endif %}
+
+%%====================================================================
+%% Default Method Handlers
+%%====================================================================
+
+handle_list_methods(_Params, Id, _State) ->
+    %% List available methods
+    Methods = [
+        {%- if module.routes %}
+        {%- for route in module.routes %}
+        <<{{ route.name | default("{{ route.name }}") }}>>,
+        {%- endfor %}
+        {%- endif %}
+        <<"system.listMethods">>,
+        <<"system.describe">>
+    ],
+    create_success_response(#{
+        methods => Methods
+    }, Id).
+
+%%====================================================================
+%% Helper Functions
+%%====================================================================
+
+validate_json_rpc(Body) ->
+    %% Validate JSON-RPC structure
+    try
+        Json = jiffy:decode(Body),
+        case Json of
+            #{<<"jsonrpc">> := ?JSONRPC_VERSION,
+              <<"method">> := _,
+              <<"params">> := _,
+              <<"id">> := _} ->
+                {ok, #state{}};
+            _ ->
+                {error, invalid_structure}
+        end
+    catch
+        _:_ ->
+            {error, invalid_json}
+    end.
+
+parse_json_rpc(Body) ->
+    %% Parse JSON-RPC request
+    try
+        Json = jiffy:decode(Body),
+        {ok, #state{
+            jsonrpc = maps:get(<<"jsonrpc">>, Json, ?JSONRPC_VERSION),
+            method = maps:get(<<"method">>, Json),
+            params = maps:get(<<"params">>, Json, null),
+            id = maps:get(<<"id">>, Json)
+        }}
+    catch
+        Error:Reason ->
+            {error, {Error, Reason}}
+    end.
+
+create_success_response(Result, Id) ->
+    %% Create successful JSON-RPC response
+    jiffy:encode(#{
+        <<"jsonrpc">> => ?JSONRPC_VERSION,
+        <<"result">> => Result,
+        <<"id">> => Id
+    }).
+
+create_error_response(Code, Message) ->
+    %% Create JSON-RPC error response
+    jiffy:encode(#{
+        <<"jsonrpc">> => ?JSONRPC_VERSION,
+        <<"error">> => #{
+            <<"code">> => Code,
+            <<"message">> => Message
+        },
+        <<"id">> => null
+    }).
+
+get_param(Params, Key) ->
+    %% Get parameter from request
+    maps:get(Key, Params, null).
+
+%%====================================================================
+%% Authorization Functions
+%%====================================================================
+
+check_authorization(Req, State) ->
+    %% Check authorization
+    case cowboy_req:header(<<"authorization">>, Req) of
+        undefined ->
+            %% Check for API key in query params
+            case cowboy_req:parse_qs(Req) of
+                #{<<"api_key">> := ApiKey} ->
+                    validate_api_key(ApiKey);
+                _ ->
+                    {false, <<"Missing authorization">>}
+            end;
+        AuthHeader ->
+            validate_authorization_header(AuthHeader)
+    end.
+
+validate_api_key(ApiKey) ->
+    %% Validate API key
+    case ApiKey of
+        <<"secret123">> -> true;
+        _ -> {false, <<"Invalid API key">>}
+    end.
+
+validate_authorization_header(<<"Bearer ", Token/binary>>) ->
+    %% Validate Bearer token
+    case Token of
+        <<"secret123">> -> true;
+        _ -> {false, <<"Invalid token">>}
+    end.
+
+generate_request_id() ->
+    %% Generate unique request ID
+    Id = crypto:strong_rand_bytes(16),
+    base64:encode(Id).
+
+%%====================================================================
+%% Batch Request Handling
+%%====================================================================
+
+handle_batch_request(Requests, State) ->
+    %% Handle batch JSON-RPC requests
+    Responses = lists:map(fun(Request) ->
+        handle_json_rpc_request(Request, none, State)
+    end, Requests),
+    Responses.
+
+%%====================================================================
+%% HotCI Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+hotci_method_metrics() ->
+    %% Collect method metrics
+    Metrics = #{
+        method_calls => get_method_calls(),
+        error_rate => get_method_error_rate(),
+        avg_response_time => get_avg_response_time()
+    },
+    Metrics.
+
+get_method_calls() ->
+    case ets:lookup(a2a_metrics, jsonrpc_method_calls) of
+        [{jsonrpc_method_calls, Count}] -> Count;
+        _ -> 0
+    end.
+
+get_method_error_rate() ->
+    case ets:lookup(a2a_metrics, jsonrpc_error_rate) of
+        [{jsonrpc_error_rate, Rate}] -> Rate;
+        _ -> 0.0
+    end.
+
+get_avg_response_time() ->
+    case ets:lookup(a2a_metrics, jsonrpc_avg_response_time) of
+        [{jsonrpc_avg_response_time, Time}] -> Time;
+        _ -> 0
+    end.
+{%- endif %}
+
+%%====================================================================
+%% EUnit Tests
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+valid_request_test() ->
+    Req = cowboy_req:new(
+        <<"POST">>,
+        {<<"http">>, <<"localhost">>, 8080},
+        <<"/{{ module.module_name | underscore }}">>,
+        [],
+        jiffy:encode(#{<<"jsonrpc">> => <<"2.0">>, <<"method">> => <<"test">>, <<"params">> => #{}, <<"id">> => 1}),
+        [{<<"content-type">>, <<"application/json">>}],
+        []
+    ),
+    {ok, _, Resp} = ?MODULE:init(Req, []),
+    ?assertEqual(200, cowboy_req:status(Resp)).
+
+invalid_request_test() ->
+    Req = cowboy_req:new(
+        <<"POST">>,
+        {<<"http">>, <<"localhost">>, 8080},
+        <<"/{{ module.module_name | underscore }}">>,
+        [],
+        <<"invalid json">>,
+        [{<<"content-type">>, <<"application/json">>}],
+        []
+    ),
+    {ok, _, Resp} = ?MODULE:init(Req, []),
+    ?assertEqual(400, cowboy_req:status(Resp)).
+
+method_not_found_test() ->
+    Req = cowboy_req:new(
+        <<"POST">>,
+        {<<"http">>, <<"localhost">>, 8080},
+        <<"/{{ module.module_name | underscore }}">>,
+        [],
+        jiffy:encode(#{<<"jsonrpc">> => <<"2.0">>, <<"method">> => <<"unknown">>, <<"params">> => #{}, <<"id">> => 1}),
+        [{<<"content-type">>, <<"application/json">>}],
+        []
+    ),
+    {ok, _, Resp} = ?MODULE:init(Req, []),
+    ?assertEqual(200, cowboy_req:status(Resp)).
+
+-endif.
+{%- endif -%}

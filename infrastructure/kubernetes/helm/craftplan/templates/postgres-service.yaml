@@ -1,0 +1,27 @@
+{{- if .Values.postgres.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-postgres
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: postgres
+  annotations:
+    {{- if .Values.postgres.annotations }}
+    {{- toYaml .Values.postgres.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.postgres.service.type }}
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: 5432
+      {{- if .Values.postgres.service.nodePort }}
+      nodePort: {{ .Values.postgres.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: postgres
+{{- end }}

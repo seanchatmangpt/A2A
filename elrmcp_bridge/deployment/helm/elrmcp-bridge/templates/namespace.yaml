@@ -1,0 +1,13 @@
+{{/* Create namespace if it doesn't exist */}}
+{{- if .Values.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    name: {{ .Release.Namespace }}
+    app: {{ include "elrmcp-bridge.name" . }}
+    {{- with .Values.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

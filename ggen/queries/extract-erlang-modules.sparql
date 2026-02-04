@@ -1,0 +1,63 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+
+# Extract all Erlang modules with their properties
+CONSTRUCT {
+    ?module a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviour ;
+        a2a:exported_functions ?exports ;
+        a2a:exported_types ?types ;
+        a2a:hotci_enabled ?hotciEnabled ;
+        a2a:upgrade_monitor ?upgradeMonitor ;
+        a2a:rollback_support ?rollbackSupport .
+}
+WHERE {
+    # Find modules with behaviour annotation
+    ?module a rdfs:Class ;
+        rdfs:subClassOf* ?behaviour .
+
+    ?behaviour a erl:behaviour .
+
+    # Get module name
+    OPTIONAL {
+        ?module rdfs:label ?moduleName .
+        FILTER(BOUND(?moduleName))
+    }
+    BIND(COALESCE(?moduleName, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+    # Get behaviour type
+    OPTIONAL {
+        ?module a ?behaviour .
+        ?behaviour rdfs:label ?behaviourLabel .
+        BIND(STR(?behaviourLabel) AS ?behaviour)
+    }
+
+    # Extract exported functions (if specified)
+    OPTIONAL {
+        ?module a2a:exported_functions ?exports .
+    }
+
+    # Extract exported types (if specified)
+    OPTIONAL {
+        ?module a2a:exported_types ?types .
+    }
+
+    # HotCI properties
+    OPTIONAL {
+        ?module a2a:hotci_enabled ?hotciEnabled .
+    }
+    BIND(COALESCE(?hotciEnabled, false) AS ?hotciEnabled)
+
+    OPTIONAL {
+        ?module a2a:upgrade_monitor ?upgradeMonitor .
+    }
+    BIND(COALESCE(?upgradeMonitor, false) AS ?upgradeMonitor)
+
+    OPTIONAL {
+        ?module a2a:rollback_support ?rollbackSupport .
+    }
+    BIND(COALESCE(?rollbackSupport, false) AS ?rollbackSupport)
+}

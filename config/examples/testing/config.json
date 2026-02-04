@@ -1,0 +1,116 @@
+{
+  "environment": "testing",
+  "config_version": "0.1.0",
+  "server": {
+    "host": "localhost",
+    "port": 8080,
+    "max_connections": 50,
+    "timeout": 15,
+    "ssl_enabled": false
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/tmp/a2a-test.log",
+    "max_size": 5242880,
+    "backup_count": 3,
+    "json_format": false
+  },
+  "security": {
+    "jwt_secret": "test-secret-key",
+    "jwt_algorithm": "HS256",
+    "jwt_expiration": 1800,
+    "api_key": "test-api-key",
+    "ssl_cert_path": null,
+    "ssl_key_path": null,
+    "allowed_origins": ["*"]
+  },
+  "database": {
+    "url": null,
+    "host": "localhost",
+    "port": 5432,
+    "name": "a2a_test",
+    "username": "postgres",
+    "password": "test_password",
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_timeout": 30
+  },
+  "mcp": {
+    "server_name": "craftplan-mcp-test",
+    "host": "localhost",
+    "port": 9000,
+    "protocol_version": "2024-11-05",
+    "capabilities": {
+      "tools": {
+        "plan": {},
+        "execute": {},
+        "monitor": {}
+      },
+      "resources": {
+        "tasks": {},
+        "agents": {}
+      },
+      "logging": {
+        "level": "DEBUG"
+      }
+    },
+    "max_request_size": 1048576,
+    "request_timeout": 300
+  },
+  "a2a": {
+    "agent_name": "a2a-agent-test",
+    "namespace": "testing",
+    "service_url": "http://localhost:8081",
+    "event_bus_url": "http://localhost:8082",
+    "task_timeout": 300,
+    "max_retries": 3,
+    "retry_delay": 5,
+    "storage_backend": "ets"
+  },
+  "bridge": {
+    "mcp_server": {
+      "server_name": "craftplan-mcp-test",
+      "host": "localhost",
+      "port": 9000,
+      "protocol_version": "2024-11-05",
+      "capabilities": {
+        "tools": {
+          "plan": {},
+          "execute": {},
+          "monitor": {}
+        },
+        "resources": {
+          "tasks": {},
+          "agents": {}
+        },
+        "logging": {
+          "level": "DEBUG"
+        }
+      },
+      "max_request_size": 1048576,
+      "request_timeout": 300
+    },
+    "a2a_agent": {
+      "agent_name": "a2a-agent-test",
+      "namespace": "testing",
+      "service_url": "http://localhost:8081",
+      "event_bus_url": "http://localhost:8082",
+      "task_timeout": 300,
+      "max_retries": 3,
+      "retry_delay": 5,
+      "storage_backend": "ets"
+    },
+    "auto_start": true,
+    "heartbeat_interval": 30,
+    "max_bridge_sessions": 5,
+    "message_queue_size": 500,
+    "metrics_enabled": true
+  },
+  "custom_config": {
+    "testing_mode": true,
+    "mock_external_services": true,
+    "test_timeout_multiplier": 2.0,
+    "cleanup_on_startup": true
+  }
+}

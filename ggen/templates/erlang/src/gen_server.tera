@@ -1,0 +1,1107 @@
+---
+description: "Generate Erlang gen_server module with HotCI support and A2A patterns"
+output_dir: "src/"
+file_extension: ".erl"
+dependencies: ["extract-erlang-modules.sparql", "extract-hotci-modules.sparql"]
+variables:
+  module_name: "Module name (e.g., 'my_server')"
+  hotci_enabled: "Enable HotCI monitoring (true/false)"
+  rollback_support: "Enable rollback support (true/false)"
+  properties: "List of state properties with name and type"
+  exported_functions: "List of exported API functions"
+  error_handling: "Error handling strategy (fail_silently/throw/return_error)"
+  metrics_enabled: "Enable metrics collection (true/false)"
+  logging_level: "Logging level (debug/info/warn/error)"
+  max_retries: "Maximum retry attempts (default: 3)"
+  retry_delay: "Retry delay in ms (default: 1000)"
+---
+{%- comment -%}
+Template for generating Erlang gen_server modules with comprehensive OTP patterns.
+Usage: Generate from modules with behaviour_type = "gen_server"
+Features:
+- HotCI support for monitoring and rollback
+- A2A task state management
+- Comprehensive error handling and logging
+- Metrics collection and monitoring
+- Configurable retry mechanisms
+- Proper resource cleanup
+{%- endcomment -%}
+
+{%- if module.behaviour_type == "gen_server" -%}
+-module({{ module.module_name }}).
+-behaviour(gen_server).
+
+%%====================================================================
+%% Includes
+%%====================================================================
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+%%====================================================================
+%% Exports
+%%====================================================================
+
+%% API Functions
+-export([
+    start_link/0,
+    start_link/1,
+    stop/0,
+    get_state/0,
+    get_metrics/0,
+    get_stats/0
+]).
+
+%% gen_server Callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
+
+%% Configuration
+-export([
+    get_config/0,
+    update_config/1
+]).
+
+%%====================================================================
+%% Records
+%%====================================================================
+
+-define(MAX_RETRIES, {{ module.max_retries | default("3") }}).
+-define(RETRY_DELAY, {{ module.retry_delay | default("1000") }}).
+-define(LOG_LEVEL, {{ module.logging_level | default("info") }}).
+
+-define(METRICS_TABLE, a2a_metrics).
+-define(LOGGER_MODULE, logger).
+
+%% State record
+-record(state, {
+    %% Configuration
+    config :: map(),
+    %% Module-specific properties
+    {%- if module.properties | length > 0 -%}
+    {%- for prop in module.properties %}
+    {{ prop.name }} :: {{ prop.type | default("term()") }},
+    {%- endfor -%}
+    {%- endif -%}
+    %% HotCI support
+    {%- if module.hotci_enabled -%}
+    hotci_monitor :: pid() | undefined,
+    hotci_enabled :: boolean(),
+    {%- endif -%}
+    %% Rollback support
+    {%- if module.rollback_support -%}
+    rollback_data :: map(),
+    rollback_timer :: reference() | undefined,
+    {%- endif -%}
+    %% Metrics and statistics
+    metrics :: map(),
+    stats :: map(),
+    %% Process state
+    status :: initializing | running | stopping | error,
+    timestamps :: map()
+}).
+
+%% Configuration record
+-record(config, {
+    max_retries :: integer(),
+    retry_delay :: integer(),
+    log_level :: atom(),
+    {%- if module.hotci_enabled -%}
+    enable_hotci :: boolean(),
+    {%- endif -%}
+    {%- if module.rollback_support -%}
+    enable_rollback :: boolean(),
+    {%- endif -%}
+    custom_config :: map()
+}).
+
+%% Metrics record
+-record(metrics, {
+    request_count :: integer(),
+    error_count :: integer(),
+    response_time :: integer(),
+    memory_usage :: integer(),
+    last_operation :: binary() | undefined,
+    operation_times :: list()
+}).
+
+%% Stats record
+-record(stats, {
+    started :: integer(),
+    uptime :: integer(),
+    operations :: integer(),
+    restarts :: integer(),
+    last_error :: term() | undefined
+}).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+%%====================================================================
+%% Lifecycle Functions
+%%====================================================================
+
+start_link() ->
+    %% Start with default configuration
+    start_link(#{}).
+
+start_link(Args) when is_map(Args) ->
+    %% Validate startup arguments
+    ValidatedArgs = validate_startup_args(Args),
+    case gen_server:start_link({local, ?MODULE}, ?MODULE, ValidatedArgs, []) of
+        {ok, Pid} ->
+            ?LOG_INFO("Started ~p with pid ~p", [?MODULE, Pid]),
+            {ok, Pid};
+        {error, {already_started, Pid}} ->
+            ?LOG_WARNING("~p already started with pid ~p", [?MODULE, Pid]),
+            {ok, Pid};
+        {error, Reason} ->
+            ?LOG_ERROR("Failed to start ~p: ~p", [?MODULE, Reason]),
+            {error, Reason}
+    end.
+
+stop() ->
+    %% Graceful shutdown
+    ?LOG_INFO("Stopping ~p", [?MODULE]),
+    case gen_server:stop(?MODULE) of
+        ok ->
+            ?LOG_INFO("Successfully stopped ~p", [?MODULE]),
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR("Failed to stop ~p: ~p", [?MODULE, Reason]),
+            {error, Reason}
+    end.
+
+%%====================================================================
+%% State Management Functions
+%%====================================================================
+
+get_state() ->
+    %% Get current server state
+    gen_server:call(?MODULE, get_state, 5000).
+
+get_metrics() ->
+    %% Get current metrics
+    gen_server:call(?MODULE, get_metrics, 5000).
+
+get_stats() ->
+    %% Get current statistics
+    gen_server:call(?MODULE, get_stats, 5000).
+
+get_config() ->
+    %% Get current configuration
+    gen_server:call(?MODULE, get_config, 5000).
+
+update_config(NewConfig) when is_map(NewConfig) ->
+    %% Update configuration
+    gen_server:call(?MODULE, {update_config, NewConfig}, 5000).
+
+%%====================================================================
+%% Status Functions
+%%====================================================================
+
+is_running() ->
+    %% Check if process is running
+    case whereis(?MODULE) of
+        undefined -> false;
+        Pid -> is_process_alive(Pid)
+    end.
+
+get_status() ->
+    %% Get current process status
+    gen_server:call(?MODULE, get_status, 5000).
+
+get_memory_usage() ->
+    %% Get memory usage statistics
+    case whereis(?MODULE) of
+        undefined -> {error, not_running};
+        Pid ->
+            case process_info(Pid, memory) of
+                {memory, Memory} -> {ok, Memory};
+                undefined -> {error, no_info}
+            end
+    end.
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(Args) ->
+    %% Initialize start time
+    StartTime = erlang:system_time(millisecond),
+
+    %% Initialize default configuration
+    DefaultConfig = create_default_config(),
+    Config = merge_config(DefaultConfig, Args),
+
+    %% Initialize state
+    State = #state{
+        config = Config,
+        metrics = create_metrics(),
+        stats = create_stats(StartTime),
+        status = initializing,
+        timestamps = #{started => StartTime}
+    },
+
+    %% Initialize HotCI if enabled
+    {%- if module.hotci_enabled %}
+    HotciMonitor = case Config#config.enable_hotci of
+        true ->
+            ?LOG_INFO("Initializing HotCI monitoring", []),
+            start_hotci_monitor(State);
+        false -> undefined
+    end,
+    {%- endif %}
+
+    %% Initialize rollback support
+    {%- if module.rollback_support %}
+    RollbackTimer = case Config#config.enable_rollback of
+        true ->
+            ?LOG_INFO("Initializing rollback support", []),
+            start_rollback_timer(State);
+        false -> undefined
+    end,
+    {%- endif %}
+
+    %% Initialize module-specific properties from args
+    State2 = initialize_properties(State, Args),
+
+    %% Validate configuration
+    case validate_config(State2#state.config) of
+        {ok, ConfigValidated} ->
+            State3 = State2#state{config = ConfigValidated},
+            %% Mark as running and perform post-initialization
+            State4 = State3#state{status = running},
+            PostInitState = perform_post_initialization(State4),
+
+            ?LOG_INFO("Successfully initialized ~p", [?MODULE]),
+            {ok, PostInitState};
+        {error, Reason} ->
+            ?LOG_ERROR("Invalid configuration for ~p: ~p", [?MODULE, Reason]),
+            {stop, {invalid_config, Reason}}
+    end.
+
+handle_call(get_state, _From, #state{status = Status} = State) ->
+    %% Return current state information
+    Response = #{
+        status => Status,
+        uptime => get_uptime(State),
+        memory => get_process_memory(),
+        config => State#state.config,
+        {%- if module.hotci_enabled -%}
+        hotci_enabled => is_hotci_enabled(State),
+        {%- endif -%}
+        {%- if module.rollback_support -%}
+        rollback_enabled => is_rollback_enabled(State),
+        {%- endif -%}
+        metrics => State#state.metrics,
+        stats => State#state.stats
+    },
+    {reply, {ok, Response}, State};
+
+handle_call(get_metrics, _From, #state{metrics = Metrics} = State) ->
+    %% Return current metrics
+    {reply, {ok, Metrics}, State};
+
+handle_call(get_stats, _From, #state{stats = Stats} = State) ->
+    %% Return current statistics
+    Uptime = get_uptime(State),
+    UpdatedStats = Stats#stats{uptime = Uptime},
+    {reply, {ok, UpdatedStats}, State#state{stats = UpdatedStats}};
+
+handle_call(get_config, _From, #state{config = Config} = State) ->
+    %% Return current configuration
+    {reply, {ok, Config}, State};
+
+handle_call({update_config, NewConfig}, _From, State) ->
+    %% Update configuration with validation
+    case validate_config(NewConfig) of
+        {ok, ValidatedConfig} ->
+            ?LOG_INFO("Updating configuration for ~p", [?MODULE]),
+            State2 = State#state{config = ValidatedConfig},
+            %% Notify of config change if HotCI is enabled
+            {%- if module.hotci_enabled %}
+            notify_config_change(State2),
+            {%- endif %}
+            {reply, ok, State2};
+        {error, Reason} ->
+            ?LOG_ERROR("Invalid config update for ~p: ~p", [?MODULE, Reason]),
+            {reply, {error, Reason}, State}
+    end;
+
+handle_call(get_status, _From, #state{status = Status} = State) ->
+    %% Return detailed status
+    StatusInfo = #{
+        status => Status,
+        uptime => get_uptime(State),
+        memory => get_process_memory(),
+        {%- if module.hotci_enabled -%}
+        hotci_status => get_hotci_status(State),
+        {%- endif -%}
+        {%- if module.rollback_support -%}
+        rollback_status => get_rollback_status(State),
+        {%- endif -%}
+        last_operation => get_last_operation(State)
+    },
+    {reply, {ok, StatusInfo}, State};
+
+handle_call({{ module.module_name | capitalize }}Request, _From, State) ->
+    %% Handle module-specific requests with retry logic
+    StartTime = erlang:system_time(millisecond),
+
+    Result = case handle_request_with_retry({{ module.module_name | capitalize }}Request, State) of
+        {ok, Response} ->
+            RecordMetrics(StartTime, success, State),
+            {ok, Response};
+        {error, Reason} ->
+            RecordMetrics(StartTime, error, State),
+            {error, Reason}
+    end,
+
+    {reply, Result, State};
+
+handle_call(_Request, _From, State) ->
+    ?LOG_WARNING("Unknown request to ~p: ~p", [?MODULE, _Request]),
+    {reply, {error, unknown_request}, State}.
+
+handle_cast({{ module.module_name | capitalize }}Request, State) ->
+    %% Handle async requests
+    StartTime = erlang:system_time(millisecond),
+
+    Result = case handle_cast_request({{ module.module_name | capitalize }}Request, State) of
+        {noreply, NewState} ->
+            RecordMetrics(StartTime, success, NewState),
+            {noreply, NewState};
+        {stop, Reason, NewState} ->
+            RecordMetrics(StartTime, error, NewState),
+            {stop, Reason, NewState}
+    end,
+
+    Result;
+
+handle_cast(_Request, State) ->
+    ?LOG_WARNING("Unknown cast to ~p: ~p", [?MODULE, _Request]),
+    {noreply, State}.
+
+handle_info({{ module.module_name | capitalize }}Request, State) ->
+    %% Handle info messages
+    handle_info_request({{ module.module_name | capitalize }}Request, State);
+
+handle_info(timeout, #state{status = Status} = State) ->
+    %% Handle timeout
+    ?LOG_WARNING("~p timeout, status: ~p", [?MODULE, Status]),
+    {noreply, State};
+
+handle_info({'EXIT', Pid, Reason}, #state{hotci_monitor = Pid} = State) ->
+    %% HotCI monitor died
+    ?LOG_ERROR("HotCI monitor ~p died: ~p", [Pid, Reason]),
+    {%- if module.hotci_enabled %}
+    State2 = State#state{hotci_monitor = undefined},
+    maybe_restart_hotci_monitor(State2);
+    {%- else %}
+    {noreply, State};
+    {%- endif %}
+
+handle_info({'EXIT', Pid, Reason}, State) ->
+    %% Other process died
+    ?LOG_WARNING("Process ~p died: ~p", [Pid, Reason]),
+    {noreply, State};
+
+handle_info(_Info, State) ->
+    %% Unknown info message
+    ?LOG_DEBUG("Received unknown info: ~p", [_Info]),
+    {noreply, State}.
+
+terminate(Reason, #state{status = Status} = State) ->
+    %% Log termination
+    ?LOG_INFO("Terminating ~p with reason: ~p, status: ~p", [?MODULE, Reason, Status]),
+
+    %% Update stats
+    FinalStats = State#state.stats#stats{
+        uptime = get_uptime(State),
+        last_error = Reason
+    },
+
+    %% Send shutdown notification if HotCI is enabled
+    {%- if module.hotci_enabled %}
+    notify_shutdown(State),
+    {%- endif %}
+
+    %% Cleanup resources
+    cleanup_resources(State),
+
+    %% Persist final stats
+    persist_stats(FinalStats),
+
+    ok.
+
+code_change(OldVsn, State, Extra) ->
+    %% Handle code changes
+    ?LOG_INFO("Code change for ~p from ~p", [?MODULE, OldVsn]),
+
+    %% Validate state compatibility
+    case validate_state_compatibility(State) of
+        {ok, ValidatedState} ->
+            %% Update configuration if needed
+            Config = update_config_for_code_change(ValidatedState#state.config, Extra),
+            State2 = ValidatedState#state{config = Config},
+
+            %% Notify HotCI if enabled
+            {%- if module.hotci_enabled %}
+            notify_code_change(State2, OldVsn),
+            {%- endif %}
+
+            ?LOG_INFO("Successfully applied code change to ~p", [?MODULE]),
+            {ok, State2};
+        {error, Reason} ->
+            ?LOG_ERROR("Invalid state during code change for ~p: ~p", [?MODULE, Reason]),
+            {error, Reason}
+    end.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+%%====================================================================
+%% Configuration Functions
+%%====================================================================
+
+create_default_config() ->
+    #config{
+        max_retries = ?MAX_RETRIES,
+        retry_delay = ?RETRY_DELAY,
+        log_level = ?LOG_LEVEL,
+        {%- if module.hotci_enabled -%}
+        enable_hotci = application:get_env(a2a_erl, enable_hotci, false),
+        {%- endif -%}
+        {%- if module.rollback_support -%}
+        enable_rollback = application:get_env(a2a_erl, enable_rollback, false),
+        {%- endif -%}
+        custom_config = #{}
+    }.
+
+merge_config(DefaultConfig, Args) when is_map(Args) ->
+    %% Merge startup args with default config
+    CustomConfig = maps:get(custom_config, DefaultConfig, #{}),
+    MergedCustom = maps:merge(CustomConfig, Args),
+    DefaultConfig#config{custom_config = MergedCustom};
+merge_config(DefaultConfig, _) ->
+    DefaultConfig.
+
+validate_config(Config) ->
+    %% Validate configuration
+    try
+        %% Validate basic configuration
+        true = is_integer(Config#config.max_retries),
+        true = Config#config.max_retries > 0,
+        true = is_integer(Config#config.retry_delay),
+        true = Config#config.retry_delay > 0,
+
+        %% Validate log level
+        ValidLogLevels = [debug, info, warn, error],
+        true = lists:member(Config#config.log_level, ValidLogLevels),
+
+        %% Validate HotCI settings if enabled
+        {%- if module.hotci_enabled %}
+        case Config#config.enable_hotci of
+            true ->
+                case whereis(a2a_hotci_monitor) of
+                    undefined -> ok;
+                    _ -> ok
+                end;
+            false -> ok
+        end,
+        {%- endif %}
+
+        %% Validate rollback settings if enabled
+        {%- if module.rollback_support %}
+        case Config#config.enable_rollback of
+            true -> ok;
+            false -> ok
+        end,
+        {%- endif %}
+
+        {ok, Config}
+    catch
+        Error:Reason ->
+            {error, {validation_failed, {Error, Reason}}}
+    end.
+
+%%====================================================================
+%% Property Initialization Functions
+%%====================================================================
+
+initialize_properties(#state{} = State, Args) ->
+    %% Initialize module-specific properties from args
+    maps:fold(fun(K, V, S) -> initialize_property(K, V, S) end, State, Args).
+
+initialize_property({{ module.module_name | underscore }}_prop, Value, #state{} = State) ->
+    %% Initialize module-specific property
+    ?LOG_DEBUG("Initializing property ~p to ~p", [{{ module.module_name | underscore }}_prop, Value]),
+    State;
+initialize_property(_Key, _Value, State) ->
+    State.
+
+%%====================================================================
+%% Request Handling Functions
+%%====================================================================
+
+handle_request_with_retry(Request, #state{config = Config} = State) ->
+    %% Handle request with retry logic
+    handle_request_with_retry(Request, State, Config#config.max_retries).
+
+handle_request_with_retry(Request, State, 0) ->
+    %% No retries left
+    {error, retry_exhausted};
+
+handle_request_with_retry(Request, #state{config = Config} = State, Retries) ->
+    %% Execute request with error handling
+    try
+        case handle_{{ module.module_name | underscore }}_request(Request, State) of
+            {ok, Response} ->
+                {ok, Response};
+            {error, Reason} when Retries > 0 ->
+                ?LOG_WARNING("Request failed, retrying (~p left): ~p", [Retries, Reason]),
+                timer:sleep(Config#config.retry_delay),
+                handle_request_with_retry(Request, State, Retries - 1);
+            {error, Reason} ->
+                {error, Reason}
+        end
+    catch
+        Error:Reason ->
+            ?LOG_ERROR("Request failed with exception: ~p: ~p", [Error, Reason]),
+            case Retries > 0 of
+                true ->
+                    timer:sleep(Config#config.retry_delay),
+                    handle_request_with_retry(Request, State, Retries - 1);
+                false ->
+                    {error, {exception, Error, Reason}}
+            end
+    end.
+
+handle_cast_request({{ module.module_name | capitalize }}Request, State) ->
+    %% Handle cast requests
+    handle_{{ module.module_name | underscore }}_cast(Request, State);
+
+handle_cast_request(_Request, State) ->
+    {noreply, State}.
+
+handle_info_request({{ module.module_name | capitalize }}Request, #state{} = State) ->
+    %% Handle info requests
+    handle_{{ module.module_name | underscore }}_info(Request, State);
+
+handle_info_request(_Request, State) ->
+    {noreply, State}.
+
+%%====================================================================
+%% HotCI Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+start_hotci_monitor(#state{} = State) ->
+    case whereis(a2a_hotci_monitor) of
+        undefined ->
+            case a2a_hotci_monitor:start() of
+                {ok, Pid} ->
+                    ?LOG_INFO("Started HotCI monitor: ~p", [Pid]),
+                    Pid;
+                {error, Reason} ->
+                    ?LOG_ERROR("Failed to start HotCI monitor: ~p", [Reason]),
+                    undefined
+            end;
+        Pid ->
+            Pid
+    end.
+
+maybe_restart_hotci_monitor(#state{config = Config} = State) ->
+    case Config#config.enable_hotci of
+        true ->
+            ?LOG_INFO("Restarting HotCI monitor", []),
+            start_hotci_monitor(State);
+        false ->
+            ok
+    end.
+
+get_hotci_status(#state{hotci_monitor = Pid}) ->
+    case Pid of
+        undefined -> disabled;
+        _ when is_pid(Pid) -> enabled
+    end.
+
+is_hotci_enabled(#state{config = Config}) ->
+    Config#config.enable_hotci.
+
+notify_config_change(#state{} = State) ->
+    %% Notify HotCI of config change
+    Event = #{
+        type => config_changed,
+        module => ?MODULE,
+        timestamp => erlang:system_time(millisecond),
+        config => State#state.config
+    },
+    a2a_event_bus:notify(config_change, Event).
+
+notify_shutdown(#state{} = State) ->
+    %% Notify HotCI of shutdown
+    Event = #{
+        type => shutdown,
+        module => ?MODULE,
+        timestamp => erlang:system_time(millisecond),
+        uptime => get_uptime(State)
+    },
+    a2a_event_bus:notify(shutdown, Event).
+
+notify_code_change(#state{} = State, OldVsn) ->
+    %% Notify HotCI of code change
+    Event = #{
+        type => code_change,
+        module => ?MODULE,
+        old_version => OldVsn,
+        new_version => ?MODULE,
+        timestamp => erlang:system_time(millisecond)
+    },
+    a2a_event_bus:notify(code_change, Event).
+{%- endif %}
+
+%%====================================================================
+%% Rollback Functions
+%%====================================================================
+
+{%- if module.rollback_support %}
+start_rollback_timer(#state{} = State) ->
+    %% Start rollback timer
+    erlang:start_timer(30000, self(), rollback_check).
+
+get_rollback_status(#state{rollback_timer = Timer}) ->
+    case Timer of
+        undefined -> disabled;
+        _ when is_reference(Timer) -> enabled
+    end.
+
+is_rollback_enabled(#state{config = Config}) ->
+    Config#config.enable_rollback.
+{%- endif %}
+
+%%====================================================================
+%% Metrics Functions
+%%====================================================================
+
+create_metrics() ->
+    #metrics{
+        request_count = 0,
+        error_count = 0,
+        response_time = 0,
+        memory_usage = get_process_memory(),
+        last_operation = undefined,
+        operation_times = []
+    }.
+
+create_stats(StartTime) ->
+    #stats{
+        started = StartTime,
+        uptime = 0,
+        operations = 0,
+        restarts = 0,
+        last_error = undefined
+    }.
+
+get_uptime(#state{timestamps = Timestamps}) ->
+    case maps:get(started, Timestamps, 0) of
+        0 -> 0;
+        StartTime -> erlang:system_time(millisecond) - StartTime
+    end.
+
+get_process_memory() ->
+    case process_info(self(), memory) of
+        {memory, Mem} -> Mem;
+        undefined -> 0
+    end.
+
+get_last_operation(#state{metrics = Metrics}) ->
+    Metrics#metrics.last_operation.
+
+handle_request_with_retry({{ module.module_name | capitalize }}Request, #state{} = State) ->
+    %% Handle module-specific requests
+    handle_{{ module.module_name | underscore }}_request(Request, State).
+
+handle_{{ module.module_name | underscore }}_request(Request, #state{} = State) ->
+    %% Placeholder for module-specific request handling
+    {error, not_implemented}.
+
+handle_{{ module.module_name | underscore }}_cast(Request, #state{} = State) ->
+    %% Placeholder for module-specific cast handling
+    {noreply, State}.
+
+handle_{{ module.module_name | underscore }}_info(Request, #state{} = State) ->
+    %% Placeholder for module-specific info handling
+    {noreply, State}.
+
+RecordMetrics(StartTime, Type, #state{metrics = Metrics} = State) ->
+    %% Record operation metrics
+    ResponseTime = erlang:system_time(millisecond) - StartTime,
+    NewRequestCount = Metrics#metrics.request_count + 1,
+    NewErrorCount = case Type of
+        error -> Metrics#metrics.error_count + 1;
+        _ -> Metrics#metrics.error_count
+    end,
+
+    UpdatedMetrics = Metrics#metrics{
+        request_count = NewRequestCount,
+        error_count = NewErrorCount,
+        response_time = ResponseTime,
+        last_operation => Type,
+        operation_times = [ResponseTime | lists:sublist(Metrics#metrics.operation_times, 99)]
+    },
+
+    State#state{metrics = UpdatedMetrics}.
+
+persist_stats(Stats) ->
+    %% Persist statistics to ETS table
+    case ets:whereis(?METRICS_TABLE) of
+        undefined -> ok;
+        Tid -> ets:insert(Tid, {?MODULE, Stats})
+    end.
+
+%%====================================================================
+%% Validation Functions
+%%====================================================================
+
+validate_startup_args(Args) when is_map(Args) ->
+    %% Validate startup arguments
+    case maps:keys(Args) of
+        [] -> #{};
+        Keys ->
+            %% Basic validation - ensure all keys are atoms
+            Validated = lists:foldl(fun(Key, Acc) ->
+                case Key of
+                    K when is_atom(K) -> Acc#{K => maps:get(Key, Args)};
+                    _ -> Acc
+                end
+            end, #{}, Keys),
+            Validated
+    end.
+
+validate_state_compatibility(#state{config = Config}) ->
+    %% Validate state compatibility during code change
+    validate_config(Config).
+
+update_config_for_code_change(Config, Extra) ->
+    %% Update configuration during code change
+    case Extra of
+        {_, _, NewConfig} when is_map(NewConfig) ->
+            merge_config(Config, NewConfig);
+        _ -> Config
+    end.
+
+%%====================================================================
+%% Cleanup Functions
+%%====================================================================
+
+cleanup_resources(#state{} = State) ->
+    %% Clean up all resources
+    ?LOG_DEBUG("Cleaning up resources for ~p", [?MODULE]),
+
+    %% Stop HotCI monitor if enabled
+    {%- if module.hotci_enabled %}
+    case State#state.hotci_monitor of
+        undefined -> ok;
+        Pid when is_pid(Pid) ->
+            erlang:monitor(process, Pid),
+            exit(Pid, shutdown),
+            ok
+    end,
+    {%- endif %}
+
+    %% Cancel rollback timer if enabled
+    {%- if module.rollback_support %}
+    case State#state.rollback_timer of
+        undefined -> ok;
+        Timer when is_reference(Timer) ->
+            erlang:cancel_timer(Timer),
+            ok
+    end,
+    {%- endif %}
+
+    %% Clean up ETS tables if any
+    cleanup_ets_tables(State),
+
+    ?LOG_DEBUG("Resource cleanup completed for ~p", [?MODULE]).
+
+cleanup_ets_tables(#state{} = State) ->
+    %% Clean up any ETS tables
+    case ets:whereis({{ module.module_name | underscore }}_table) of
+        undefined -> ok;
+        Tid -> ets:delete(Tid)
+    end.
+
+perform_post_initialization(#state{} = State) ->
+    %% Perform post-initialization tasks
+    ?LOG_INFO("Performing post-initialization for ~p", [?MODULE]),
+
+    %% Log initialization complete
+    ?LOG_INFO("Initialization complete for ~p", [?MODULE]),
+
+    %% Send ready notification if needed
+    case application:get_env(a2a_erl, notify_on_ready, false) of
+        true ->
+            a2a_event_bus:notify(ready, #{module => ?MODULE});
+        false -> ok
+    end,
+
+    State.
+
+%%====================================================================
+%% Exported API Functions
+%%====================================================================
+
+{%- if module.exported_functions | length > 0 -%}
+{%- for func in module.exported_functions %}
+{{ func.name }}({% for arg in func.args %}{{ arg }}, {% endfor %}) ->
+    %% Exported function {{ func.name }}
+    gen_server:call(?MODULE, {{ func.request_name | default(func.name) }}).
+
+{%- endfor -%}
+{%- endif -%}
+
+%%====================================================================
+%% Module-Specific Request Handlers
+%%====================================================================
+
+handle_{{ module.module_name | underscore }}_request(Request, #state{} = State) ->
+    %% Handle module-specific requests
+    ?LOG_DEBUG("Handling {{ module.module_name | underscore }} request: ~p", [Request]),
+    {error, not_implemented}.
+
+%%====================================================================
+%% Maintenance Functions
+%%====================================================================
+
+health_check() ->
+    %% Perform health check
+    gen_server:call(?MODULE, health_check, 5000).
+
+backup() ->
+    %% Create backup of state
+    gen_server:call(?MODULE, backup, 10000).
+
+restore() ->
+    %% Restore from backup
+    gen_server:call(?MODULE, restore, 10000).
+
+reset() ->
+    %% Reset server state
+    gen_server:call(?MODULE, reset, 5000).
+
+%%====================================================================
+%% Maintenance Request Handlers
+%%====================================================================
+
+handle_call(health_check, _From, #state{status = Status} = State) ->
+    %% Perform health check
+    Health = #{
+        status => Status,
+        uptime => get_uptime(State),
+        memory => get_process_memory(),
+        {%- if module.hotci_enabled -%}
+        hotci_status => get_hotci_status(State),
+        {%- endif -%}
+        {%- if module.rollback_support -%}
+        rollback_status => get_rollback_status(State),
+        {%- endif -%}
+        metrics => State#state.metrics,
+        timestamp => erlang:system_time(millisecond)
+    },
+    {reply, {ok, Health}, State};
+
+handle_call(backup, _From, State) ->
+    %% Create backup
+    Backup = create_backup(State),
+    {reply, {ok, Backup}, State};
+
+handle_call(restore, _From, State) ->
+    %% Restore from backup (placeholder)
+    {reply, {error, not_implemented}, State};
+
+handle_call(reset, _From, State) ->
+    %% Reset server state
+    ?LOG_INFO("Resetting ~p", [?MODULE]),
+    NewState = State#state{
+        metrics = create_metrics(),
+        stats = create_stats(erlang:system_time(millisecond)),
+        timestamps = State#state.timestamps#{reset => erlang:system_time(millisecond)}
+    },
+    {reply, ok, NewState};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+create_backup(#state{} = State) ->
+    %% Create backup of state
+    #{
+        module => ?MODULE,
+        timestamp => erlang:system_time(millisecond),
+        config => State#state.config,
+        {%- if module.properties | length > 0 -%}
+        properties => extract_properties(State),
+        {%- endif -%}
+        metrics => State#state.metrics,
+        stats => State#state.stats
+    }.
+
+extract_properties(#state{} = State) ->
+    %% Extract module-specific properties
+    maps:fold(fun(K, V, Acc) ->
+        case K of
+            {{ module.module_name | underscore }}_prop -> Acc#{K => V};
+            _ -> Acc
+        end
+    end, #{}, State).
+
+%%====================================================================
+%% EUnit Tests
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%%====================================================================
+%% Basic Tests
+%%====================================================================
+
+start_stop_test() ->
+    %% Test basic start/stop functionality
+    {ok, Pid} = start_link(),
+    ?assert(is_pid(Pid)),
+    unlink(Pid),
+    exit(Pid, kill),
+    ok.
+
+config_test() ->
+    %% Test configuration management
+    {ok, Pid} = start_link(#{custom_config => #{test => true}}),
+    ?assert(is_pid(Pid)),
+
+    %% Test config retrieval
+    {ok, Config} = get_config(),
+    ?assertEqual(true, Config#config.custom_config#{test => true}),
+
+    unlink(Pid),
+    exit(Pid, kill),
+    ok.
+
+%%====================================================================
+%% Function Tests
+%%====================================================================
+
+{%- if module.exported_functions | length > 0 -%}
+{%- for func in module.exported_functions %}
+{{ func.name }}_test() ->
+    %% Test {{ func.name }} function
+    {ok, _} = start_link(),
+    try
+        Result = {{ func.name }}({% for arg in func.args %}{{ arg | default("undefined") }}, {% endfor %}),
+        ?assert(is_ok(Result))
+    catch
+        Error:Reason ->
+            ?assert(false, "{{ func.name }} failed with ~p: ~p", [Error, Reason])
+    after
+        ok = stop()
+    end.
+
+{%- endfor -%}
+{%- endif -%}
+
+%%====================================================================
+%% Metrics Tests
+%%====================================================================
+
+metrics_test() ->
+    %% Test metrics collection
+    {ok, _} = start_link(),
+
+    %% Perform some operations to generate metrics
+    try
+        get_state(),
+        get_metrics(),
+        get_stats()
+    after
+        ok = stop()
+    end,
+
+    %% Test metrics structure
+    {ok, Metrics} = get_metrics(),
+    ?assert(is_map(Metrics)),
+    ?assert(is_integer(Metrics#metrics.request_count)),
+    ok.
+
+%%====================================================================
+%% HotCI Tests (if enabled)
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+hotci_test() ->
+    %% Test HotCI functionality
+    {ok, _} = start_link(),
+
+    %% Test HotCI status
+    Status = get_status(),
+    ?assert(is_map(Status)),
+    ?assert(is_atom(Status#{status})),
+
+    ok = stop(),
+    ok.
+
+metrics_collection_test() ->
+    %% Test metrics collection over time
+    {ok, _} = start_link(),
+
+    %% Wait a bit for operations
+    timer:sleep(100),
+
+    {ok, Metrics} = get_metrics(),
+    ?assert(Metrics#metrics.request_count >= 0),
+    ok = stop(),
+    ok.
+{%- endif %}
+
+%%====================================================================
+%% Error Handling Tests
+%%====================================================================
+
+error_handling_test() ->
+    %% Test error handling
+    {ok, _} = start_link(),
+
+    %% Test unknown requests
+    {error, unknown_request} = gen_server:call(?MODULE, unknown_request),
+
+    ok = stop(),
+    ok.
+
+timeout_test() ->
+    %% Test timeout handling
+    {ok, _} = start_link(),
+
+    %% Test with timeout
+    {error, timeout} = gen_server:call(?MODULE, long_operation, 100),
+
+    ok = stop(),
+    ok.
+
+%%====================================================================
+%% Helper Test Functions
+%%====================================================================
+
+is_ok({ok, _}) -> true;
+is_ok(ok) -> true;
+is_ok(_) -> false.
+
+-endif.
+{%- endif -%}

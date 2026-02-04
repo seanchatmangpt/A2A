@@ -1,0 +1,519 @@
+---
+description: "Generate Erlang cowboy HTTP handler module"
+output_dir: "src/"
+file_extension: ".erl"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating Erlang cowboy HTTP handler modules.
+Usage: Generate from modules with behaviour_type = "cowboy_handler"
+{%- endcomment -%}
+
+{%- if module.behaviour_type == "cowboy_handler" -%}
+-module({{ module.module_name }}).
+
+%%====================================================================
+%% Exports
+%%====================================================================
+
+-export([
+    init/2,
+    allowed_methods/2,
+    content_types_provided/2,
+    content_types_accepted/2,
+    resource_exists/2,
+    delete_resource/2,
+    malformed_request/2,
+    is_authorized/2,
+    forbidden/2,
+    expires/2,
+    generate_etag/2,
+    last_modified/2
+]).
+
+-export([
+    {{ module.module_name | capitalize }}Get/2,
+    {{ module.module_name | capitalize }}Post/2,
+    {{ module.module_name | capitalize }}Put/2,
+    {{ module.module_name | capitalize }}Delete/2
+]).
+
+%%====================================================================
+%% Records
+%%====================================================================
+
+-record(state, {
+{%- if module.hotci_enabled -%}
+    request_id :: binary(),
+    hotci_enabled :: boolean(),
+{%- endif -%}
+{%- if module.properties | length > 0 -%}
+    {%- for prop in module.properties %}
+    {{ prop.name }} :: {{ prop.type | default("term()") }},
+    {%- endfor -%}
+{%- endif -%}
+    %% Request state
+    method :: binary(),
+    path :: binary(),
+    headers :: map(),
+    body :: binary(),
+    params :: map()
+}).
+
+%%====================================================================
+%% Cowboy Callbacks
+%%====================================================================
+
+init(Req, Opts) ->
+    %% Extract request information
+    Method = cowboy_req:method(Req),
+    Path = cowboy_req:path(Req),
+    Headers = cowboy_req:headers(Req),
+
+    %% Parse query parameters
+    Params = cowboy_req:parse_qs(Req),
+
+    %% Create request ID
+    RequestId = generate_request_id(),
+
+    %% Initialize state
+    State = #state{
+        method = Method,
+        path = Path,
+        headers = Headers,
+        body = <<>>,
+        params = Params,
+        {%- if module.hotci_enabled %}
+        request_id = RequestId,
+        hotci_enabled = application:get_env(a2a_erl, enable_hotci, false),
+        {%- endif %}
+        {%- if module.properties | length > 0 -%}
+        {%- for prop in module.properties %}
+        {{ prop.name }} = {{ prop.default_value | default("undefined") }},
+        {%- endfor -%}
+        {%- endif -%}
+    },
+
+    %% Start request timer
+    start_request_timer(Method, Path),
+
+    {cowboy_rest, Req, State}.
+
+allowed_methods(Req, State) ->
+    {[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>], Req, State}.
+
+content_types_provided(Req, State) ->
+    {[
+        {<<"application/json">>, {{ module.module_name | capitalize }}Get}
+    ], Req, State}.
+
+content_types_accepted(Req, State) ->
+    {[
+        {<<"application/json">>, {{ module.module_name | capitalize }}Post}
+    ], Req, State}.
+
+resource_exists(Req, #state{path = Path} = State) ->
+    {check_resource_exists(Path), Req, State}.
+
+malformed_request(Req, State) ->
+    {check_malformed_request(Req), Req, State}.
+
+is_authorized(Req, State) ->
+    {check_authorization(Req), Req, State}.
+
+forbidden(Req, State) ->
+    {check_forbidden(Req, State), Req, State}.
+
+expires(Req, State) ->
+    {false, Req, State}. % No caching
+
+generate_etag(Req, State) ->
+    {generate_etag(Req, State), Req, State}.
+
+last_modified(Req, State) ->
+    {undefined, Req, State}.
+
+%%====================================================================
+%% HTTP Method Handlers
+%%====================================================================
+
+{{ module.module_name | capitalize }}Get(Req, State) ->
+    Path = cowboy_req:path(Req),
+
+    case Path of
+        {%- if module.routes %}
+        {%- for route in module.routes %}
+        {{ route.path }} ->
+            handle_{{ route.name | underscore }}_get(Req, State);
+        {%- endfor %}
+        {%- else %}
+        <<"/{{ module.module_name | underscore }}">> ->
+            handle_default_get(Req, State);
+        {%- endif %}
+        _ ->
+            {false, Req, State}
+    end.
+
+{{ module.module_name | capitalize }}Post(Req, State) ->
+    case cowboy_req:has_body(Req) of
+        true ->
+            {ok, Body, Req2} = cowboy_req:read_body(Req),
+            State2 = State#state{body = Body},
+            handle_post(Req2, State2);
+        false ->
+            {true, Req, State} % Malformed: no body
+    end.
+
+{{ module.module_name | capitalize }}Put(Req, State) ->
+    case cowboy_req:has_body(Req) of
+        true ->
+            {ok, Body, Req2} = cowboy_req:read_body(Req),
+            State2 = State#state{body = Body},
+            handle_put(Req2, State2);
+        false ->
+            {true, Req, State} % Malformed: no body
+    end.
+
+{{ module.module_name | capitalize }}Delete(Req, State) ->
+    handle_delete(Req, State).
+
+%%====================================================================
+%% Route Handlers
+%%====================================================================
+
+{%- if module.routes %}
+{%- for route in module.routes %}
+handle_{{ route.name | underscore }}_get(Req, #state{params = Params} = State) ->
+    %% Extract query parameters
+    {%- if route.params %}
+    {%- for param in route.params %}
+    {{ param.name }} = maps:get(<<"{{ param.name }}">>, Params, {{ param.default | default("undefined") }}),
+    {%- endfor %}
+    {%- endif %}
+
+    %% Process GET request
+    Response = process_{{ route.name | underscore }}_get(),
+
+    %% Format JSON response
+    JsonResponse = jiffy:encode(Response),
+
+    cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>
+    }, JsonResponse, Req).
+
+handle_{{ route.name | underscore }}_post(Req, #state{body = Body} = State) ->
+    %% Parse JSON body
+    try
+        JsonData = jiffy:decode(Body),
+
+        %% Process POST request
+        Response = process_{{ route.name | underscore }}_post(JsonData),
+
+        %% Format JSON response
+        JsonResponse = jiffy:encode(Response),
+
+        cowboy_req:reply(201, #{
+            <<"content-type">> => <<"application/json">>
+        }, JsonResponse, Req)
+    catch
+        Error:Reason ->
+            %% Handle JSON parsing errors
+            ErrorResponse = #{
+                error => "malformed_json",
+                message => binary_to_list(iolist_to_binary(io_lib:format("~p", [Reason])))
+            },
+            JsonError = jiffy:encode(ErrorResponse),
+            cowboy_req:reply(400, #{
+                <<"content-type">> => <<"application/json">>
+            }, JsonError, Req)
+    end.
+
+handle_{{ route.name | underscore }}_put(Req, #state{body = Body} = State) ->
+    %% Parse JSON body
+    try
+        JsonData = jiffy:decode(Body),
+
+        %% Process PUT request
+        Response = process_{{ route.name | underscore }}_put(JsonData),
+
+        %% Format JSON response
+        JsonResponse = jiffy:encode(Response),
+
+        cowboy_req:reply(200, #{
+            <<"content-type">> => <<"application/json">>
+        }, JsonResponse, Req)
+    catch
+        Error:Reason ->
+            %% Handle JSON parsing errors
+            ErrorResponse = #{
+                error => "malformed_json",
+                message => binary_to_list(iolist_to_binary(io_lib:format("~p", [Reason])))
+            },
+            JsonError = jiffy:encode(ErrorResponse),
+            cowboy_req:reply(400, #{
+                <<"content-type">> => <<"application/json">>
+            }, JsonError, Req)
+    end.
+
+handle_{{ route.name | underscore }}_delete(Req, State) ->
+    %% Process DELETE request
+    Response = process_{{ route.name | underscore }}_delete(),
+
+    %% Format JSON response
+    JsonResponse = jiffy:encode(Response),
+
+    cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>
+    }, JsonResponse, Req).
+{%- endfor %}
+{%- else %}
+handle_default_get(Req, #state{params = Params} = State) ->
+    %% Default GET handler
+    Response = #{
+        status => "ok",
+        message => "default handler",
+        timestamp => erlang:system_time(millisecond)
+    },
+
+    JsonResponse = jiffy:encode(Response),
+    cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>
+    }, JsonResponse, Req).
+{%- endif %}
+
+%%====================================================================
+%% Core Request Handlers
+%%====================================================================
+
+handle_post(Req, #state{params = Params, body = Body} = State) ->
+    %% Parse JSON body
+    try
+        JsonData = jiffy:decode(Body),
+
+        %% Process POST request
+        Response = process_post(JsonData, Params),
+
+        %% Format JSON response
+        JsonResponse = jiffy:encode(Response),
+
+        cowboy_req:reply(201, #{
+            <<"content-type">> => <<"application/json">>
+        }, JsonResponse, Req)
+    catch
+        Error:Reason ->
+            %% Handle JSON parsing errors
+            ErrorResponse = #{
+                error => "malformed_json",
+                message => binary_to_list(iolist_to_binary(io_lib:format("~p", [Reason])))
+            },
+            JsonError = jiffy:encode(ErrorResponse),
+            cowboy_req:reply(400, #{
+                <<"content-type">> => <<"application/json">>
+            }, JsonError, Req)
+    end.
+
+handle_put(Req, #state{params = Params, body = Body} = State) ->
+    %% Parse JSON body
+    try
+        JsonData = jiffy:decode(Body),
+
+        %% Process PUT request
+        Response = process_put(JsonData, Params),
+
+        %% Format JSON response
+        JsonResponse = jiffy:encode(Response),
+
+        cowboy_req:reply(200, #{
+            <<"content-type">> => <<"application/json">>
+        }, JsonResponse, Req)
+    catch
+        Error:Reason ->
+            %% Handle JSON parsing errors
+            ErrorResponse = #{
+                error => "malformed_json",
+                message => binary_to_list(iolist_to_binary(io_lib:format("~p", [Reason])))
+            },
+            JsonError = jiffy:encode(ErrorResponse),
+            cowboy_req:reply(400, #{
+                <<"content-type">> => <<"application/json">>
+            }, JsonError, Req)
+    end.
+
+handle_delete(Req, #state{params = Params} = State) ->
+    %% Process DELETE request
+    Response = process_delete(Params),
+
+    %% Format JSON response
+    JsonResponse = jiffy:encode(Response),
+
+    cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>
+    }, JsonResponse, Req).
+
+%%====================================================================
+%% Validation Functions
+%%====================================================================
+
+check_resource_exists(Path) ->
+    %% Check if resource exists
+    {true, _} = {Path, true}, % Placeholder
+    true.
+
+check_malformed_request(Req) ->
+    %% Check for malformed request
+    case cowboy_req:has_body(Req) of
+        true ->
+            case cowboy_req:header(<<"content-type">>, Req) of
+                <<"application/json">> -> false;
+                undefined -> false;
+                _ -> true
+            end;
+        false ->
+            false
+    end.
+
+check_authorization(Req) ->
+    %% Check authorization
+    case cowboy_req:header(<<"authorization">>, Req) of
+        undefined ->
+            %% Check for API key in query params
+            case cowboy_req:parse_qs(Req) of
+                #{<<"api_key">> := ApiKey} ->
+                    validate_api_key(ApiKey);
+                _ ->
+                    {false, <<"Missing authorization">>}
+            end;
+        AuthHeader ->
+            validate_authorization_header(AuthHeader)
+    end.
+
+check_forbidden(Req, State) ->
+    %% Check forbidden conditions
+    false.
+
+%%====================================================================
+%% Helper Functions
+%%====================================================================
+
+generate_request_id() ->
+    %% Generate unique request ID
+    Id = crypto:strong_rand_bytes(16),
+    base64:encode(Id).
+
+process_post(JsonData, Params) ->
+    %% Process POST request
+    #{
+        status => "created",
+        data => JsonData,
+        params => Params,
+        timestamp => erlang:system_time(millisecond)
+    }.
+
+process_put(JsonData, Params) ->
+    %% Process PUT request
+    #{
+        status => "updated",
+        data => JsonData,
+        params => Params,
+        timestamp => erlang:system_time(millisecond)
+    }.
+
+process_delete(Params) ->
+    %% Process DELETE request
+    #{
+        status => "deleted",
+        params => Params,
+        timestamp => erlang:system_time(millisecond)
+    }.
+
+validate_api_key(ApiKey) ->
+    %% Validate API key
+    case ApiKey of
+        <<"secret123">> -> true;
+        _ -> {false, <<"Invalid API key">>}
+    end.
+
+validate_authorization_header(<<"Bearer ", Token/binary>>) ->
+    %% Validate Bearer token
+    case Token of
+        <<"secret123">> -> true;
+        _ -> {false, <<"Invalid token">>}
+    end.
+
+generate_etag(Req, State) ->
+    %% Generate ETag based on request
+    undefined.
+
+start_request_timer(Method, Path) ->
+    %% Start request timer for metrics
+    _ = erlang:send_after(60000, self(), request_timeout),
+    ok.
+
+%%====================================================================
+%% HotCI Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+hotci_request_metrics() ->
+    %% Collect request metrics
+    Metrics = #{
+        request_count => get_request_count(),
+        response_time => get_average_response_time(),
+        error_rate => get_error_rate()
+    },
+    Metrics.
+
+get_request_count() ->
+    case ets:lookup(a2a_metrics, http_requests) of
+        [{http_requests, Count}] -> Count;
+        _ -> 0
+    end.
+
+get_average_response_time() ->
+    case ets:lookup(a2a_metrics, avg_response_time) of
+        [{avg_response_time, Time}] -> Time;
+        _ -> 0
+    end.
+
+get_error_rate() ->
+    case ets:lookup(a2a_metrics, error_rate) of
+        [{error_rate, Rate}] -> Rate;
+        _ -> 0.0
+    end.
+{%- endif %}
+
+%%====================================================================
+%% EUnit Tests
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+get_test() ->
+    Req = cowboy_req:new(
+        <<"GET">>,
+        {<<"http">>, <<"localhost">>, 8080},
+        <<"/{{ module.module_name | underscore }}">>,
+        [],
+        <<>>,
+        [],
+        []
+    ),
+    {ok, _, Resp} = ?MODULE:init(Req, []),
+    ?assertEqual(200, cowboy_req:status(Resp)).
+
+post_test() ->
+    Req = cowboy_req:new(
+        <<"POST">>,
+        {<<"http">>, <<"localhost">>, 8080},
+        <<"/{{ module.module_name | underscore }}">>,
+        [],
+        <<"{}">>,
+        [{<<"content-type">>, <<"application/json">>}],
+        []
+    ),
+    {ok, _, Resp} = ?MODULE:init(Req, []),
+    ?assertEqual(201, cowboy_req:status(Resp)).
+
+-endif.
+{%- endif -%}

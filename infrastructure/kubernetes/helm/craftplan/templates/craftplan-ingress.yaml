@@ -1,0 +1,57 @@
+{{- if .Values.craftplan.enabled -}}
+{{- if .Values.craftplan.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "craftplan.fullname" . }}-craftplan
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+  annotations:
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.craftplan.ingress.annotations }}
+    {{- toYaml .Values.craftplan.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.global.ingress.className }}
+    kubernetes.io/ingress.class: {{ .Values.global.ingress.className }}
+    {{- end }}
+    {{- if .Values.global.ingress.tls }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+    {{- if .Values.global.ingress.ingressClassName }}
+    nginx.ingress.kubernetes.io/ingress.class: {{ .Values.global.ingress.ingressClassName }}
+    {{- end }}
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.global.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.global.ingress.ingressClassName }}
+  {{- else if .Values.global.ingress.className }}
+  ingressClassName: {{ .Values.global.ingress.className }}
+  {{- end }}
+  {{- if .Values.global.ingress.tls }}
+  tls:
+    {{- toYaml .Values.global.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- $hosts := .Values.global.ingress.hosts | default list }}
+    {{- range $hosts }}
+    - host: {{ .host | default "craftplan.example.com" }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "craftplan.fullname" . }}-craftplan
+                port:
+                  number: {{ .servicePort | default 4000 }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

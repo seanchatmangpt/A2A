@@ -1,0 +1,262 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX k8s: <https://kubernetes.io/schema/>
+PREFIX docker: <https://docker.io/schema/>
+PREFIX helm: <https://helm.io/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Extract comprehensive cloud infrastructure configurations
+CONSTRUCT {
+    # Docker Configurations
+    ?dockerConfig a a2a:docker_config ;
+        a2a:base_image ?baseImage ;
+        a2a:expose_port ?exposePort ;
+        a2a:volume_mount ?volumeMount ;
+        a2a:environment_variable ?envVar ;
+        rdfs:label ?dockerLabel .
+
+    # Kubernetes Configurations
+    ?k8sConfig a a2a:kubernetes_config ;
+        a2a:app_label ?appLabel ;
+        a2a:component_label ?componentLabel ;
+        a2a:version_label ?versionLabel ;
+        a2a:namespace ?namespace ;
+        a2a:replicas ?replicas ;
+        a2a:resource_request_cpu ?cpuRequest ;
+        a2a:resource_request_memory ?memoryRequest ;
+        a2a:resource_limit_cpu ?cpuLimit ;
+        a2a:resource_limit_memory ?memoryLimit ;
+        a2a:service_type ?serviceType ;
+        a2a:ingress_class ?ingressClass ;
+        a2a:liveness_probe_path ?livenessPath ;
+        a2a:readiness_probe_path ?readinessPath ;
+        a2a:health_check_port ?healthPort ;
+        a2a:service_account_name ?serviceAccount ;
+        a2a:role_name ?roleName ;
+        a2a:role_binding_name ?roleBindingName ;
+        rdfs:label ?k8sLabel .
+
+    # Helm Chart Configurations
+    ?helmChart a a2a:helm_chart ;
+        a2a:chart_version ?chartVersion ;
+        a2a:app_version ?appVersion ;
+        a2a:values_schema ?valuesSchema ;
+        a2a:helm_values ?helmValues ;
+        rdfs:label ?helmLabel .
+
+    # Kubernetes Specific Resources
+    ?deployment a a2a:deployment ;
+        a2a:replicas ?deploymentReplicas ;
+        a2a:resource_request_cpu ?deploymentCpu ;
+        a2a:resource_request_memory ?deploymentMemory ;
+        a2a:resource_limit_cpu ?deploymentCpuLimit ;
+        a2a:resource_limit_memory ?deploymentMemoryLimit .
+
+    ?service a a2a:service ;
+        a2a:service_type ?serviceType ;
+        a2a:health_check_port ?serviceHealthPort .
+
+    ?configmap a a2a:configmap ;
+        a2a:app_label ?configmapAppLabel .
+
+    ?secret a a2a:secret ;
+        a2a:app_label ?secretAppLabel .
+
+    ?ingress a a2a:ingress ;
+        a2a:ingress_class ?ingressClass .
+
+    ?pvc a a2a:persistent_volume_claim ;
+        a2a:app_label ?pvcAppLabel .
+}
+WHERE {
+    # Docker Configurations
+    ?dockerConfig a a2a:docker_config .
+
+    # Get base image
+    OPTIONAL {
+        ?dockerConfig a2a:base_image ?baseImage .
+    }
+    BIND(COALESCE(?baseImage, "erlang:27-alpine") AS ?baseImage)
+
+    # Get exposed ports
+    OPTIONAL {
+        ?dockerConfig a2a:expose_port ?exposePort .
+    }
+    BIND(COALESCE(?exposePort, 8080) AS ?exposePort)
+
+    # Get volume mounts
+    OPTIONAL {
+        ?dockerConfig a2a:volume_mount ?volumeMount .
+    }
+
+    # Get environment variables
+    OPTIONAL {
+        ?dockerConfig a2a:environment_variable ?envVar .
+    }
+
+    # Docker label
+    OPTIONAL {
+        ?dockerConfig rdfs:label ?dockerLabel .
+    }
+
+    # Kubernetes Configurations
+    ?k8sConfig a a2a:kubernetes_config .
+
+    # Common labels
+    OPTIONAL {
+        ?k8sConfig rdfs:label ?label .
+        FILTER(STRSTARTS(STR(?label), "app:"))
+        BIND(SUBSTR(COALESCE(?label, ""), 5) AS ?appLabel)
+    }
+    BIND(COALESCE(?appLabel, "a2a") AS ?appLabel)
+
+    OPTIONAL {
+        ?k8sConfig rdfs:label ?label .
+        FILTER(STRSTARTS(STR(?label), "component:"))
+        BIND(SUBSTR(COALESCE(?label, ""), 10) AS ?componentLabel)
+    }
+    BIND(COALESCE(?componentLabel, "default") AS ?componentLabel)
+
+    OPTIONAL {
+        ?k8sConfig rdfs:label ?label .
+        FILTER(STRSTARTS(STR(?label), "version:"))
+        BIND(SUBSTR(COALESCE(?label, ""), 8) AS ?versionLabel)
+    }
+    BIND(COALESCE(?versionLabel, "1.0.0") AS ?versionLabel)
+
+    # Get namespace
+    OPTIONAL {
+        ?k8sConfig a2a:namespace ?namespace .
+    }
+    BIND(COALESCE(?namespace, "a2a-system") AS ?namespace)
+
+    # Get replicas
+    OPTIONAL {
+        ?k8sConfig a2a:replicas ?replicas .
+    }
+    BIND(COALESCE(?replicas, 2) AS ?replicas)
+
+    # Get resource requests/limits
+    OPTIONAL {
+        ?k8sConfig a2a:resource_request_cpu ?cpuRequest .
+    }
+    BIND(COALESCE(?cpuRequest, "100m") AS ?cpuRequest)
+
+    OPTIONAL {
+        ?k8sConfig a2a:resource_request_memory ?memoryRequest .
+    }
+    BIND(COALESCE(?memoryRequest, "128Mi") AS ?memoryRequest)
+
+    OPTIONAL {
+        ?k8sConfig a2a:resource_limit_cpu ?cpuLimit .
+    }
+    BIND(COALESCE(?cpuLimit, "500m") AS ?cpuLimit)
+
+    OPTIONAL {
+        ?k8sConfig a2a:resource_limit_memory ?memoryLimit .
+    }
+    BIND(COALESCE(?memoryLimit, "256Mi") AS ?memoryLimit)
+
+    # Get service type
+    OPTIONAL {
+        ?k8sConfig a2a:service_type ?serviceType .
+    }
+    BIND(COALESCE(?serviceType, "ClusterIP") AS ?serviceType)
+
+    # Get ingress class
+    OPTIONAL {
+        ?k8sConfig a2a:ingress_class ?ingressClass .
+    }
+    BIND(COALESCE(?ingressClass, "nginx") AS ?ingressClass)
+
+    # Health checks
+    OPTIONAL {
+        ?k8sConfig a2a:liveness_probe_path ?livenessPath .
+    }
+    BIND(COALESCE(?livenessPath, "/health") AS ?livenessPath)
+
+    OPTIONAL {
+        ?k8sConfig a2a:readiness_probe_path ?readinessPath .
+    }
+    BIND(COALESCE(?readinessPath, "/ready") AS ?readinessPath)
+
+    OPTIONAL {
+        ?k8sConfig a2a:health_check_port ?healthPort .
+    }
+    BIND(COALESCE(?healthPort, 8080) AS ?healthPort)
+
+    # Security
+    OPTIONAL {
+        ?k8sConfig a2a:service_account_name ?serviceAccount .
+    }
+    BIND(COALESCE(?serviceAccount, "a2a-service-account") AS ?serviceAccount)
+
+    OPTIONAL {
+        ?k8sConfig a2a:role_name ?roleName .
+    }
+    BIND(COALESCE(?roleName, "a2a-role") AS ?roleName)
+
+    OPTIONAL {
+        ?k8sConfig a2a:role_binding_name ?roleBindingName .
+    }
+    BIND(COALESCE(?roleBindingName, "a2a-role-binding") AS ?roleBindingName)
+
+    # Kubernetes label
+    OPTIONAL {
+        ?k8sConfig rdfs:label ?k8sLabel .
+    }
+
+    # Helm Charts
+    ?helmChart a a2a:helm_chart .
+
+    # Get version information
+    OPTIONAL {
+        ?helmChart a2a:chart_version ?chartVersion .
+    }
+    BIND(COALESCE(?chartVersion, "0.1.0") AS ?chartVersion)
+
+    OPTIONAL {
+        ?helmChart a2a:app_version ?appVersion .
+    }
+    BIND(COALESCE(?appVersion, "1.0.0") AS ?appVersion)
+
+    # Get schema and values
+    OPTIONAL {
+        ?helmChart a2a:values_schema ?valuesSchema .
+    }
+
+    OPTIONAL {
+        ?helmChart a2a:helm_values ?helmValues .
+    }
+
+    # Helm label
+    OPTIONAL {
+        ?helmChart rdfs:label ?helmLabel .
+    }
+
+    # Specific Kubernetes Resources
+    ?deployment a a2a:deployment ;
+        a2a:replicas ?deploymentReplicas ;
+        a2a:resource_request_cpu ?deploymentCpu ;
+        a2a:resource_request_memory ?deploymentMemory ;
+        a2a:resource_limit_cpu ?deploymentCpuLimit ;
+        a2a:resource_limit_memory ?deploymentMemoryLimit .
+
+    ?service a a2a:service ;
+        a2a:service_type ?serviceType ;
+        a2a:health_check_port ?serviceHealthPort .
+
+    ?configmap a a2a:configmap ;
+        a2a:app_label ?configmapAppLabel .
+
+    ?secret a a2a:secret ;
+        a2a:app_label ?secretAppLabel .
+
+    ?ingress a a2a:ingress ;
+        a2a:ingress_class ?ingressClass .
+
+    ?pvc a a2a:persistent_volume_claim ;
+        a2a:app_label ?pvcAppLabel .
+}

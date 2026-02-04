@@ -1,0 +1,191 @@
+{{- if .Values.elrmcp.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-elrmcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.elrmcp.annotations }}
+    {{- toYaml .Values.elrmcp.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ include "craftplan.replicaCount" . | default .Values.elrmcp.replicas }}
+  {{- if .Values.elrmcp.strategy }}
+  strategy:
+    {{- toYaml .Values.elrmcp.strategy | nindent 4 }}
+  {{- else }}
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: elrmcp
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: elrmcp
+        app.kubernetes.io/component: elrmcp
+        {{- if .Values.elrmcp.podLabels }}
+        {{- toYaml .Values.elrmcp.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.elrmcp.podAnnotations }}
+        {{- toYaml .Values.elrmcp.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+        checksum/secrets: {{ include "craftplan.secret" . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: {{ include "craftplan.metricsPath" . }}
+        {{- if .Values.elrmcp.monitoring.enabled }}
+        kubernetes.io/monitoring: "true"
+        {{- end }}
+    spec:
+      {{- if .Values.elrmcp.priorityClassName }}
+      priorityClassName: {{ .Values.elrmcp.priorityClassName }}
+      {{- end }}
+      {{- if .Values.elrmcp.serviceAccount.name }}
+      serviceAccountName: {{ include "craftplan.serviceAccountName" . }}
+      {{- end }}
+      {{- include "craftplan.imagePullSecret" . | nindent 6 }}
+      {{- if .Values.elrmcp.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.elrmcp.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.elrmcp.tolerations }}
+      tolerations:
+        {{- toYaml .Values.elrmcp.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.elrmcp.affinity }}
+      affinity:
+        {{- toYaml .Values.elrmcp.affinity | nindent 8 }}
+      {{- end }}
+      {{- if .Values.global.costOptimization.spotInstances.enabled }}
+      nodeSelector:
+        {{- toYaml .Values.global.costOptimization.spotInstances.nodeSelector | nindent 8 }}
+      tolerations:
+        - key: "spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      {{- end }}
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: elrmcp
+          image: "{{ .Values.elrmcp.image.repository }}:{{ .Values.elrmcp.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.elrmcp.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          {{- if .Values.elrmcp.livenessProbe }}
+          livenessProbe:
+            {{- toYaml (include "craftplan.livenessProbe" .) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.elrmcp.readinessProbe }}
+          readinessProbe:
+            {{- toYaml (include "craftplan.readinessProbe" .) | nindent 12 }}
+          {{- end }}
+          env:
+            {{- if .Values.elrmcp.env }}
+            {{- toYaml .Values.elrmcp.env | nindent 12 }}
+            {{- end }}
+            {{- if .Values.global.secrets }}
+            - name: ERLMCP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftplan.secretName" . }}
+                  key: elrmcp.erlmcpSecret
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- if .Values.elrmcp.resources }}
+          resources:
+            {{- toYaml .Values.elrmcp.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.elrmcp.volumeMounts }}
+          volumeMounts:
+            {{- toYaml .Values.elrmcp.volumeMounts | nindent 12 }}
+          {{- end }}
+          {{- if .Values.elrmcp.configMap }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/elrmcp/config
+              readOnly: true
+          {{- end }}
+          {{- if .Values.elrmcp.secrets }}
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/elrmcp/secrets
+              readOnly: true
+          {{- end }}
+          {{- if .Values.elrmcp.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.elrmcp.volumes }}
+      volumes:
+        {{- toYaml .Values.elrmcp.volumes | nindent 8 }}
+      {{- end }}
+      {{- if .Values.elrmcp.configMap }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "craftplan.configMapName" . }}-elrmcp
+      {{- end }}
+      {{- if .Values.elrmcp.secrets }}
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ include "craftplan.secretName" . }}
+      {{- end }}
+      {{- if .Values.elrmcp.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "craftplan.pvcName" . }}-elrmcp
+      {{- end }}
+      {{- if .Values.global.costOptimization.resourceLimits.enabled }}
+      resources:
+        limits:
+          cpu: {{ .Values.global.costOptimization.resourceLimits.maxCPU }}
+          memory: {{ .Values.global.costOptimization.resourceLimits.maxMemory }}
+      {{- end }}
+      {{- if .Values.global.security.networkPolicy.enabled }}
+      networkPolicy:
+        enabled: {{ .Values.global.security.networkPolicy.enabled }}
+        {{- if .Values.global.security.networkPolicy.ingress }}
+        ingress:
+          {{- toYaml .Values.global.security.networkPolicy.ingress | nindent 10 }}
+        {{- end }}
+        {{- if .Values.global.security.networkPolicy.egress }}
+        egress:
+          {{- toYaml .Values.global.security.networkPolicy.egress | nindent 10 }}
+        {{- end }}
+      {{- end }}
+{{- end }}

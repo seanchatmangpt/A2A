@@ -1,0 +1,239 @@
+# elrmcp Bridge Helm Chart Values
+
+## Global Settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  # For private registries, add your image pull secrets
+  # imagePullSecrets:
+  #   - name: registry-secret
+
+## Image Settings
+image:
+  repository: elrmcp-bridge
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+  # Optional: image digest for immutable deployments
+  # digest: sha256:1234567890abcdef...
+
+## replicaCount
+replicaCount: 2
+
+## Update Strategy
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 1
+
+## Resource Management
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+## Node Configuration
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - elrmcp-bridge
+          topologyKey: "kubernetes.io/hostname"
+
+## Configuration
+config:
+  craftplan:
+    url: "http://craftplan-mcp:8090"
+    timeout: 30000
+    authToken: null
+
+  rateLimiting:
+    enabled: true
+    requestsPerSecond: 100
+    burstSize: 10
+    refillIntervalMs: 1000
+
+  toolManagement:
+    whitelist: []
+    blacklist: []
+    autoRegister: true
+    cacheTtl: 300000
+
+  performance:
+    enableCaching: true
+    cacheSize: 1000
+    requestTimeout: 30000
+    connectTimeout: 5000
+
+  logging:
+    level: info
+    enableMetrics: true
+    requestLogging: true
+    errorLogging: true
+
+  healthChecks:
+    enabled: true
+    intervalMs: 30000
+    timeoutMs: 5000
+
+  security:
+    validateInputs: true
+    sanitizeOutputs: true
+    maxRequestSize: 1048576
+    allowedOrigins: ["*"]
+
+## Service Configuration
+service:
+  type: ClusterIP
+  ports:
+    mcp:
+      port: 8091
+      targetPort: 8091
+      protocol: TCP
+    metrics:
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  annotations: {}
+
+## Ingress Configuration (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: elrmcp-bridge.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: elrmcp-bridge-tls
+  #   hosts:
+  #     - elrmcp-bridge.example.com
+
+## Horizontal Pod Autoscaler Configuration
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+  # customMetrics:
+  #   - type: Pods
+  #     pods:
+  #       metric:
+  #         name: http_requests_per_second
+  #       target:
+  #         type: AverageValue
+  #         averageValue: 100
+
+## Persistence
+persistence:
+  enabled: false
+  # existingClaim: ""
+  # accessModes: [ReadWriteOnce]
+  # size: 1Gi
+  # storageClass: ""
+
+## Monitoring and Observability
+monitoring:
+  enabled: false
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      # Additional service monitor configurations
+
+## Security Context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+## Pod Security Context
+podSecurityContext:
+  fsGroup: 1000
+
+## Service Account
+serviceAccount:
+  create: true
+  name: elrmcp-bridge
+  annotations: {}
+  # For using IAM roles for service accounts:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/elrmcp-bridge
+
+## Pod Disruption Budget
+pdb:
+  enabled: true
+  minAvailable: 1
+  maxUnavailable: 1
+
+## Network Policy
+networkPolicy:
+  enabled: false
+  # ingress:
+  #   - from:
+  #       - podSelector:
+  #           matchLabels:
+  #             app: elrmcp
+  #   ports:
+  #     - port: 8091
+  #       protocol: TCP
+
+## Telemetry
+telemetry:
+  enabled: true
+  otel:
+    enabled: false
+    service_name: elrmcp-bridge
+    resource_attributes:
+      service.version: "1.0.0"
+      deployment.environment: "production"
+
+## initContainers
+initContainers: []
+
+## sidecars
+sidecars: []
+
+## lifecycle
+lifecycle: {}
+
+## priorityClassName
+priorityClassName: ""
+
+## Additional pod annotations
+podAnnotations:
+  checksum/config: {{ include (print .Chart.Name "/configmap.yaml") . | sha256sum }}
+
+## Additional labels
+additionalLabels: {}
+
+## Extra env vars
+extraEnv: []
+
+## Extra volumes
+extraVolumes: []
+
+## Extra volume mounts
+extraVolumeMounts: []

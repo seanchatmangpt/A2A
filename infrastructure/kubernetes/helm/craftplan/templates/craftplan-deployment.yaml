@@ -1,0 +1,196 @@
+{{- if .Values.craftplan.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-craftplan
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.craftplan.annotations }}
+    {{- toYaml .Values.craftplan.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ include "craftplan.replicaCount" . | default .Values.craftplan.replicas }}
+  {{- if .Values.craftplan.strategy }}
+  strategy:
+    {{- toYaml .Values.craftplan.strategy | nindent 4 }}
+  {{- else }}
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: craftplan
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: craftplan
+        app.kubernetes.io/component: craftplan
+        {{- if .Values.craftplan.podLabels }}
+        {{- toYaml .Values.craftplan.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.craftplan.podAnnotations }}
+        {{- toYaml .Values.craftplan.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+        checksum/secrets: {{ include "craftplan.secret" . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: {{ include "craftplan.metricsPath" . }}
+        {{- if .Values.craftplan.monitoring.enabled }}
+        kubernetes.io/monitoring: "true"
+        {{- end }}
+    spec:
+      {{- if .Values.craftplan.priorityClassName }}
+      priorityClassName: {{ .Values.craftplan.priorityClassName }}
+      {{- end }}
+      {{- if .Values.craftplan.serviceAccount.name }}
+      serviceAccountName: {{ include "craftplan.serviceAccountName" . }}
+      {{- end }}
+      {{- include "craftplan.imagePullSecret" . | nindent 6 }}
+      {{- if .Values.craftplan.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.craftplan.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.craftplan.tolerations }}
+      tolerations:
+        {{- toYaml .Values.craftplan.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.craftplan.affinity }}
+      affinity:
+        {{- toYaml .Values.craftplan.affinity | nindent 8 }}
+      {{- end }}
+      {{- if .Values.global.costOptimization.spotInstances.enabled }}
+      nodeSelector:
+        {{- toYaml .Values.global.costOptimization.spotInstances.nodeSelector | nindent 8 }}
+      tolerations:
+        - key: "spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      {{- end }}
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: craftplan
+          image: "{{ .Values.craftplan.image.repository }}:{{ .Values.craftplan.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.craftplan.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          {{- if .Values.craftplan.livenessProbe }}
+          livenessProbe:
+            {{- toYaml (include "craftplan.livenessProbe" .) | nindent 12 }}
+          {{- end }}
+          {{- if .Values.craftplan.readinessProbe }}
+          readinessProbe:
+            {{- toYaml (include "craftplan.readinessProbe" .) | nindent 12 }}
+          {{- end }}
+          env:
+            {{- if .Values.craftplan.env }}
+            {{- toYaml .Values.craftplan.env | nindent 12 }}
+            {{- end }}
+            {{- if .Values.global.secrets }}
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftplan.secretName" . }}
+                  key: craftplan.secretKeyBase
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftplan.secretName" . }}
+                  key: craftplan.jwtSecret
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- if .Values.craftplan.resources }}
+          resources:
+            {{- toYaml .Values.craftplan.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.craftplan.volumeMounts }}
+          volumeMounts:
+            {{- toYaml .Values.craftplan.volumeMounts | nindent 12 }}
+          {{- end }}
+          {{- if .Values.craftplan.configMap }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/craftplan/config
+              readOnly: true
+          {{- end }}
+          {{- if .Values.craftplan.secrets }}
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/craftplan/secrets
+              readOnly: true
+          {{- end }}
+          {{- if .Values.craftplan.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.craftplan.volumes }}
+      volumes:
+        {{- toYaml .Values.craftplan.volumes | nindent 8 }}
+      {{- end }}
+      {{- if .Values.craftplan.configMap }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "craftplan.configMapName" . }}
+      {{- end }}
+      {{- if .Values.craftplan.secrets }}
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ include "craftplan.secretName" . }}
+      {{- end }}
+      {{- if .Values.craftplan.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "craftplan.pvcName" . }}
+      {{- end }}
+      {{- if .Values.global.costOptimization.resourceLimits.enabled }}
+      resources:
+        limits:
+          cpu: {{ .Values.global.costOptimization.resourceLimits.maxCPU }}
+          memory: {{ .Values.global.costOptimization.resourceLimits.maxMemory }}
+      {{- end }}
+      {{- if .Values.global.security.networkPolicy.enabled }}
+      networkPolicy:
+        enabled: {{ .Values.global.security.networkPolicy.enabled }}
+        {{- if .Values.global.security.networkPolicy.ingress }}
+        ingress:
+          {{- toYaml .Values.global.security.networkPolicy.ingress | nindent 10 }}
+        {{- end }}
+        {{- if .Values.global.security.networkPolicy.egress }}
+        egress:
+          {{- toYaml .Values.global.security.networkPolicy.egress | nindent 10 }}
+        {{- end }}
+      {{- end }}
+{{- end }}

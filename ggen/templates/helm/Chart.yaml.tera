@@ -1,0 +1,98 @@
+---
+description: "Helm chart configuration with comprehensive metadata"
+output_dir: "{{ chart_name }}/Chart.yaml"
+file_extension: ""
+variables:
+  chart_name: "{{ module.name | lower }}"
+  chart_version: "{{ version | default('1.0.0') }}"
+  app_version: "{{ app_version | default('1.0.0') }}"
+  description: "{{ description | default('A2A Erlang Application Helm Chart') }}"
+  keywords: "{{ keywords | default(['erlang', 'a2a', 'distributed']) }}"
+  home: "{{ home | default('https://github.com/a2a/ggen') }}"
+  sources: "{{ sources | default(['https://github.com/a2a/ggen']) }}"
+  maintainers: "{{ maintainers | default([{'name': 'A2A Team', 'email': 'team@a2a.io'}]) }}"
+  icon: "{{ icon | default('https://a2a.io/icon.png') }}"
+  app_version: "{{ app_version | default('1.0.0') }}"
+  kube_version: "{{ kube_version | default('>=1.22.0-0') }}"
+  license: "{{ license | default('Apache-2.0') }}"
+  category: "{{ category | default('applications') }}"
+  changelog: "{{ changelog | default('- Initial release') }}"
+  prerelease: "{{ prerelease | default(false) }}"
+  project_name: "{{ project_name | default(chart_name) }}"
+  screenshot_url: "{{ screenshot_url | default('https://a2a.io/dashboard.png') }}"
+---
+{%- comment -%}
+Helm Chart.yaml with comprehensive metadata and validation
+{%- endcomment -%}
+
+apiVersion: v2
+name: {{ chart_name }}
+version: {{ chart_version }}
+appVersion: {{ app_version }}
+description: {{ description }}
+type: application
+keywords:
+  {% for keyword in keywords %}
+  - {{ keyword }}
+  {% endfor %}
+home: {{ home }}
+sources:
+  {% for source in sources %}
+  - {{ source }}
+  {% endfor %}
+maintainers:
+  {% for maintainer in maintainers %}
+  - name: {{ maintainer.name }}
+    {% if maintainer.email %}
+    email: {{ maintainer.email }}
+    {% endif %}
+  {% endfor %}
+icon: {{ icon }}
+kubeVersion: {{ kube_version }}
+annotations:
+  # Helm chart validation and CI/CD annotations
+  "artifacthub.io/category": "{{ category }}"
+  "artifacthub.io/changes": "{{ changelog }}"
+  "artifacthub.io/crds": ""
+  "artifacthub.io/images": |
+    [
+      {
+        "name": "{{ module.name }}",
+        "image": "{{ module.name }}:{{ app_version }}",
+        "platform": "linux/amd64"
+      }
+    ]
+  "artifacthub.io/license": "{{ license }}"
+  "artifacthub.io/prerelease": "{{ prerelease | lower }}"
+  "artifacthub.io/links": |
+    [
+      {
+        "name": "{{ project_name }}",
+        "url": "{{ home }}"
+      }
+    ]
+  "artifacthub.io/maintainers": |
+    [
+      {% for maintainer in maintainers %}
+      {
+        "name": "{{ maintainer.name }}",
+        {% if maintainer.email %}
+        "email": "{{ maintainer.email }}"
+        {% endif %}
+      }
+      {% if not loop.last %},{% endif %}
+      {% endfor %}
+    ]
+  "artifacthub.io/screenshots": |
+    [
+      {
+        "name": "Dashboard",
+        "url": "{{ screenshot_url }}"
+      }
+    ]
+  "artifacthub.io/readme": |
+    {{ description }}
+
+  # Additional metadata
+  "a2a.io/version": "{{ chart_version }}"
+  "a2a.io/managed-by": "ggen"

@@ -1,0 +1,95 @@
+{
+  "modules": [
+    {
+      "module_name": "a2a_task_store",
+      "behaviour_type": "gen_server",
+      "hotci_enabled": true,
+      "rollback_support": true,
+      "properties": [
+        {
+          "name": "ets_table",
+          "type": "ets:tid()",
+          "default": "undefined"
+        },
+        {
+          "name": "max_size",
+          "type": "integer",
+          "default": "10000"
+        }
+      ],
+      "exported_functions": [
+        {
+          "name": "start_link",
+          "args": []
+        },
+        {
+          "name": "get_task",
+          "args": [
+            "TaskId"
+          ]
+        },
+        {
+          "name": "put_task",
+          "args": [
+            "Task",
+            "Ttl"
+          ]
+        },
+        {
+          "name": "delete_task",
+          "args": [
+            "TaskId"
+          ]
+        }
+      ]
+    },
+    {
+      "module_name": "a2a_task_statem",
+      "behaviour_type": "gen_statem",
+      "hotci_enabled": true,
+      "properties": [
+        {
+          "name": "task_timeout",
+          "type": "integer",
+          "default": "30000"
+        }
+      ],
+      "states": [
+        {
+          "name": "submitted",
+          "hotci_enabled": true,
+          "handlers": [
+            "handle_submitted_event"
+          ]
+        },
+        {
+          "name": "working",
+          "hotci_enabled": true,
+          "handlers": [
+            "handle_working_event"
+          ]
+        },
+        {
+          "name": "completed",
+          "hotci_enabled": true,
+          "handlers": [
+            "handle_completed_event"
+          ]
+        }
+      ],
+      "exported_functions": [
+        {
+          "name": "start_link",
+          "args": [
+            "TaskId",
+            "TaskData"
+          ]
+        },
+        {
+          "name": "get_state",
+          "args": []
+        }
+      ]
+    }
+  ]
+}

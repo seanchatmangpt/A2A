@@ -1,0 +1,96 @@
+---
+description: "Generate rebar3.config file"
+output_dir: "config/"
+file_extension: ".config"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating rebar3.config file
+Usage: Generate from application configuration
+{%- endcomment -%}
+
+{{
+{
+    "erl_opts": [
+        {warn_unused_vars, true},
+        {warn_shadow_vars, true},
+        {warn_unused_import, true},
+        {warn_obsolete_guard, true},
+        {warn_unused_record, true},
+        {warn_deprecated_function, true},
+        {warn_deprecated_guard, true},
+        {warn_unused_macro, true},
+        {warn_missing_spec, all},
+        {warn_untyped_record, true},
+        {warnings_as_errors, false}
+    ],
+    {%- if module.dependencies %}
+    "deps": [
+        {%- for dep in module.dependencies %}
+        {%- if dep.type == "hex" %}
+        {{ dep.name }}, {{ dep.version | default("latest") }}
+        {%- else %}
+        {git, "{{ dep.repo }}", {{ dep.branch | default("master") }}}
+        {%- endif %}
+        {%- endfor %}
+    ],
+    {%- endif %}
+    "shell": [
+        {apps, [{{ module.name }}]}
+    ],
+    "relx": [
+        {release, { {{ module.name }}, "{{ module.version }}" }, [
+            sasl,
+            {{ module.name }}
+        ]},
+        {dev_mode, true},
+        {include_src, false},
+        {include_erts, false},
+        {sys_config, "config/sys.config"},
+        {vm_args, "config/vm.args"},
+        {generate_start_script, true},
+        {extended_start_script, true}
+    ],
+    "profiles": [
+        { "prod", [
+            { include, [relx] },
+            { relx, [
+                { dev_mode, false },
+                { include_erts, true },
+                { include_src, true },
+                { sys_config, "config/sys.config"},
+                { vm_args, "config/vm.args"}
+            ]},
+            { erl_opts, [
+                { debug_info, { strip, true }},
+                { warn_missing_spec, false }
+            ]}
+        ]},
+        { "test", [
+            { deps, [
+                {meck, "0.9.2"}
+            ]},
+            { erl_opts, [ debug_info ] }
+        ]},
+        { "hotci", [
+            { include, [relx] },
+            { deps, [
+                {meck, "0.9.2"}
+            ]},
+            { erl_opts, [
+                { debug_info, { strip, true }}
+            ]}
+        ]}
+    ]
+} | json_encode
+}}
+
+{%- if module.hotci_enabled %}
+%% HotCI configuration
+{%- if module.upgrade_monitor %}
+{ hotci_enabled, true }.
+{%- endif %}
+{%- if module.rollback_support %}
+{ enable_rollback, true }.
+{%- endif %}
+{%- endif %}

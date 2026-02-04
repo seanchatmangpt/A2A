@@ -1,0 +1,440 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# SPARQL queries optimized for template generation with ggen
+CONSTRUCT {
+    # Template Module Patterns
+    ?templateModule a erl:module ;
+        a2a:module_name ?templateName ;
+        a2a:module_type ?templateType ;
+        a2a:template_variables ?templateVars ;
+        a2a:template_conditions ?templateConditions ;
+        a2a:generated_from ?patternSource ;
+        rdfs:label ?templateLabel .
+
+    # Template Infrastructure Patterns
+    ?templateInfra a a2a:cloud_infrastructure ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_parameters ?templateParams ;
+        a2a:template_outputs ?templateOutputs ;
+        a2a:deployment_environment ?env ;
+        rdfs:label ?templateLabel .
+
+    # Template Agent Patterns
+    ?templateAgent a a2a:agent ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_capabilities ?templateCaps ;
+        a2a:template_configuration ?templateConfig ;
+        a2a:runtime_variables ?runtimeVars ;
+        rdfs:label ?templateLabel .
+
+    # Template Task Patterns
+    ?templateTask a a2a:task ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_workflow ?templateWorkflow ;
+        a2a:template_dependencies ?templateDeps ;
+        a2a:execution_environment ?execEnv ;
+        rdfs:label ?templateLabel .
+
+    # Template Service Patterns
+    ?templateService a a2a:http_handler ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_endpoints ?templateEndpoints ;
+        a2a:template_auth ?templateAuth ;
+        a2a:template_middleware ?templateMiddleware ;
+        rdfs:label ?templateLabel .
+
+    # Template Configuration Patterns
+    ?templateConfig a a2a:config ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_settings ?templateSettings ;
+        a2a:template_secrets ?templateSecrets ;
+        a2a:template_validation ?templateValidation ;
+        rdfs:label ?templateLabel .
+
+    # Template Record Patterns
+    ?templateRecord a a2a:record ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_fields ?templateFields ;
+        a2a:template_constraints ?templateConstraints ;
+        rdfs:label ?templateLabel .
+
+    # Template Workflow Patterns
+    ?templateWorkflow a a2a:workflow ;
+        a2a:template_name ?templateName ;
+        a2a:template_type ?templateType ;
+        a2a:template_steps ?templateSteps ;
+        a2a:template_parallel_steps ?templateParallel ;
+        a2a:template_error_handling ?templateError ;
+        rdfs:label ?templateLabel .
+}
+WHERE {
+    # Template Module Patterns
+    # Generate Erlang module templates with variables and conditions
+    {
+        SELECT ?module ?templateName ?templateType ?templateVars ?templateConditions ?patternSource ?templateLabel
+        WHERE {
+            ?module a erl:module ;
+                rdfs:subClassOf* ?behaviour .
+            ?behaviour a erl:behaviour .
+
+            # Template name from module name
+            OPTIONAL {
+                ?module rdfs:label ?moduleLabel .
+            }
+            BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?templateName)
+
+            # Template type based on behaviour
+            OPTIONAL {
+                ?module a ?behaviour .
+                ?behaviour rdfs:label ?behaviourLabel .
+            }
+            BIND(
+                IF(BOUND(?behaviourLabel) && STRSTARTS(?behaviourLabel, "Gen "),
+                   "gen_server_template",
+                   IF(BOUND(?behaviourLabel) && STRSTARTS(?behaviourLabel, "Gen Statem"),
+                      "gen_statem_template",
+                      IF(BOUND(?behaviourLabel) && STRSTARTS(?behaviourLabel, "Supervisor"),
+                         "supervisor_template",
+                         IF(BOUND(?behaviourLabel) && STRSTARTS(?behaviourLabel, "Cowboy"),
+                            "cowboy_template",
+                            "general_module_template")))))
+                AS ?templateType
+            )
+
+            # Template variables based on exported functions
+            OPTIONAL {
+                ?module a2a:exported_functions ?exports .
+            }
+            BIND(COALESCE(?exports, "start_link, init, handle_call, handle_cast, handle_info, terminate") AS ?templateVars)
+
+            # Template conditions based on HotCI properties
+            OPTIONAL {
+                ?module a2a:hotci_enabled ?hotciEnabled .
+                ?module a2a:rollback_support ?rollbackSupport .
+                ?module a2a:upgrade_monitor ?upgradeMonitor .
+            }
+            BIND(
+                CONCAT(
+                    IF(BOUND(?hotciEnabled) && ?hotciEnabled = true, "hotci_enabled=true&", ""),
+                    IF(BOUND(?rollbackSupport) && ?rollbackSupport = true, "rollback_supported=true&", ""),
+                    IF(BOUND(?upgradeMonitor) && ?upgradeMonitor = true, "upgrade_monitor=true&", ""))
+                AS ?templateConditions
+            )
+
+            # Pattern source
+            BIND(CONCAT("behaviour:", ?templateType) AS ?patternSource)
+
+            # Template label
+            OPTIONAL {
+                ?module rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Infrastructure Patterns
+    # Generate infrastructure templates with deployment environments
+    {
+        SELECT ?infra ?templateName ?templateType ?templateParams ?templateOutputs ?env ?templateLabel
+        WHERE {
+            ?infra a a2a:cloud_infrastructure ;
+                a ?infraType .
+            FILTER(?infraType IN (a2a:deployment, a2a:kubernetes_config))
+
+            # Template name from infrastructure type
+            BIND(
+                IF(?infraType = a2a:deployment,
+                   "deployment_template",
+                   IF(?infraType = a2a:kubernetes_config,
+                      "k8s_template",
+                      "infra_template")))
+                AS ?templateName
+
+            # Template type
+            BIND(?infraType AS ?templateType)
+
+            # Template parameters
+            OPTIONAL {
+                ?infra a2a:replicas ?replicas .
+            }
+            BIND(COALESCE(?replicas, "2") AS ?templateParams)
+
+            # Template outputs
+            BIND("deployment_name, service_name, ingress_url" AS ?templateOutputs)
+
+            # Environment based on resource requirements
+            OPTIONAL {
+                ?infra a2a:resource_request_cpu ?cpuReq .
+                ?infra a2a:resource_request_memory ?memReq .
+            }
+            BIND(
+                IF(BOUND(?cpuReq) && STR(?cpuReq) >= "500m",
+                   "production",
+                   IF(BOUND(?cpuReq) && STR(?cpuReq) >= "200m",
+                      "staging",
+                      "development")))
+                AS ?env
+
+            # Template label
+            OPTIONAL {
+                ?infra rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Agent Patterns
+    # Generate agent templates with runtime variables
+    {
+        SELECT ?agent ?templateName ?templateType ?templateCaps ?templateConfig ?runtimeVars ?templateLabel
+        WHERE {
+            ?agent a a2a:agent .
+
+            # Template name from agent properties
+            OPTIONAL {
+                ?agent a2a:agent_name ?agentName .
+            }
+            BIND(COALESCE(?agentName, "agent_template") AS ?templateName)
+
+            # Template type based on capabilities
+            OPTIONAL {
+                ?agent a2a:agent_capabilities ?caps .
+            }
+            BIND(
+                IF(BOUND(?caps) && REGEX(STR(?caps), "database|storage", "i"),
+                   "database_agent_template",
+                   IF(BOUND(?caps) && REGEX(STR(?caps), "network|communication", "i"),
+                      "network_agent_template",
+                      IF(BOUND(?caps) && REGEX(STR(?caps), "compute|processing", "i"),
+                         "compute_agent_template",
+                         "general_agent_template"))))
+                AS ?templateType
+
+            # Template capabilities
+            BIND(COALESCE(?caps, "general,persistence,communication") AS ?templateCaps)
+
+            # Template configuration
+            BIND("config_file=/etc/agent.conf, log_level=info" AS ?templateConfig)
+
+            # Runtime variables
+            BIND("agent_id, node_name, cluster_nodes, storage_path" AS ?runtimeVars)
+
+            # Template label
+            OPTIONAL {
+                ?agent rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Task Patterns
+    # Generate task templates with workflows
+    {
+        SELECT ?task ?templateName ?templateType ?templateWorkflow ?templateDeps ?execEnv ?templateLabel
+        WHERE {
+            ?task a a2a:task .
+
+            # Template name from task type
+            OPTIONAL {
+                ?task a2a:task_type ?taskType .
+            }
+            BIND(COALESCE(?taskType, "general_task") AS ?templateName)
+
+            # Template type
+            BIND(CONCAT("task_", ?taskType) AS ?templateType)
+
+            # Template workflow
+            OPTIONAL {
+                ?task a2a:workflow ?workflow .
+            }
+            BIND(COALESCE(?workflow, "linear_workflow") AS ?templateWorkflow)
+
+            # Template dependencies
+            BIND("input_validation, authentication, resource_allocation" AS ?templateDeps)
+
+            # Execution environment
+            OPTIONAL {
+                ?task a2a:execution_environment ?env .
+            }
+            BIND(COALESCE(?env, "default") AS ?execEnv)
+
+            # Template label
+            OPTIONAL {
+                ?task rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Service Patterns
+    # Generate HTTP handler templates
+    {
+        SELECT ?service ?templateName ?templateType ?templateEndpoints ?templateAuth ?templateMiddleware ?templateLabel
+        WHERE {
+            ?service a a2a:http_handler .
+
+            # Template name from service type
+            OPTIONAL {
+                ?service a ?handlerType .
+                ?handlerType rdfs:label ?handlerLabel .
+            }
+            BIND(
+                IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "JSON-RPC"),
+                   "json_rpc_service",
+                   IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "Health Check"),
+                      "health_check_service",
+                      IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "SSE"),
+                         "sse_service",
+                         "http_service"))))
+                AS ?templateName
+
+            # Template type
+            BIND(CONCAT("service_", ?templateName) AS ?templateType)
+
+            # Template endpoints
+            BIND(
+                IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "JSON-RPC"),
+                   "/rpc, /health, /status",
+                   IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "Health Check"),
+                      "/health, /ready",
+                      IF(BOUND(?handlerLabel) && STRSTARTS(?handlerLabel, "SSE"),
+                         "/events, /subscribe",
+                         "/api, /v1"))))
+                AS ?templateEndpoints
+
+            # Template authentication
+            BIND("jwt_bearer, api_key, oauth2" AS ?templateAuth)
+
+            # Template middleware
+            BIND("cors, rate_limit, logging" AS ?templateMiddleware)
+
+            # Template label
+            OPTIONAL {
+                ?service rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Configuration Patterns
+    # Generate configuration templates with validation
+    {
+        SELECT ?config ?templateName ?templateType ?templateSettings ?templateSecrets ?templateValidation ?templateLabel
+        WHERE {
+            ?config a a2a:config .
+
+            # Template name
+            BIND("application_config" AS ?templateName)
+
+            # Template type
+            BIND("configuration_template" AS ?templateType)
+
+            # Template settings
+            OPTIONAL {
+                ?config a2a:http_port ?port .
+                ?config a2a:log_level ?level .
+                ?config a2a:enable_sse ?sse .
+                ?config a2a:enable_metrics ?metrics .
+            }
+            BIND(
+                CONCAT(
+                    "http_port=", COALESCE(?port, "8080"), "&",
+                    "log_level=", COALESCE(?level, "info"), "&",
+                    "enable_sse=", COALESCE(?sse, "false"), "&",
+                    "enable_metrics=", COALESCE(?metrics, "true")))
+                AS ?templateSettings
+
+            # Template secrets
+            BIND("database_password, api_key, jwt_secret" AS ?templateSecrets)
+
+            # Template validation
+            BIND("port_range, log_levels, boolean_flags" AS ?templateValidation)
+
+            # Template label
+            OPTIONAL {
+                ?config rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Record Patterns
+    # Generate record templates with constraints
+    {
+        SELECT ?record ?templateName ?templateType ?templateFields ?templateConstraints ?templateLabel
+        WHERE {
+            ?record a a2a:record .
+
+            # Template name
+            OPTIONAL {
+                ?record rdfs:label ?recordLabel .
+            }
+            BIND(COALESCE(?recordLabel, "record_template") AS ?templateName)
+
+            # Template type
+            BIND("erlang_record_template" AS ?templateType)
+
+            # Template fields
+            OPTIONAL {
+                ?record a2a:record_field ?field .
+            }
+            BIND(COALESCE(?field, "id, name, metadata") AS ?templateFields)
+
+            # Template constraints
+            BIND("required_fields, data_types, validation_rules" AS ?templateConstraints)
+
+            # Template label
+            OPTIONAL {
+                ?record rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Template Workflow Patterns
+    # Generate workflow templates with parallel execution
+    {
+        SELECT ?workflow ?templateName ?templateType ?templateSteps ?templateParallel ?templateError ?templateLabel
+        WHERE {
+            ?workflow a a2a:workflow .
+
+            # Template name
+            OPTIONAL {
+                ?workflow rdfs:label ?workflowLabel .
+            }
+            BIND(COALESCE(?workflowLabel, "workflow_template") AS ?templateName)
+
+            # Template type
+            BIND("workflow_template" AS ?templateType)
+
+            # Template steps
+            OPTIONAL {
+                ?workflow a2a:contains_step ?step .
+            }
+            BIND(COALESCE(?step, "step1, step2, step3") AS ?templateSteps)
+
+            # Template parallel steps
+            BIND("parallel_step1, parallel_step2" AS ?templateParallel)
+
+            # Template error handling
+            BIND("retry_policy, fallback_action, error_notification" AS ?templateError)
+
+            # Template label
+            OPTIONAL {
+                ?workflow rdfs:label ?templateLabel .
+            }
+        }
+        LIMIT 100
+    }
+}

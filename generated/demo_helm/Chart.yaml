@@ -1,0 +1,5 @@
+apiVersion: v2
+name: a2a-erl
+version: 0.2.0
+appVersion: 0.2.0
+description: A2A Erlang Application

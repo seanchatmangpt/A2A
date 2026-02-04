@@ -1,0 +1,43 @@
+{{- if .Values.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "elrmcp-bridge.serviceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elrmcp-bridge.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- range $key, $port := .Values.service.ports }}
+    {{- if $port.enabled }}
+    - name: {{ $key }}
+      port: {{ $port.port }}
+      targetPort: {{ $port.targetPort | default $port.port }}
+      protocol: {{ $port.protocol | default "TCP" }}
+      {{- if $port.nodePort }}
+      nodePort: {{ $port.nodePort }}
+      {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if not (or .Values.metrics.enabled .Values.monitoring.prometheus.enabled) }}
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "elrmcp-bridge.selectorLabels" . | nindent 4 }}
+  {{- with .Values.service.sessionAffinity }}
+  sessionAffinity: {{ .type | default "None" }}
+  {{- if .clientIP }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ .clientIP.timeoutSeconds }}
+  {{- end }}
+  {{- end }}
+{{- end }}

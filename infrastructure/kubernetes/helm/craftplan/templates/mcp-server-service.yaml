@@ -1,0 +1,27 @@
+{{- if .Values.mcpServer.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-mcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: mcp-server
+  annotations:
+    {{- if .Values.mcpServer.annotations }}
+    {{- toYaml .Values.mcpServer.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.mcpServer.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.mcpServer.service.port }}
+      targetPort: 8090
+      {{- if .Values.mcpServer.service.nodePort }}
+      nodePort: {{ .Values.mcpServer.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: mcp-server
+{{- end }}

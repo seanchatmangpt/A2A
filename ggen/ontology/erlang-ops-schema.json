@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Erlang OTP Pattern Schema",
+  "description": "JSON Schema representation of the Erlang OTP ontology for easy integration",
+  "type": "object",
+  "definitions": {
+    "Component": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"type": "string", "enum": ["component", "behaviour", "module"]},
+        "module_name": {"type": "string"},
+        "description": {"type": "string"}
+      },
+      "required": ["id", "type"]
+    },
+    "Behaviour": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "behaviour_type": {"type": "string"},
+        "application_name": {"type": "string"},
+        "version": {"type": "string"},
+        "hotci_enabled": {"type": "boolean"}
+      }
+    },
+    "GenServer": {
+      "allOf": [{"$ref": "#/definitions/Behaviour"}],
+      "type": "object",
+      "properties": {
+        "type": {"const": "gen_server"}
+      }
+    },
+    "GenStatem": {
+      "allOf": [{"$ref": "#/definitions/Behaviour"}],
+      "type": "object",
+      "properties": {
+        "type": {"const": "gen_statem"}
+      }
+    },
+    "Supervisor": {
+      "allOf": [{"$ref": "#/definitions/Behaviour"}],
+      "type": "object",
+      "properties": {
+        "type": {"const": "supervisor"},
+        "supervisor_strategy": {
+          "type": "string",
+          "enum": ["one_for_one", "one_for_all", "rest_for_one", "simple_one_for_one"]
+        },
+        "supervisor_intensity": {"type": "integer", "minimum": 1, "maximum": 100},
+        "supervisor_period": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "child_specs": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/Component"}
+        }
+      },
+      "required": ["supervisor_strategy", "supervisor_intensity", "supervisor_period"]
+    },
+    "ETS Table": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "ets_table_name": {"type": "string"},
+        "ets_table_type": {
+          "type": "string",
+          "enum": ["set", "bag", "ordered_set", "private", "public", "named"]
+        },
+        "ets_table_key_type": {"type": "string"},
+        "ets_table_value_type": {"type": "string"},
+        "ets_table_options": {"type": "string"},
+        "ets_table_size": {"type": "integer", "minimum": 1}
+      },
+      "required": ["ets_table_name", "ets_table_type"]
+    },
+    "HotCIModule": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "type": {"const": "hotci_module"},
+        "hotci_enabled": {"type": "boolean"},
+        "version_compatibility": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+        },
+        "rollback_supported": {"type": "boolean"},
+        "upgrade_monitoring": {"type": "boolean"}
+      },
+      "required": ["hotci_enabled", "version_compatibility"]
+    },
+    "MetricCollector": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "metric_name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "metric_type": {
+          "type": "string",
+          "enum": ["counter", "gauge", "histogram", "summary"]
+        },
+        "collection_interval": {"type": "integer", "minimum": 100},
+        "monitors": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/Component"}
+        }
+      },
+      "required": ["metric_name", "metric_type"]
+    },
+    "ErrorHandler": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "error_type": {
+          "type": "string",
+          "enum": ["runtime_error", "timeout", "memory_error", "network_error"]
+        },
+        "max_retries": {"type": "integer", "minimum": 0},
+        "retry_delay": {"type": "integer", "minimum": 0},
+        "backoff_type": {
+          "type": "string",
+          "enum": ["fixed", "exponential", "linear"]
+        }
+      }
+    },
+    "Protocol": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "protocol_type": {
+          "type": "string",
+          "enum": ["request_reply", "cast", "forward", "broadcast", "queue", "pubsub"]
+        },
+        "message_format": {"type": "string"},
+        "timeout": {"type": "integer", "minimum": 0},
+        "sends_to": {"$ref": "#/definitions/Component"},
+        "receives_from": {"$ref": "#/definitions/Component"}
+      },
+      "required": ["protocol_type"]
+    },
+    "AlertHandler": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "metric_name": {"type": "string"},
+        "alert_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "alert_level": {
+          "type": "string",
+          "enum": ["info", "warning", "error", "critical"]
+        }
+      },
+      "required": ["metric_name", "alert_threshold", "alert_level"]
+    },
+    "LoggingHandler": {
+      "allOf": [{"$ref": "#/definitions/Component"}],
+      "type": "object",
+      "properties": {
+        "log_level": {
+          "type": "string",
+          "enum": ["emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"]
+        },
+        "log_format": {
+          "type": "string",
+          "enum": ["text", "json", "syslog"]
+        },
+        "log_rotation": {"type": "integer", "minimum": 0},
+        "log_retention": {"type": "integer", "minimum": 0}
+      },
+      "required": ["log_level", "log_format"]
+    }
+  },
+  "type": "object",
+  "properties": {
+    "components": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/definitions/Component"},
+          {"$ref": "#/definitions/Behaviour"},
+          {"$ref": "#/definitions/GenServer"},
+          {"$ref": "#/definitions/GenStatem"},
+          {"$ref": "#/definitions/Supervisor"},
+          {"$ref": "#/definitions/ETS Table"},
+          {"$ref": "#/definitions/HotCIModule"},
+          {"$ref": "#/definitions/MetricCollector"},
+          {"$ref": "#/definitions/ErrorHandler"},
+          {"$ref": "#/definitions/Protocol"},
+          {"$ref": "#/definitions/AlertHandler"},
+          {"$ref": "#/definitions/LoggingHandler"}
+        ]
+      }
+    }
+  }
+}

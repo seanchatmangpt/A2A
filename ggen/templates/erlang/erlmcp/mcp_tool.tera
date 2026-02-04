@@ -1,0 +1,295 @@
+-module({{ module_name }}_tool).
+-behaviour(gen_server).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/1, execute/2, get_status/0, stop/0]).
+-export([handle_call/3, handle_cast/2, handle_info/2, init/1, terminate/2, code_change/3]).
+
+%%====================================================================
+%% Records and Macros
+%%====================================================================
+
+-record(state, {
+    name :: string(),
+    description :: string(),
+    handler :: atom(),
+    input_schema :: map(),
+    output_schema :: map(),
+    timeout :: pos_integer(),
+    max_retries :: pos_integer(),
+    enabled :: boolean(),
+    execution_count :: integer(),
+    last_execution :: integer() | undefined,
+    errors :: map()  #{error_type() => integer()}
+}).
+
+-define(SERVER, ?MODULE).
+-define(DEFAULT_TIMEOUT, {{ default_timeout }}).
+-define(MAX_RETRIES, {{ max_retries }}).
+
+%%====================================================================
+%% Type Definitions
+%%====================================================================
+
+-type error_type() :: timeout | validation | execution | unknown.
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link(ToolConfig) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, ToolConfig, []).
+
+execute(Args, Options) ->
+    gen_server:call(?SERVER, {execute, Args, Options}, ?DEFAULT_TIMEOUT).
+
+get_status() ->
+    gen_server:call(?SERVER, get_status).
+
+stop() ->
+    gen_server:call(?SERVER, stop).
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(ToolConfig) ->
+    io:format("Initializing MCP tool: ~p~n", [ToolConfig#tool_config.name]),
+
+    State = #state{
+        name = ToolConfig#tool_config.name,
+        description = ToolConfig#tool_config.description,
+        handler = ToolConfig#tool_config.handler,
+        input_schema = ToolConfig#tool_config.input_schema,
+        output_schema = ToolConfig#tool_config.output_schema,
+        timeout = ToolConfig#tool_config.timeout,
+        max_retries = ToolConfig#tool_config.max_retries,
+        enabled = ToolConfig#tool_config.enabled,
+        execution_count = 0,
+        errors = #{}
+    },
+
+    {ok, State}.
+
+handle_call({execute, Args, Options}, _From, State) ->
+    case State#state.enabled of
+        false ->
+            {reply, {error, tool_disabled}, State};
+        true ->
+            case validate_input(Args, State#state.input_schema) of
+                valid ->
+                    Result = execute_with_retry(Args, State#state.max_retries, State),
+                    case Result of
+                        {ok, _} ->
+                            NewState = update_execution_metrics(State, success),
+                            {reply, Result, NewState};
+                        {error, _} = Error ->
+                            NewState = update_execution_metrics(State, Error),
+                            {reply, Error, NewState}
+                    end;
+                {error, Reason} ->
+                    NewState = update_execution_metrics(State, {validation, Reason}),
+                    {reply, {error, Reason}, NewState}
+            end
+    end;
+
+handle_call(get_status, _From, State) ->
+    Status = #{
+        name => State#state.name,
+        description => State#state.description,
+        enabled => State#state.enabled,
+        execution_count => State#state.execution_count,
+        last_execution => State#state.last_execution,
+        error_counts => State#state.errors
+    },
+    {reply, {ok, Status}, State};
+
+handle_call(stop, _From, State) ->
+    {stop, normal, stopped, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    io:format("MCP tool terminating: ~p~n", [?MODULE]),
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+validate_input(Args, Schema) ->
+    % Simple validation - in real implementation, use proper JSON schema validation
+    case is_map(Args) of
+        true ->
+            case maps:size(Args) > 0 of
+                true -> valid;
+                false -> {error, empty_args}
+            end;
+        false ->
+            {error, invalid_args}
+    end.
+
+execute_with_retry(Args, 0, State) ->
+    execute_tool(Args, State);
+
+execute_with_retry(Args, Retries, State) ->
+    Result = execute_tool(Args, State),
+    case Result of
+        {ok, _} -> Result;
+        {error, timeout} when Retries > 0 ->
+            timer:sleep(1000),  % Wait before retry
+            execute_with_retry(Args, Retries - 1, State);
+        {error, _} = Error -> Error
+    end.
+
+execute_tool(Args, State) ->
+    StartTime = os:system_time(millisecond),
+
+    % Simulate tool execution based on handler
+    HandlerResult = case State#state.handler of
+        file_system_handler ->
+            execute_file_tool(Args);
+        math_handler ->
+            execute_math_tool(Args);
+        text_handler ->
+            execute_text_tool(Args);
+        _ ->
+            {error, unknown_handler}
+    end,
+
+    EndTime = os:system_time(millisecond),
+    Duration = EndTime - StartTime,
+
+    case HandlerResult of
+        {ok, Result} ->
+            validate_output(Result, State#state.output_schema);
+        {error, _} = Error ->
+            Error
+    end.
+
+execute_file_tool(Args) ->
+    case Args of
+        #{<<"operation">> := Op} when is_binary(Op) ->
+            case Op of
+                <<"read">> ->
+                    #{<<"path">> := Path} = Args,
+                    case file:read_file(Path) of
+                        {ok, Content} -> {ok, #{<<"content">> => Content, <<"path">> => Path}};
+                        {error, _} = Error -> Error
+                    end;
+                <<"write">> ->
+                    #{<<"path">> := Path, <<"content">> := Content} = Args,
+                    case file:write_file(Path, Content) of
+                        ok -> {ok, #{<<"path">> => Path, <<"status">> => <<"written">>}};
+                        {error, _} = Error -> Error
+                    end;
+                _ ->
+                    {error, {invalid_operation, Op}}
+            end;
+        _ ->
+            {error, invalid_args}
+    end.
+
+execute_math_tool(Args) ->
+    case Args of
+        #{<<"operation">> := Op, <<"a">> := A, <<"b">> := B} when is_number(A), is_number(B) ->
+            Result = case Op of
+                <<"add">> -> A + B;
+                <<"subtract">> -> A - B;
+                <<"multiply">> -> A * B;
+                <<"divide">> -> A / B;
+                _ -> {error, {invalid_operation, Op}}
+            end,
+            case Result of
+                {error, _} = Error -> Error;
+                _ -> {ok, #{<<"result">> => Result}}
+            end;
+        _ ->
+            {error, invalid_args}
+    end.
+
+execute_text_tool(Args) ->
+    case Args of
+        #{<<"operation">> := Op, <<"text">> := Text} when is_binary(Text) ->
+            case Op of
+                <<"uppercase">> -> {ok, #{<<"result">> => string:uppercase(binary_to_list(Text))}};
+                <<"lowercase">> -> {ok, #{<<"result">> => string:lowercase(binary_to_list(Text))}};
+                <<"length">> -> {ok, #{<<"result">> => byte_size(Text)}};
+                _ -> {error, {invalid_operation, Op}}
+            end;
+        _ ->
+            {error, invalid_args}
+    end.
+
+validate_output(Result, Schema) ->
+    % Simple validation - in real implementation, use proper JSON schema validation
+    case is_map(Result) of
+        true ->
+            case maps:size(Result) > 0 of
+                true -> {ok, Result};
+                false -> {error, empty_result}
+            end;
+        false ->
+            {error, invalid_output}
+    end.
+
+update_execution_metrics(State, Result) ->
+    ExecutionCount = State#state.execution_count + 1,
+    LastExecution = os:system_time(millisecond),
+
+    Errors = case Result of
+        {error, {Type, _}} when is_atom(Type) ->
+            ErrorCount = maps:get(Type, State#state.errors, 0) + 1,
+            State#state.errors#{Type => ErrorCount};
+        {error, Type} when is_atom(Type) ->
+            ErrorCount = maps:get(Type, State#state.errors, 0) + 1,
+            State#state.errors#{Type => ErrorCount};
+        _ ->
+            State#state.errors
+    end,
+
+    State#state{
+        execution_count = ExecutionCount,
+        last_execution = LastExecution,
+        errors = Errors
+    }.
+
+%%====================================================================
+%% HotCI Support Functions
+%%====================================================================
+
+-ifdef(HOTCI).
+hotci_status() ->
+    case whereis(?SERVER) of
+        undefined -> not_running;
+        Pid -> {running, Pid, erlang:process_info(Pid, memory)}
+    end.
+
+hotci_upgrade(NewModule) ->
+    gen_server:call(?SERVER, {hotci_upgrade, NewModule}).
+
+handle_call({hotci_upgrade, NewModule}, _From, State) ->
+    % Perform hot code upgrade for tool
+    io:format("Upgrading tool to ~p~n", [NewModule]),
+    case code:ensure_loaded(NewModule) of
+        {module, NewModule} ->
+            % Update handler if needed
+            NewHandler = case NewModule of
+                ?MODULE -> State#state.handler;
+                _ -> NewModule
+            end,
+            {reply, {ok, upgrading}, State#state{handler = NewHandler}};
+        {error, _} = Error ->
+            {reply, Error, State}
+    end.
+-endif.

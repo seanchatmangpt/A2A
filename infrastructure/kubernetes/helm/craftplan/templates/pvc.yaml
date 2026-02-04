@@ -1,0 +1,205 @@
+{{- if .Values.postgres.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-postgres
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size | default "10Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.redis.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-redis
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size | default "5Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.minio.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size | default "50Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.craftplan.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-craftplan
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+    app.kubernetes.io/component: craftplan
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.craftplan.persistence.size | default "10Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.mcpServer.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-mcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: mcp-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.mcpServer.persistence.size | default "5Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.a2aAgent.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-a2a
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: a2a-agent
+    app.kubernetes.io/component: a2a-agent
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.a2aAgent.persistence.size | default "5Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.elrmcp.persistence.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-elrmcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+    app.kubernetes.io/component: elrmcp
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.elrmcp.persistence.size | default "5Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-prometheus
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: prometheus
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.monitoring.prometheus.persistence.size | default "20Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.grafana.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: grafana
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.monitoring.grafana.persistence.size | default "10Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.loki.enabled -}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "craftplan.pvcName" . }}-loki
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/component: loki
+spec:
+  accessModes:
+    - {{ .Values.storage.accessModes | first | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.monitoring.loki.persistence.size | default "30Gi" }}
+  storageClassName: {{ .Values.storage.class | default "standard" }}
+{{- end }}
+{{- end }}

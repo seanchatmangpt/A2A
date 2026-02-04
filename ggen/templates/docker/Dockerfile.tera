@@ -1,0 +1,74 @@
+---
+description: "Generate Dockerfile for Erlang application"
+output_dir: "Dockerfile"
+file_extension: ""
+dependencies: ["extract-docker-config.sparql"]
+---
+{%- comment -%}
+Template for generating Dockerfile for Erlang application
+Usage: Generate from Docker configuration
+{%- endcomment -%}
+
+FROM {{ base_image | default("erlang:27-alpine") }} AS builder
+
+{%- if module.hotci_enabled %}
+# Install HotCI dependencies
+RUN apk add --no-cache git make curl
+{%- endif %}
+
+# Set working directory
+WORKDIR /app
+
+# Copy rebar3 and dependencies
+COPY rebar3 /usr/local/bin/
+COPY rebar.config.lock .
+COPY rebar.config .
+COPY {%- if module.hotci_enabled %}src_hotci {%- else %}src {%- endif %} ./src
+COPY include ./include
+COPY config ./config
+
+# Build the application
+{%- if module.hotci_enabled %}
+RUN rebar3 as hotci compile
+{%- else %}
+RUN rebar3 compile
+{%- endif %}
+
+# Production stage
+FROM {{ base_image | default("erlang:27-alpine") }}
+
+# Create app user
+RUN addgroup -g 1001 -S appuser && \
+    adduser -S appuser -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy built application from builder stage
+COPY --from=builder --chown=appuser:appuser /app/_build/prod/rel/{{ module.name }} /app
+COPY --from=builder --chown=appuser:appuser /app/config /app/config
+
+# Create necessary directories
+RUN chown -R appuser:appuser /app && \
+    mkdir -p /app/log /app/data
+
+# Switch to app user
+USER appuser
+
+{%- if module.hotci_enabled %}
+# HotCI specific setup
+RUN mkdir -p /app/hotci_data
+{%- endif %}
+
+# Expose port
+EXPOSE {{ port | default(8080) }}
+
+# Health check
+HEALTHCHECK --interval={{ health_check_interval | default("30s") }} \
+    --timeout={{ health_check_timeout | default("5s") }} \
+    --start-period={{ health_check_start_period | default("5s") }} \
+    --retries={{ health_check_retries | default(3) }} \
+    CMD curl -f http://localhost:{{ port | default(8080) }}/health || exit 1
+
+# Start the application
+CMD ["/app/bin/{{ module.name }}", "foreground"]

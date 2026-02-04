@@ -1,0 +1,16 @@
+{
+  "_comment": "Local overrides for configuration",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "logging": {
+    "level": "DEBUG",
+    "file": null
+  },
+  "custom_config": {
+    "local_development": true,
+    "skip_remote_checks": true,
+    "mock_external_services": true
+  }
+}

@@ -1,0 +1,35 @@
+{application, craftplan_a2a,
+ [{description, "Craftplan A2A Agent - Agent-to-Agent protocol for Craftplan ERP"},
+  {vsn, "1.0.0"},
+  {registered, [craftplan_a2a_sup,
+                craftplan_a2a_server,
+                craftplan_task_sup,
+                craftplan_task_handler,
+                craftplan_agent_card,
+                craftplan_sse_handler]},
+  {mod, {craftplan_a2a_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    cowboy,
+    jiffy,
+    logger]},
+  {env,[
+    {port, 8080},
+    {mcp_server_url, "http://localhost:8090/mcp"},
+    {agent_id, "craftplan-erp-agent"}
+  ]},
+  {modules, [
+    craftplan_a2a_app,
+    craftplan_a2a_sup,
+    craftplan_a2a_server,
+    craftplan_task_sup,
+    craftplan_task_handler,
+    craftplan_agent_card,
+    craftplan_sse_handler
+  ]},
+  {licenses, ["MIT"]},
+  {links, [
+    {"GitHub", "https://github.com/a2a/craftplan"}
+  ]}
+ ]}.

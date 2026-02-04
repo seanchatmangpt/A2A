@@ -1,0 +1,22 @@
+apiVersion: v2
+name: craftplan-integration
+description: A Helm chart for Craftplan MCP + A2A + elrmcp integration
+type: application
+version: 0.1.0
+appVersion: 1.0.0
+home: https://github.com/puemos/a2a
+sources:
+  - https://github.com/puemos/a2a
+keywords:
+  - craftplan
+  - mcp
+  - a2a
+  - elrmcp
+  - erlang
+  - agent
+maintainers:
+  - name: Craftplan Team
+    email: dev@craftplan.app
+annotations:
+  category: AI/ML
+  ordering: "1"

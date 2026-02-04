@@ -1,0 +1,63 @@
+{{- if .Values.a2aAgent.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.configMapName" . }}-a2a
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: a2a-agent
+data:
+  config.json: |
+    {
+      "agent": {
+        "id": "{{ .Values.a2aAgent.env.AGENT_ID }}",
+        "name": "{{ .Values.a2aAgent.env.AGENT_NAME }}",
+        "version": "{{ .Values.a2aAgent.env.AGENT_VERSION }}"
+      },
+      "server": {
+        "host": "{{ .Values.a2aAgent.env.HOST }}",
+        "port": {{ .Values.a2aAgent.env.PORT }},
+        "log_level": "{{ .Values.a2aAgent.env.LOG_LEVEL }}"
+      },
+      "mcp": {
+        "server_url": "{{ .Values.a2aAgent.env.MCP_SERVER_URL }}",
+        "server_token": "{{ .Values.a2aAgent.env.MCP_SERVER_TOKEN }}"
+      },
+      "features": {
+        "health_check": {{ .Values.a2aAgent.env.ENABLE_HEALTH_CHECK | default "true" }},
+        "metrics": {{ .Values.a2aAgent.env.ENABLE_METRICS | default "true" }},
+        "tracing": {{ .Values.a2aAgent.env.ENABLE_TRACING | default "true" }}
+      }
+    }
+  logging.yml: |
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      json:
+        format: "%(asctime)s %(name)s %(levelname)s %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: json
+        stream: ext://sys.stdout
+    loggers:
+      a2a_agent:
+        level: {{ .Values.a2aAgent.env.LOG_LEVEL | default "INFO" }}
+        handlers: [console]
+        propagate: false
+    root:
+      level: {{ .Values.a2aAgent.env.LOG_LEVEL | default "INFO" }}
+      handlers: [console]
+  monitoring.yml: |
+    version: 1
+    services:
+      prometheus:
+        enabled: {{ .Values.global.monitoring.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.prometheus.port | default 9090 }}
+        metrics_path: /metrics
+      mcp:
+        enabled: true
+        server_url: "{{ .Values.a2aAgent.env.MCP_SERVER_URL }}"
+        server_token: "{{ .Values.a2aAgent.env.MCP_SERVER_TOKEN }}"
+{{- end }}

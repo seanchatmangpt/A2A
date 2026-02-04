@@ -1,0 +1,35 @@
+## elrmcp Bridge VM Arguments
+
+## Kernel
++K true
++zdbbl 128000
+
+## Process Limits
++P 1048576
++A 64
+
+## Scheduling
++S 128
++Q 65536
+
+## Memory
+-heap_type optimal
++hms 64 +hmsz 64 +hmtvm 128
++hmbsz 32
+
+## ETS
++ets [file_table {read_concurrency true}]
+
+## Logging
+-kernel logger '[{handler, default, logger_std_h,
+                  #{formatter => {logger_formatter,
+                                 #{single_line => true,
+                                   legacy_header => false}}},
+                  #{level => info}]}]'
+
+## Crash Dump
+-crash_dump /tmp/elrmcp_bridge.crashdump
+
+## Heart
+-heartbeat_interval 30
+-heartbeat_timeout 60

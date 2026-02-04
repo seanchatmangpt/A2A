@@ -1,0 +1,260 @@
+---
+description: "Production-ready Kubernetes deployment with HPA and security best practices"
+output_dir: "k8s"
+file_extension: ".yaml"
+variables:
+  app_name: "{{ module.name }}"
+  app_port: "{{ port | default(8080) }}"
+  app_image: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  replicas: "{{ replicas | default(3) }}"
+  image_pull_policy: "{{ image_pull_policy | default('IfNotPresent') }}"
+  hotci_enabled: "{{ module.hotci_enabled | default(false) }}"
+  cpu_request: "{{ cpu_request | default('100m') }}"
+  cpu_limit: "{{ cpu_limit | default('500m') }}"
+  memory_request: "{{ memory_request | default('128Mi') }}"
+  memory_limit: "{{ memory_limit | default('512Mi') }}"
+  service_account_name: "{{ service_account_name | default('default') }}"
+  security_context_enabled: "{{ security_context_enabled | default(true) }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+  health_check_path: "{{ health_check_path | default('/health') }}"
+---
+{%- comment -%}
+Production-ready Kubernetes deployment with HPA and security best practices
+{%- endcomment -%}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ app_name }}
+    version: {{ version | default('1.0.0') }}
+    component: backend
+  annotations:
+    deployment.kubernetes.io/revision: "{{ revision | default('1') }}"
+    description: "{{ app_name }} deployment"
+    app-version: "{{ version | default('1.0.0') }}"
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ app_name }}
+      component: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+      minReadySeconds: 30
+  template:
+    metadata:
+      labels:
+        app: {{ app_name }}
+        component: backend
+        version: {{ version | default('1.0.0') }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ metrics_port }}"
+        prometheus.io/path: "/metrics"
+        app.kubernetes.io/name: {{ app_name }}
+        app.kubernetes.io/instance: {{ app_name }}
+        app.kubernetes.io/version: {{ version | default('1.0.0') }}
+        app.kubernetes.io/component: backend
+    spec:
+      {% if security_context_enabled %}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {% endif %}
+      serviceAccountName: {{ service_account_name }}
+      containers:
+      - name: {{ app_name }}
+        image: {{ app_image }}:{{ tag | default('latest') }}
+        imagePullPolicy: {{ image_pull_policy }}
+        {% if security_context_enabled %}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+            add: []
+          seccompProfile:
+            type: RuntimeDefault
+        {% endif %}
+        ports:
+        - name: http
+          containerPort: {{ app_port }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ metrics_port }}
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "{{ app_port }}"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: ERL_AFLAGS
+          value: "+pc unicode +sbwt none +sbwtdcpu none +sbwtdio none"
+        - name: ERL_FULLSWEEP_AFTER
+          value: "0"
+        {% if hotci_enabled %}
+        - name: HOTCI_ENABLED
+          value: "true"
+        - name: HOTCI_DATA_PATH
+          value: "/app/hotci_data"
+        {% endif %}
+        resources:
+          requests:
+            cpu: {{ cpu_request }}
+            memory: {{ memory_request }}
+          limits:
+            cpu: {{ cpu_limit }}
+            memory: {{ memory_limit }}
+        livenessProbe:
+          httpGet:
+            path: {{ health_check_path }}
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: {{ health_check_path }}
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: {{ health_check_path }}
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+          successThreshold: 1
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        - name: log-volume
+          mountPath: /app/log
+        {% if hotci_enabled %}
+        - name: hotci-data-volume
+          mountPath: /app/hotci_data
+        {% endif %}
+        - name: tmp-volume
+          mountPath: /app/tmp
+      volumes:
+      - name: config-volume
+        configMap:
+          name: {{ app_name }}-config
+      - name: log-volume
+        emptyDir: {}
+      - name: tmp-volume
+        emptyDir: {}
+      {% if hotci_enabled %}
+      - name: hotci-data-volume
+        persistentVolumeClaim:
+          claimName: {{ app_name }}-hotci-pvc
+      {% endif %}
+      {% if security_context_enabled %}
+      terminationGracePeriodSeconds: 30
+      {% endif %}
+      restartPolicy: Always
+      dnsPolicy: ClusterFirst
+      {{- if affinity }}
+      affinity:
+        {{ affinity }}
+      {{- endif }}
+      {{- if tolerations }}
+      tolerations:
+        {{ tolerations }}
+      {{- endif }}
+      {{- if node_selector }}
+      nodeSelector:
+        {{ node_selector }}
+      {{- endif }}
+---
+{%- comment -%}
+Horizontal Pod Autoscaler
+{%- endcomment -%}
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ app_name }}-hpa
+  namespace: {{ namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ app_name }}
+  minReplicas: {{ min_replicas | default(2) }}
+  maxReplicas: {{ max_replicas | default(10) }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ cpu_target_utilization | default(70) }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ memory_target_utilization | default(80) }}
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: {{ requests_per_second_target | default('100') }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ scale_down_stabilization | default(300) }}
+      policies:
+      - type: Percent
+        value: {{ scale_down_percent | default(10) }}
+        periodSeconds: {{ scale_down_period | default(60) }}
+    scaleUp:
+      stabilizationWindowSeconds: {{ scale_up_stabilization | default(60) }}
+      policies:
+      - type: Percent
+        value: {{ scale_up_percent | default(50) }}
+        periodSeconds: {{ scale_up_period | default(60) }}
+      - type: Pods
+        value: {{ scale_up_pods | default(2) }}
+        periodSeconds: {{ scale_up_period | default(60) }}

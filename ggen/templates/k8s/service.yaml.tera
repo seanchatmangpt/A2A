@@ -1,0 +1,163 @@
+---
+description: "Kubernetes service with multiple service types and annotations"
+output_dir: "k8s"
+file_extension: ".yaml"
+variables:
+  app_name: "{{ module.name }}"
+  app_port: "{{ port | default(8080) }}"
+  namespace: "{{ namespace | default('default') }}"
+  service_type: "{{ service_type | default('ClusterIP') }}"
+  load_balancer_ip: "{{ load_balancer_ip | default('') }}"
+  session_affinity: "{{ session_affinity | default('None') }}"
+  external_traffic_policy: "{{ external_traffic_policy | default('Cluster') }}"
+  publish_not_ready_addresses: "{{ publish_not_ready_addresses | default(false) }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+  app_host: "{{ app_host | default(module.name + '.local') }}"
+---
+{%- comment -%}
+Kubernetes service with multiple service types and best practices
+{%- endcomment -%}
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ app_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ app_name }}
+    component: backend
+    version: {{ version | default('1.0.0') }}
+    app.kubernetes.io/name: {{ app_name }}
+    app.kubernetes.io/instance: {{ app_name }}
+    app.kubernetes.io/version: {{ version | default('1.0.0') }}
+    app.kubernetes.io/component: backend
+  annotations:
+    {% if service_type == 'LoadBalancer' %}
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-attributes: "idle_timeout=300,connection_logs.enabled=true,connection_logs.s3.enabled=true,connection_logs.s3.bucket={{ app_name }}-logs"
+    {% endif %}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ metrics_port }}"
+    prometheus.io/path: "/metrics"
+    metallb.universe.tf/allow-shared-ip: "shared-ip-pool"
+spec:
+  type: {{ service_type }}
+  {% if service_type == 'LoadBalancer' %}
+  {% if load_balancer_ip %}
+  loadBalancerIP: {{ load_balancer_ip }}
+  {% endif %}
+  {% endif %}
+  {% if session_affinity != 'None' %}
+  sessionAffinity: {{ session_affinity }}
+  {% if session_affinity == 'ClientIP' %}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ session_affinity_timeout | default(10800) }}
+  {% endif %}
+  {% endif %}
+  externalTrafficPolicy: {{ external_traffic_policy }}
+  publishNotReadyAddresses: {{ publish_not_ready_addresses | lower }}
+  selector:
+    app: {{ app_name }}
+    component: backend
+  ports:
+  - name: http
+    port: {{ app_port }}
+    targetPort: http
+    protocol: TCP
+    {% if service_type == 'NodePort' %}
+    nodePort: {{ node_port | default(30080) }}
+    {% endif %}
+  - name: metrics
+    port: {{ metrics_port }}
+    targetPort: metrics
+    protocol: TCP
+    {% if service_type == 'NodePort' %}
+    nodePort: {{ metrics_node_port | default(30081) }}
+    {% endif %}
+---
+{%- comment -%}
+Optional: Ingress resource for HTTP/HTTPS routing
+{%- endcomment -%}
+
+{% if service_type == 'LoadBalancer' or service_type == 'NodePort' %}
+{% if ingress_enabled | default(true) %}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ app_name }}-ingress
+  namespace: {{ namespace }}
+  labels:
+    app: {{ app_name }}
+    component: ingress
+  annotations:
+    kubernetes.io/ingress.class: "{{ ingress_class | default('nginx') }}"
+    cert-manager.io/cluster-issuer: "{{ cert_manager_issuer | default('letsencrypt-prod') }}"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+    nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "60"
+    nginx.ingress.kubernetes.io/upstream-keepalive-requests: "1000"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-key: "$remote_addr"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10254"
+spec:
+  tls:
+  - hosts:
+    - {{ app_host }}
+    secretName: {{ app_name }}-tls
+  rules:
+  - host: {{ app_host }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ app_name }}
+            port:
+              number: {{ app_port }}
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ app_name }}-monitoring
+            port:
+              number: {{ metrics_port }}
+{% endif %}
+{% endif %}
+---
+{%- comment -%}
+Optional: Monitoring service for Prometheus
+{%- endcomment -%}
+
+{% if monitoring_enabled | default(true) %}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ app_name }}-monitoring
+  namespace: {{ namespace }}
+  labels:
+    app: {{ app_name }}
+    component: monitoring
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ metrics_port }}"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ app_name }}
+    component: backend
+  ports:
+  - name: metrics
+    port: {{ metrics_port }}
+    targetPort: metrics
+    protocol: TCP
+{% endif %}

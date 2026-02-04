@@ -1,0 +1,27 @@
+{{- if .Values.craftplan.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-craftplan
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+  annotations:
+    {{- if .Values.craftplan.annotations }}
+    {{- toYaml .Values.craftplan.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.craftplan.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.craftplan.service.port }}
+      targetPort: 4000
+      {{- if .Values.craftplan.service.nodePort }}
+      nodePort: {{ .Values.craftplan.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+{{- end }}

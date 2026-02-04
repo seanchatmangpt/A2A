@@ -1,0 +1,97 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.loki.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.fullname" . }}-loki
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: loki
+data:
+  loki.yml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+
+    common:
+      path_prefix: /var/lib/loki
+      storage:
+        filesystem:
+          chunks_directory: /var/lib/loki/chunks
+          rules_directory: /var/lib/loki/rules
+      replication_factor: 1
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: memberlist
+
+    query_range:
+      results_cache:
+        cache_config:
+          default_expiration: 24h
+
+    ruler:
+      alertmanager_url: http://localhost:9093
+      rule_path: /var/lib/loki/rules
+      enable_api: true
+      enable_alertmanager_v2: true
+
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+
+    storage_config:
+      boltdb_shipper:
+        active_index_path: /var/lib/loki/index
+        cache_location: /var/lib/loki/cache
+        cache_ttl: 24h
+        shared_store: filesystem
+
+    chunk_store_config:
+      max_look_back_period: 0s
+
+    table_manager:
+      retention_deletes_enabled: false
+      retention_period: 0s
+
+    compactor:
+      working_directory: /var/lib/loki/boltdb-shipper-compactor
+      shared_store: filesystem
+      compactor_address: 127.0.0.1:9095
+
+    backend:
+      s3:
+        endpoint: http://minio:9000
+        bucket: loki
+        access_key_id: {{ .Values.secrets.minio.accessKey }}
+        secret_access_key: {{ .Values.secrets.minio.secretKey }}
+        insecure: true
+
+    ingester:
+      lifecycler:
+        ring:
+          kvstore:
+            store: memberlist
+          replication_factor: 1
+        final_sleep: 0s
+      chunk_idle_period: 75s
+      chunk_retain_period: 30s
+      max_transfer_retries: 0
+      wal:
+        dir: /var/lib/loki/wal
+    limits_config:
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+    tracing_config:
+      enabled: false
+{{- end }}
+{{- end }}

@@ -1,0 +1,589 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Complex pattern composition combining multiple ontological patterns
+CONSTRUCT {
+    # Application-Service Pattern
+    ?applicationService a erl:application ;
+        a2a:application_name ?appName ;
+        a2a:version ?appVersion ;
+        a2a:contains_service ?service ;
+        a2a:has_config ?config ;
+        a2a:deployment_strategy ?deploymentStrategy ;
+        rdfs:label ?appServiceLabel .
+
+    # Service-Module Pattern
+    ?serviceModule a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviourType ;
+        a2a:belongs_to_service ?service ;
+        a2a:has_infra_config ?infraConfig ;
+        a2a:has_agent_config ?agentConfig ;
+        rdfs:label ?serviceModuleLabel .
+
+    # Module-Agent Pattern
+    ?moduleAgent a a2a:agent ;
+        a2a:agent_id ?agentId ;
+        a2a:agent_name ?agentName ;
+        a2a:manages_module ?module ;
+        a2a:has_task_queue ?taskQueue ;
+        a2a:communication_pattern ?commPattern ;
+        rdfs:label ?moduleAgentLabel .
+
+    # Agent-Task Pattern
+    ?agentTask a a2a:task ;
+        a2a:task_id ?taskId ;
+        a2a:task_type ?taskType ;
+        a2a:assigned_to_agent ?agent ;
+        a2a:has_workflow ?workflow ;
+        a2a:dependencies ?dependencies ;
+        rdfs:label ?agentTaskLabel .
+
+    # Task-Workflow Pattern
+    ?workflowStep a a2a:task ;
+        a2a:task_id ?stepId ;
+        a2a:belongs_to_workflow ?workflow ;
+        a2a:has_next_step ?nextStep ;
+        a2a:has_prev_step ?prevStep ;
+        a2a:workflow_status ?workflowStatus ;
+        rdfs:label ?workflowStepLabel .
+
+    # Infrastructure-Service Pattern
+    ?infraService a a2a:cloud_infrastructure ;
+        a2a:service_name ?serviceName ;
+        a2a:expose_port ?servicePort ;
+        a2a:has_scaling_policy ?scalingPolicy ;
+        a2a:health_check ?healthCheck ;
+        a2a:deployment_target ?deploymentTarget ;
+        rdfs:label ?infraServiceLabel .
+
+    # Service-Message Pattern
+    ?serviceMessage a a2a:message ;
+        a2a:message_type ?messageType ;
+        a2a:service_origin ?serviceOrigin ;
+        a2a:service_target ?serviceTarget ;
+        a2a:message_route ?messageRoute ;
+        a2a:processing_time ?processingTime ;
+        rdfs:label ?serviceMessageLabel .
+
+    # Event-Action Pattern
+    ?eventAction a a2a:event ;
+        a2a:event_type ?eventType ;
+        a2a:triggers_action ?action ;
+        a2a:has_conditions ?conditions ;
+        a2a:action_result ?actionResult ;
+        rdfs:label ?eventActionLabel .
+
+    # Capability-Skill Pattern
+    ?capabilitySkill a a2a:skill ;
+        a2a:skill_name ?skillName ;
+        a2a:required_capability ?capability ;
+        a2a:provides_capability ?provides ;
+        a2a:skill_level ?skillLevel ;
+        rdfs:label ?capabilitySkillLabel .
+
+    # State-Transition Pattern
+    ?stateTransition a a2a:state_transition ;
+        a2a:from_state ?fromState ;
+        a2a:to_state ?toState ;
+        a2a:transition_trigger ?trigger ;
+        a2a:transition_conditions ?conditions ;
+        a2a:transition_action ?action ;
+        rdfs:label ?stateTransitionLabel .
+}
+WHERE {
+    # Application-Service Pattern Composition
+    {
+        SELECT ?application ?service ?appName ?appVersion ?config ?deploymentStrategy ?appServiceLabel
+        WHERE {
+            # Application
+            ?application a erl:application .
+
+            # Application properties
+            OPTIONAL {
+                ?application a2a:application_name ?appName .
+            }
+            BIND(COALESCE(?appName, "a2a-application") AS ?appName)
+
+            OPTIONAL {
+                ?application a2a:version ?appVersion .
+            }
+            BIND(COALESCE(?appVersion, "1.0.0") AS ?appVersion)
+
+            # Services in application
+            OPTIONAL {
+                ?service a rdfs:Class ;
+                    rdfs:subClassOf* ?behaviour ;
+                    rdfs:label ?serviceLabel .
+                ?application rdfs:contains ?service .
+            }
+
+            # Application configuration
+            OPTIONAL {
+                ?config a a2a:config ;
+                    a2a:belongs_to_application ?application .
+            }
+
+            # Deployment strategy based on HotCI properties
+            OPTIONAL {
+                ?application a2a:hotci_enabled ?hotciEnabled .
+                ?application a2a:rollback_support ?rollbackSupport .
+            }
+            BIND(
+                IF(BOUND(?hotciEnabled) && ?hotciEnabled = true && BOUND(?rollbackSupport) && ?rollbackSupport = true,
+                   "hotci_rollback",
+                   IF(BOUND(?hotciEnabled) && ?hotciEnabled = true,
+                      "hotci_only",
+                      IF(BOUND(?rollbackSupport) && ?rollbackSupport = true,
+                         "rollback_only",
+                         "standard")))
+                AS ?deploymentStrategy
+            )
+
+            # Application service label
+            OPTIONAL {
+                ?application rdfs:label ?appServiceLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Service-Module Pattern Composition
+    {
+        SELECT ?service ?module ?moduleName ?behaviourType ?infraConfig ?agentConfig ?serviceModuleLabel
+        WHERE {
+            # Service
+            ?service a rdfs:Class ;
+                rdfs:subClassOf* ?behaviour .
+            ?behaviour a erl:behaviour .
+
+            # Modules in service
+            ?module a rdfs:Class ;
+                rdfs:subClassOf* ?service .
+
+            # Module properties
+            OPTIONAL {
+                ?module rdfs:label ?moduleLabel .
+            }
+            BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+            # Behaviour type
+            OPTIONAL {
+                ?module a ?behaviour ;
+                    ?behaviour rdfs:label ?behaviourLabel .
+                BIND(STR(?behaviourLabel) AS ?behaviourType)
+            }
+
+            # Infrastructure configuration
+            OPTIONAL {
+                ?infraConfig a a2a:cloud_infrastructure ;
+                    a2a:configured_for_module ?module .
+            }
+
+            # Agent configuration
+            OPTIONAL {
+                ?agentConfig a a2a:agent ;
+                    a2a:manages_module ?module .
+            }
+
+            # Service module label
+            OPTIONAL {
+                ?service rdfs:label ?serviceLabel .
+                ?module rdfs:label ?serviceModuleLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Module-Agent Pattern Composition
+    {
+        SELECT ?module ?agent ?agentId ?agentName ?taskQueue ?commPattern ?moduleAgentLabel
+        WHERE {
+            # Module
+            ?module a rdfs:Class ;
+                rdfs:subClassOf* ?behaviour .
+            ?behaviour a erl:behaviour .
+
+            # Agents managing module
+            ?agent a a2a:agent .
+
+            # Agent properties
+            OPTIONAL {
+                ?agent a2a:agent_id ?agentId .
+            }
+            BIND(COALESCE(?agentId, UUID()) AS ?agentId)
+
+            OPTIONAL {
+                ?agent a2a:agent_name ?agentName .
+            }
+            BIND(COALESCE(?agentName, "agent_" + ?agentId) AS ?agentName)
+
+            # Task queue
+            OPTIONAL {
+                ?taskQueue a a2a:task_queue ;
+                    a2a:managed_by_agent ?agent .
+            }
+
+            # Communication pattern based on agent capabilities
+            OPTIONAL {
+                ?agent a2a:agent_capabilities ?capabilities .
+            }
+            BIND(
+                IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "pubsub|broadcast", "i"),
+                   "broadcast_communication",
+                   IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "point-to-point|direct", "i"),
+                      "direct_communication",
+                      IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "mesh|peer", "i"),
+                         "mesh_communication",
+                         "standard_communication")))
+                AS ?commPattern
+            )
+
+            # Module agent label
+            OPTIONAL {
+                ?module rdfs:label ?moduleLabel .
+                ?agent rdfs:label ?moduleAgentLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Agent-Task Pattern Composition
+    {
+        SELECT ?agent ?task ?taskId ?taskType ?workflow ?dependencies ?agentTaskLabel
+        WHERE {
+            # Agent
+            ?agent a a2a:agent .
+
+            # Tasks assigned to agent
+            ?task a a2a:task ;
+                a2a:assigned_to_agent ?agent .
+
+            # Task properties
+            OPTIONAL {
+                ?task a2a:task_id ?taskId .
+            }
+            BIND(COALESCE(?taskId, UUID()) AS ?taskId)
+
+            OPTIONAL {
+                ?task a2a:task_type ?taskType .
+            }
+
+            # Workflow
+            OPTIONAL {
+                ?workflow a a2a:workflow ;
+                    a2a:contains_task ?task .
+            }
+
+            # Dependencies
+            OPTIONAL {
+                ?dependencies a a2a:task_dependency ;
+                    a2a:depends_on ?task ;
+                    a2a:dependency_type ?depType .
+            }
+
+            # Agent task label
+            OPTIONAL {
+                ?agent rdfs:label ?agentLabel .
+                ?task rdfs:label ?agentTaskLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Task-Workflow Pattern Composition
+    {
+        SELECT ?workflow ?step ?stepId ?nextStep ?prevStep ?workflowStatus ?workflowStepLabel
+        WHERE {
+            # Workflow
+            ?workflow a a2a:workflow .
+
+            # Steps in workflow
+            ?step a a2a:task ;
+                a2a:belongs_to_workflow ?workflow .
+
+            # Step properties
+            OPTIONAL {
+                ?step a2a:task_id ?stepId .
+            }
+            BIND(COALESCE(?stepId, "step_" + UUID()) AS ?stepId)
+
+            # Next and previous steps
+            OPTIONAL {
+                ?nextStep a a2a:task ;
+                    a2a:has_prev_step ?step .
+            }
+
+            OPTIONAL {
+                ?prevStep a a2a:task ;
+                    a2a:has_next_step ?step .
+            }
+
+            # Workflow status
+            OPTIONAL {
+                ?workflow a2a:workflow_status ?workflowStatus .
+            }
+            BIND(COALESCE(?workflowStatus, "active") AS ?workflowStatus)
+
+            # Workflow step label
+            OPTIONAL {
+                ?workflow rdfs:label ?workflowLabel .
+                ?step rdfs:label ?workflowStepLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Infrastructure-Service Pattern Composition
+    {
+        SELECT ?infra ?service ?serviceName ?servicePort ?scalingPolicy ?healthCheck ?deploymentTarget ?infraServiceLabel
+        WHERE {
+            # Infrastructure
+            ?infra a a2a:cloud_infrastructure .
+
+            # Services on infrastructure
+            ?service a rdfs:Class ;
+                rdfs:subClassOf* ?behaviour ;
+                a2a:deployed_on_infra ?infra .
+
+            # Service properties
+            OPTIONAL {
+                ?service rdfs:label ?serviceLabel .
+            }
+            BIND(COALESCE(?serviceLabel, REPLACE(STR(?service), ".*(#|/)", "")) AS ?serviceName)
+
+            # Service port
+            OPTIONAL {
+                ?infra a a2a:docker_config ;
+                    a2a:expose_port ?servicePort .
+            }
+            BIND(COALESCE(?servicePort, 8080) AS ?servicePort)
+
+            # Scaling policy based on replicas
+            OPTIONAL {
+                ?infra a a2a:kubernetes_config ;
+                    a2a:replicas ?replicas .
+            }
+            BIND(
+                IF(BOUND(?replicas) && ?replicas >= 5,
+                   "horizontal_scaling",
+                   IF(BOUND(?replicas) && ?replicas >= 3,
+                      "medium_scaling",
+                      IF(BOUND(?replicas) && ?replicas = 1,
+                         "single_instance",
+                         "auto_scaling"))))
+                AS ?scalingPolicy
+            )
+
+            # Health check
+            OPTIONAL {
+                ?healthCheck a a2a:health_check ;
+                    a2a:config_for_service ?service .
+            }
+
+            # Deployment target
+            OPTIONAL {
+                ?deploymentTarget a a2a:deployment_target ;
+                    a2a:target_infra ?infra .
+            }
+
+            # Infrastructure service label
+            OPTIONAL {
+                ?infra rdfs:label ?infraServiceLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Service-Message Pattern Composition
+    {
+        SELECT ?service ?message ?messageType ?serviceOrigin ?serviceTarget ?messageRoute ?processingTime ?serviceMessageLabel
+        WHERE {
+            # Service
+            ?service a rdfs:Class ;
+                rdfs:subClassOf* ?behaviour .
+
+            # Messages from service
+            ?message a a2a:message ;
+                a2a:originates_from_service ?service .
+
+            # Message properties
+            OPTIONAL {
+                ?message a2a:message_type ?messageType .
+            }
+            BIND(COALESCE(?messageType, "standard") AS ?messageType)
+
+            # Service origin
+            OPTIONAL {
+                ?serviceOrigin a a2a:service ;
+                    rdfs:label ?originLabel .
+            }
+            BIND(COALESCE(?originLabel, REPLACE(STR(?service), ".*(#|/)", "")) AS ?serviceOrigin)
+
+            # Service target
+            OPTIONAL {
+                ?serviceTarget a a2a:service ;
+                    rdfs:label ?targetLabel .
+            }
+            BIND(COALESCE(?targetLabel, "unknown") AS ?serviceTarget)
+
+            # Message route
+            BIND(
+                IF(?messageType = "request" && BOUND(?serviceTarget) && ?serviceTarget != "unknown",
+                   "directed_route",
+                   IF(?messageType = "response" && BOUND(?serviceOrigin),
+                      "response_route",
+                      IF(?messageType = "notification",
+                         "broadcast_route",
+                         "standard_route"))))
+                AS ?messageRoute
+            )
+
+            # Processing time (simulated)
+            BIND(RAND() * 1000 AS ?processingTime)
+
+            # Service message label
+            OPTIONAL {
+                ?service rdfs:label ?serviceMessageLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Event-Action Pattern Composition
+    {
+        SELECT ?event ?action ?eventType ?conditions ?actionResult ?eventActionLabel
+        WHERE {
+            # Event
+            ?event a a2a:event .
+
+            # Actions triggered by event
+            ?action a a2a:action ;
+                a2a:triggered_by_event ?event .
+
+            # Event properties
+            OPTIONAL {
+                ?event a2a:event_type ?eventType .
+            }
+            BIND(COALESCE(?eventType, "system") AS ?eventType)
+
+            # Conditions
+            OPTIONAL {
+                ?conditions a a2a:condition ;
+                    a2a:for_event ?event .
+            }
+
+            # Action result
+            OPTIONAL {
+                ?actionResult a a2a:action_result ;
+                    a2a:from_action ?action .
+            }
+
+            # Event action label
+            OPTIONAL {
+                ?event rdfs:label ?eventActionLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # Capability-Skill Pattern Composition
+    {
+        SELECT ?skill ?capability ?skillName ?provides ?skillLevel ?capabilitySkillLabel
+        WHERE {
+            # Skill
+            ?skill a a2a:skill .
+
+            # Skill properties
+            OPTIONAL {
+                ?skill a2a:skill_name ?skillName .
+            }
+            BIND(COALESCE(?skillName, "skill_" + UUID()) AS ?skillName)
+
+            # Required capabilities
+            OPTIONAL {
+                ?capability a a2a:capability ;
+                    rdfs:label ?capabilityLabel .
+            }
+            BIND(COALESCE(?capabilityLabel, "general") AS ?capability)
+
+            # Provides capabilities
+            OPTIONAL {
+                ?provides a a2a:capability ;
+                    rdfs:label ?providesLabel .
+            }
+            BIND(COALESCE(?providesLabel, ?skillName) AS ?provides)
+
+            # Skill level based on complexity
+            BIND(
+                IF(?skillName = "master" || ?skillName = "expert",
+                   "expert",
+                   IF(?skillName = "advanced",
+                      "advanced",
+                      IF(?skillName = "intermediate",
+                         "intermediate",
+                         "basic"))))
+                AS ?skillLevel
+            )
+
+            # Capability skill label
+            OPTIONAL {
+                ?skill rdfs:label ?capabilitySkillLabel .
+            }
+        }
+        LIMIT 50
+    }
+
+    # State-Transition Pattern Composition
+    {
+        SELECT ?transition ?fromState ?toState ?trigger ?conditions ?action ?stateTransitionLabel
+        WHERE {
+            # State transition
+            ?transition a a2a:state_transition .
+
+            # Transition properties
+            OPTIONAL {
+                ?fromState a a2a:task_state ;
+                    rdfs:label ?fromStateLabel .
+            }
+            BIND(COALESCE(?fromStateLabel, "start") AS ?fromState)
+
+            OPTIONAL {
+                ?toState a a2a:task_state ;
+                    rdfs:label ?toStateLabel .
+            }
+            BIND(COALESCE(?toStateLabel, "end") AS ?toState)
+
+            # Trigger
+            OPTIONAL {
+                ?trigger a a2a:transition_trigger ;
+                    rdfs:label ?triggerLabel .
+            }
+            BIND(COALESCE(?triggerLabel, "default") AS ?trigger)
+
+            # Conditions
+            OPTIONAL {
+                ?conditions a a2a:transition_condition ;
+                    rdfs:label ?conditionsLabel .
+            }
+            BIND(COALESCE(?conditionsLabel, "always") AS ?conditions)
+
+            # Action
+            OPTIONAL {
+                ?action a a2a:transition_action ;
+                    rdfs:label ?actionLabel .
+            }
+            BIND(COALESCE(?actionLabel, "none") AS ?action)
+
+            # State transition label
+            OPTIONAL {
+                ?transition rdfs:label ?stateTransitionLabel .
+            }
+        }
+        LIMIT 50
+    }
+}

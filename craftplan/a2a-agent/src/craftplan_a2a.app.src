@@ -1,0 +1,13 @@
+{application, craftplan_a2a,
+ [{description, "Craftplan A2A Agent"},
+  {vsn, "1.0.0"},
+  {modules, [craftplan_a2a_app,
+            craftplan_a2a_sup,
+            craftplan_a2a_server,
+            craftplan_task_handler,
+            craftplan_task_sup,
+            craftplan_sse_handler,
+            craftplan_agent_card]},
+  {registered, [craftplan_a2a]},
+  {applications, [kernel, stdlib, cowboy, jiffy]},
+  {mod, {craftplan_a2a_app, []}}]}.

@@ -1,0 +1,420 @@
+# =============================================================================
+# Craftplan — Docker Stack Configuration
+# Deploy with: docker stack deploy -c docker-compose.stack.yml craftplan
+# =============================================================================
+# Self-hosted ERP for artisanal D2C micro-businesses
+# Integrated with Docker Swarm for production deployment
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------------
+  # Craftplan Application Service
+  # -------------------------------------------------------------------------
+  craftplan:
+    image: ghcr.io/puemos/craftplan:latest
+    environment:
+      # Phoenix Configuration
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      TOKEN_SIGNING_SECRET: ${TOKEN_SIGNING_SECRET}
+      CLOAK_KEY: ${CLOAK_KEY}
+      HOST: ${HOST:-localhost}
+      PORT: ${PORT:-4000}
+
+      # Database Configuration
+      DATABASE_URL: "ecto://postgres:${POSTGRES_PASSWORD}@postgres:5432/craftplan"
+
+      # File Storage (MinIO)
+      AWS_S3_SCHEME: "http://"
+      AWS_S3_HOST: minio
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      AWS_S3_BUCKET: "${AWS_S3_BUCKET:-craftplan}"
+      AWS_REGION: "us-east-1"
+
+      # Email Configuration (Optional)
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      EMAIL_API_KEY: ${EMAIL_API_KEY:-}
+
+      # Docker Swarm Networking
+      RELEASE_DISTRIBUTION: name
+      RELEASE_COOKIE: craftplan_swarm_cookie
+    networks:
+      - craftplan-overlay
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: ${CRAFTPLAN_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 60s
+        max_failure_ratio: 0.1
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          cpus: '${CRAFTPLAN_CPU_LIMIT:-1.0}'
+          memory: ${CRAFTPLAN_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '${CRAFTPLAN_CPU_RESERVATION:-0.25}'
+          memory: ${CRAFTPLAN_MEMORY_RESERVATION:-256M}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.craftplan.rule=Host(`${HOST:-localhost}`)"
+      - "traefik.http.routers.craftplan.entrypoints=web"
+      - "traefik.http.services.craftplan.loadbalancer.server.port=4000"
+      - "traefik.http.routers.craftplan.middlewares=craftplan-auth"
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL Database Service
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: craftplan
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./craftplan/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - craftplan-overlay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '${POSTGRES_CPU_LIMIT:-1.0}'
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '${POSTGRES_CPU_RESERVATION:-0.25}'
+          memory: ${POSTGRES_MEMORY_RESERVATION:-512M}
+    labels:
+      - "traefik.enable=false"
+
+  # -------------------------------------------------------------------------
+  # MinIO Object Storage Service
+  # -------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL: "http://minio:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - craftplan-overlay
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '${MINIO_CPU_LIMIT:-1.0}'
+          memory: ${MINIO_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '${MINIO_CPU_RESERVATION:-0.25}'
+          memory: ${MINIO_MEMORY_RESERVATION:-256M}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio.rule=Host(`minio.${HOST:-localhost}`)"
+      - "traefik.http.routers.minio.entrypoints=web"
+      - "traefik.http.routers.minio.middlewares=minio-auth"
+
+  # -------------------------------------------------------------------------
+  # Redis Cache Service (Optional - for session storage)
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - craftplan-overlay
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '${REDIS_CPU_LIMIT:-0.5}'
+          memory: ${REDIS_MEMORY_LIMIT:-512M}
+        reservations:
+          cpus: '${REDIS_CPU_RESERVATION:-0.1}'
+          memory: ${REDIS_MEMORY_RESERVATION:-64M}
+    labels:
+      - "traefik.enable=false"
+
+  # -------------------------------------------------------------------------
+  # Monitoring & Logging
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --storage.tsdb.retention.time=200h
+      - --web.enable-lifecycle
+    volumes:
+      - ./craftplan/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - craftplan-overlay
+    ports:
+      - "9090:9090"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${HOST:-localhost}`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./craftplan/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./craftplan/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - craftplan-overlay
+    ports:
+      - "3000:3000"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${HOST:-localhost}`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+
+  # -------------------------------------------------------------------------
+  # Craftplan MCP Server - Model Context Protocol endpoint
+  # -------------------------------------------------------------------------
+  craftplan-mcp-server:
+    image: craftplan-mcp:latest
+    environment:
+      # Craftplan API connection
+      CRAFTPLAN_API_URL: "http://craftplan:4000/api"
+      CRAFTPLAN_API_TOKEN: ${CRAFTPLAN_API_TOKEN:-}
+      # MCP Server configuration
+      MCP_PORT: 8090
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - craftplan-overlay
+    depends_on:
+      craftplan:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      mode: replicated
+      replicas: ${MCP_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '${MCP_CPU_LIMIT:-1.0}'
+          memory: ${MCP_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '${MCP_CPU_RESERVATION:-0.25}'
+          memory: ${MCP_MEMORY_RESERVATION:-256M}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.craftplan-mcp.rule=Host(`mcp.${HOST:-localhost}`)"
+      - "traefik.http.routers.craftplan-mcp.entrypoints=web"
+      - "traefik.http.services.craftplan-mcp.loadbalancer.server.port=8090"
+      - "com.craftplan.mcp.enabled=true"
+      - "com.craftplan.hotci.enabled=true"
+
+  # -------------------------------------------------------------------------
+  # Craftplan A2A Agent - Agent-to-Agent protocol endpoint
+  # -------------------------------------------------------------------------
+  craftplan-a2a-agent:
+    image: craftplan-a2a:latest
+    environment:
+      # A2A Agent configuration
+      A2A_PORT: 8080
+      MCP_SERVER_URL: "http://craftplan-mcp-server:8090/mcp"
+      AGENT_ID: "craftplan-erp-agent"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./craftplan/agent-card:/app/priv/agent-card:ro
+    networks:
+      - craftplan-overlay
+    depends_on:
+      craftplan-mcp-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      mode: replicated
+      replicas: ${A2A_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '${A2A_CPU_LIMIT:-1.0}'
+          memory: ${A2A_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '${A2A_CPU_RESERVATION:-0.25}'
+          memory: ${A2A_MEMORY_RESERVATION:-256M}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.craftplan-a2a.rule=Host(`a2a.${HOST:-localhost}`)"
+      - "traefik.http.routers.craftplan-a2a.entrypoints=web"
+      - "traefik.http.services.craftplan-a2a.loadbalancer.server.port=8080"
+      - "com.craftplan.a2a.enabled=true"
+      - "com.craftplan.a2a.agent_id=craftplan-erp-agent"
+      - "com.craftplan.hotci.enabled=true"
+
+  # -------------------------------------------------------------------------
+  # Nginx Reverse Proxy (Optional - for production)
+  # -------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./craftplan/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./craftplan/nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - craftplan-overlay
+    depends_on:
+      - craftplan
+    deploy:
+      mode: replicated
+      replicas: ${NGINX_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      - "traefik.enable=false"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  craftplan-overlay:
+    driver: overlay
+    attachable: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.20.0.0/24
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

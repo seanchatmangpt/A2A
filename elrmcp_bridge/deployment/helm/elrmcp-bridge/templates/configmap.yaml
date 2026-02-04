@@ -1,0 +1,109 @@
+{{- if .Values.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elrmcp-bridge.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elrmcp-bridge.labels" . | nindent 4 }}
+  {{- with .Values.config.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  bridge.config: |
+    {
+      "elrmcp_bridge": {
+        "version": "{{ .Chart.AppVersion }}",
+        "description": "elrmcp MCP Bridge Configuration",
+
+        "craftplan": {
+          "url": {{ .Values.config.craftplan.url | quote }},
+          "timeout": {{ .Values.config.craftplan.timeout }},
+          "auth_token": {{ .Values.config.craftplan.authToken | quote }}
+        },
+
+        "rate_limiting": {
+          "enabled": {{ .Values.config.rateLimiting.enabled }},
+          "requests_per_second": {{ .Values.config.rateLimiting.requestsPerSecond }},
+          "burst_size": {{ .Values.config.rateLimiting.burstSize }},
+          "refill_interval_ms": {{ .Values.config.rateLimiting.refillIntervalMs }}
+        },
+
+        "tool_management": {
+          "whitelist": {{ .Values.config.toolManagement.whitelist | toJson }},
+          "blacklist": {{ .Values.config.toolManagement.blacklist | toJson }},
+          "auto_register": {{ .Values.config.toolManagement.autoRegister }},
+          "cache_ttl": {{ .Values.config.toolManagement.cacheTtl }}
+        },
+
+        "performance": {
+          "enable_caching": {{ .Values.config.performance.enableCaching }},
+          "cache_size": {{ .Values.config.performance.cacheSize }},
+          "request_timeout": {{ .Values.config.performance.requestTimeout }},
+          "connect_timeout": {{ .Values.config.performance.connectTimeout }}
+        },
+
+        "logging": {
+          "level": {{ .Values.config.logging.level | quote }},
+          "enable_metrics": {{ .Values.config.logging.enableMetrics }},
+          "request_logging": {{ .Values.config.logging.requestLogging }},
+          "error_logging": {{ .Values.config.logging.errorLogging }}
+        },
+
+        "health_checks": {
+          "enabled": {{ .Values.config.healthChecks.enabled }},
+          "interval_ms": {{ .Values.config.healthChecks.intervalMs }},
+          "timeout_ms": {{ .Values.config.healthChecks.timeoutMs }}
+        },
+
+        "security": {
+          "validate_inputs": {{ .Values.config.security.validateInputs }},
+          "sanitize_outputs": {{ .Values.config.security.sanitizeOutputs }},
+          "max_request_size": {{ .Values.config.security.maxRequestSize }},
+          "allowed_origins": {{ .Values.config.security.allowedOrigins | toJson }}
+        }
+      }
+    }
+  {{- if .Values.config.vm.args }}
+  vm.args: |
+    {{ .Values.config.vm.args | nindent 4 }}
+  {{- else }}
+  vm.args: |
+    ## elrmcp Bridge VM Arguments
+    ## Kernel
+    +K true
+    +zdbbl 128000
+
+    ## Process Limits
+    +P 1048576
+    +A 64
+
+    ## Scheduling
+    +S 128
+    +Q 65536
+
+    ## Memory
+    -heap_type optimal
+    -hms 64 +hmsz 64 +hmtvm 128
+    +hmbsz 32
+
+    ## ETS
+    +ets [file_table {read_concurrency true}]
+
+    ## Logging
+    -kernel logger '[{handler, default, logger_std_h,
+                     #{formatter => {logger_formatter,
+                                    #{single_line => true,
+                                      legacy_header => false}}},
+                     #{level => info}]}]'
+
+    ## Crash Dump
+    -crash_dump /tmp/elrmcp_bridge.crashdump
+
+    ## Heart
+    -heartbeat_interval 30
+    -heartbeat_timeout 60
+  {{- end }}
+  {{- end }}
+{{- end }}

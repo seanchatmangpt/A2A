@@ -1,0 +1,27 @@
+{{- if .Values.redis.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-redis
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
+  annotations:
+    {{- if .Values.redis.annotations }}
+    {{- toYaml .Values.redis.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.redis.service.type }}
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port }}
+      targetPort: 6379
+      {{- if .Values.redis.service.nodePort }}
+      nodePort: {{ .Values.redis.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
+{{- end }}

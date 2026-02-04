@@ -1,0 +1,91 @@
+{{- if .Values.minio.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.minio.annotations }}
+    {{- toYaml .Values.minio.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.minio.replicas }}
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: minio
+        {{- if .Values.minio.podLabels }}
+        {{- toYaml .Values.minio.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.minio.podAnnotations }}
+        {{- toYaml .Values.minio.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+        checksum/secrets: {{ include "craftplan.secret" . | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          env:
+            {{- if .Values.minio.env }}
+            {{- toYaml .Values.minio.env | nindent 12 }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          {{- if .Values.minio.resources }}
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.minio.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+          command:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+      {{- if .Values.minio.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "craftplan.pvcName" . }}-minio
+      {{- end }}
+{{- end }}

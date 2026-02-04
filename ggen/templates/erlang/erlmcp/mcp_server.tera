@@ -1,0 +1,102 @@
+-module({{ module_name }}).
+-behaviour(application).
+-behaviour(:supervisor).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/0, stop/0]).
+-export([init/1]).
+
+%%====================================================================
+%% Application Callbacks
+%%====================================================================
+
+start_link() ->
+    io:format("Starting ~p application~n", [?MODULE]),
+    application:start(?MODULE).
+
+stop() ->
+    io:format("Stopping ~p application~n", [?MODULE]),
+    application:stop(?MODULE]).
+
+%%====================================================================
+%% Supervisor Callbacks
+%%====================================================================
+
+init(_Args) ->
+    io:format("Initializing ~p supervisor~n", [?MODULE]),
+
+    {{ok, {{one_for_one, 5, 10}}, [
+        %% MCP Server Process
+        #{
+            id => {{ server_name }}_server,
+            start => {{ module_name }}_server,
+            start_args => [{{ server_config }}],
+            restart => transient,
+            shutdown => 5000,
+            type => worker,
+            modules => [{{ module_name }}_server]
+        },
+
+        %% MCP Tools Supervisor
+        #{
+            id => {{ server_name }}_tools_sup,
+            start => {{ module_name }}_tools_sup,
+            start_args => [{{ tools_config }}],
+            restart => transient,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [{{ module_name }}_tools_sup]
+        },
+
+        %% MCP Connection Manager
+        #{
+            id => {{ server_name }}_conn_manager,
+            start => {{ module_name }}_conn_manager,
+            start_args => [{{ conn_config }}],
+            restart => transient,
+            shutdown => 5000,
+            type => worker,
+            modules => [{{ module_name }}_conn_manager]
+        }
+    ]}, {ok, []}}.
+
+%%====================================================================
+%% HotCI Support Functions
+%%====================================================================
+
+-ifdef(HOTCI).
+hotci_status() ->
+    case whereis({{ server_name }}_server) of
+        undefined -> not_running;
+        Pid -> {running, Pid}
+    end.
+
+hotci_upgrade(NewModule) ->
+    io:format("HotCI upgrade to ~p for ~p~n", [NewModule, ?MODULE]),
+    case whereis({{ server_name }}_server) of
+        undefined ->
+            {error, server_not_running};
+        Pid ->
+            ?MODULE:upgrade_server(Pid, NewModule)
+    end.
+
+hotci_consistency_check() ->
+    case hotci_status() of
+        {running, Pid} ->
+            {{ module_name }}_server:consistency_check(Pid);
+        not_running ->
+            {inconsistent, server_not_running}
+    end.
+-endif.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+%% Helper function for string multiplication (if needed)
+string_times(_String, 0) -> "";
+string_times(String, Times) when Times > 0 ->
+    string_times(String, Times - 1) ++ String.

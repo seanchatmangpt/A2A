@@ -1,0 +1,321 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Craftplan MCP + A2A Configuration Schema",
+  "description": "Schema for Craftplan MCP + A2A + elrmcp integration configuration",
+  "type": "object",
+  "properties": {
+    "environment": {
+      "type": "string",
+      "enum": ["development", "testing", "staging", "production"],
+      "description": "Deployment environment"
+    },
+    "config_version": {
+      "type": "string",
+      "description": "Configuration schema version"
+    },
+    "server": {
+      "$ref": "#/definitions/server",
+      "description": "Server configuration"
+    },
+    "logging": {
+      "$ref": "#/definitions/logging",
+      "description": "Logging configuration"
+    },
+    "security": {
+      "$ref": "#/definitions/security",
+      "description": "Security configuration"
+    },
+    "database": {
+      "$ref": "#/definitions/database",
+      "description": "Database configuration"
+    },
+    "mcp": {
+      "$ref": "#/definitions/mcp",
+      "description": "MCP server configuration"
+    },
+    "a2a": {
+      "$ref": "#/definitions/a2a",
+      "description": "A2A agent configuration"
+    },
+    "bridge": {
+      "$ref": "#/definitions/bridge",
+      "description": "Bridge configuration"
+    },
+    "custom_config": {
+      "type": "object",
+      "description": "Custom configuration"
+    }
+  },
+  "required": ["environment", "config_version"],
+  "definitions": {
+    "server": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Server host"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Server port"
+        },
+        "max_connections": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum concurrent connections"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Connection timeout in seconds"
+        },
+        "ssl_enabled": {
+          "type": "boolean",
+          "description": "Enable SSL/TLS"
+        }
+      },
+      "required": ["host", "port"]
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "description": "Logging level"
+        },
+        "format": {
+          "type": "string",
+          "description": "Log format"
+        },
+        "file": {
+          "type": ["string", "null"],
+          "description": "Log file path"
+        },
+        "max_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max log file size in bytes"
+        },
+        "backup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of backup files to keep"
+        },
+        "json_format": {
+          "type": "boolean",
+          "description": "Use JSON log format"
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "properties": {
+        "jwt_secret": {
+          "type": ["string", "null"],
+          "description": "JWT secret key"
+        },
+        "jwt_algorithm": {
+          "type": "string",
+          "description": "JWT algorithm"
+        },
+        "jwt_expiration": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "JWT expiration in seconds"
+        },
+        "api_key": {
+          "type": ["string", "null"],
+          "description": "API key for authentication"
+        },
+        "ssl_cert_path": {
+          "type": ["string", "null"],
+          "description": "SSL certificate path"
+        },
+        "ssl_key_path": {
+          "type": ["string", "null"],
+          "description": "SSL private key path"
+        },
+        "allowed_origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CORS allowed origins"
+        }
+      },
+      "required": ["jwt_secret", "api_key"],
+      "oneOf": [
+        {"required": ["jwt_secret"]},
+        {"required": ["api_key"]}
+      ]
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": ["string", "null"],
+          "description": "Database URL"
+        },
+        "host": {
+          "type": "string",
+          "description": "Database host"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Database port"
+        },
+        "name": {
+          "type": "string",
+          "description": "Database name"
+        },
+        "username": {
+          "type": ["string", "null"],
+          "description": "Database username"
+        },
+        "password": {
+          "type": ["string", "null"],
+          "description": "Database password"
+        },
+        "pool_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Connection pool size"
+        },
+        "max_overflow": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum overflow connections"
+        },
+        "pool_timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Connection pool timeout"
+        }
+      },
+      "required": ["name"]
+    },
+    "mcp": {
+      "type": "object",
+      "properties": {
+        "server_name": {
+          "type": "string",
+          "description": "MCP server name"
+        },
+        "host": {
+          "type": "string",
+          "description": "MCP server host"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "MCP server port"
+        },
+        "protocol_version": {
+          "type": "string",
+          "description": "MCP protocol version"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "MCP server capabilities"
+        },
+        "max_request_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum request size in bytes"
+        },
+        "request_timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Request timeout in seconds"
+        }
+      },
+      "required": ["server_name", "host", "port"]
+    },
+    "a2a": {
+      "type": "object",
+      "properties": {
+        "agent_name": {
+          "type": "string",
+          "description": "A2A agent name"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "A2A agent namespace"
+        },
+        "service_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "A2A service URL"
+        },
+        "event_bus_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Event bus URL"
+        },
+        "task_timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Task timeout in seconds"
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum retry attempts"
+        },
+        "retry_delay": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Retry delay in seconds"
+        },
+        "storage_backend": {
+          "type": "string",
+          "description": "Storage backend (ets, mnesia, redis)"
+        }
+      },
+      "required": ["agent_name", "namespace", "service_url"]
+    },
+    "bridge": {
+      "type": "object",
+      "properties": {
+        "mcp_server": {
+          "$ref": "#/definitions/mcp",
+          "description": "MCP server configuration"
+        },
+        "a2a_agent": {
+          "$ref": "#/definitions/a2a",
+          "description": "A2A agent configuration"
+        },
+        "auto_start": {
+          "type": "boolean",
+          "description": "Auto-start bridge on startup"
+        },
+        "heartbeat_interval": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Heartbeat interval in seconds"
+        },
+        "max_bridge_sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum bridge sessions"
+        },
+        "message_queue_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Message queue size"
+        },
+        "metrics_enabled": {
+          "type": "boolean",
+          "description": "Enable metrics collection"
+        }
+      },
+      "required": ["mcp_server", "a2a_agent"]
+    }
+  }
+}

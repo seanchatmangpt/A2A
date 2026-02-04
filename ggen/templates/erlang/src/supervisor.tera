@@ -1,0 +1,284 @@
+---
+description: "Generate Erlang supervisor module"
+output_dir: "src/"
+file_extension: ".erl"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating Erlang supervisor modules.
+Usage: Generate from modules with behaviour_type = "supervisor"
+{%- endcomment -%}
+
+{%- if module.behaviour_type == "supervisor" -%}
+-module({{ module.module_name }}).
+-behaviour(supervisor).
+
+%%====================================================================
+%% Exports
+%%====================================================================
+
+-export([
+    start_link/0,
+    start_link/1
+]).
+
+%%====================================================================
+ Records
+%%====================================================================
+
+-record(state, {
+    %% Supervisor state
+    children :: list(),
+    metrics :: map()
+}).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+start_link(Args) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, Args).
+
+%%====================================================================
+%% Supervisor Callbacks
+%%====================================================================
+
+init(Args) ->
+    %% Get supervisor strategy
+    Strategy = get_supervisor_strategy(),
+    MaxRestarts = get_max_restarts(),
+    MaxTime = get_max_time(),
+
+    %% Define child specifications
+    Children = define_children(Args),
+
+    %% Initialize metrics
+    Metrics = #{
+        started => erlang:system_time(millisecond),
+        restarts => 0
+    },
+
+    %% HotCI monitoring if enabled
+    {%- if module.hotci_enabled %}
+    HotciChildren = case application:get_env(a2a_erl, enable_hotci, false) of
+        true -> define_hotci_children();
+        false -> []
+    end,
+    {%- else %}
+    HotciChildren = [],
+    {%- endif %}
+
+    AllChildren = Children ++ HotciChildren,
+
+    {ok, {{ Strategy }, MaxRestarts, MaxTime}, AllChildren}}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+get_supervisor_strategy() ->
+    %% Get strategy from module or use default
+    {%- if module.properties %}
+    {%- for prop in module.properties %}
+    {%- if prop.name == "strategy" %}
+    {{ prop.value | default("one_for_one") | capitalize }},
+    {%- endif %}
+    {%- endfor %}
+    {%- else %}
+    one_for_one,
+    {%- endif %}
+
+define_children(Args) ->
+    %% Define child specifications based on args
+    Children = [
+        {%- if module.children %}
+        {%- for child in module.children %}
+        #{
+            id => {{ child.id | capitalize }},
+            start => {{ child.module }}, {{ child.function }}, {{ child.args | default("[]") }},
+            restart => {{ child.restart | default("permanent") }},
+            shutdown => {{ child.shutdown | default("5000") }},
+            type => {{ child.type | default("worker") }},
+            modules => [{{ child.module }}]
+        },
+        {%- endfor %}
+        {%- endif %}
+    ],
+    Children.
+
+{%- if module.hotci_enabled %}
+define_hotci_children() ->
+    %% Define HotCI monitoring children
+    [
+        #{
+            id => hotci_monitor,
+            start => a2a_hotci_monitor, start, [],
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [a2a_hotci_monitor]
+        },
+        #{
+            id => hotci_consistency_checker,
+            start => a2a_hotci_consistency_checker, start, [],
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [a2a_hotci_consistency_checker]
+        }
+    ].
+{%- endif %}
+
+get_max_restarts() ->
+    %% Get max restarts from config
+    case application:get_env(a2a_erl, max_restarts, undefined) of
+        undefined -> 3;
+        N -> N
+    end.
+
+get_max_time() ->
+    %% Get max time from config
+    case application:get_env(a2a_erl, max_time_seconds, undefined) of
+        undefined -> 60;
+        T -> T * 1000
+    end.
+
+%%====================================================================
+%% Child Management Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+restart_child(ChildId) ->
+    supervisor:restart_child(?MODULE, ChildId).
+
+stop_child(ChildId) ->
+    supervisor:terminate_child(?MODULE, ChildId),
+    supervisor:delete_child(?MODULE, ChildId).
+
+get_child_status(ChildId) ->
+    case supervisor:which_children(?MODULE) of
+        [{ChildId, Pid, _, _} | _] ->
+            case process_info(Pid, status) of
+                {status, Status} -> Status;
+                undefined -> dead
+            end;
+        _ -> not_found
+    end.
+
+check_child_health() ->
+    Children = supervisor:which_children(?MODULE),
+    Healthy = [Id || {Id, Pid, _, _} <- Children, is_process_alive(Pid)],
+    case length(Healthy) of
+        length(Children) -> healthy;
+        _ -> unhealthy
+    end.
+{%- endif %}
+
+%%====================================================================
+%% Metrics Functions
+%%====================================================================
+
+get_metrics() ->
+    Children = supervisor:which_children(?MODULE),
+    Processes = [case process_info(Pid, memory) of
+                    {memory, Mem} -> Mem;
+                    undefined -> 0
+                end || {_, Pid, _, _} <- Children, is_process_alive(Pid)],
+
+    Metrics = #{
+        children_count => length(Children),
+        processes_count => length(Processes),
+        memory_usage => lists:sum(Processes),
+        restarts => get_restart_count()
+    },
+    Metrics.
+
+get_restart_count() ->
+    case ets:lookup(a2a_metrics, supervisor_restarts) of
+        [{supervisor_restarts, Count}] -> Count;
+        _ -> 0
+    end.
+
+%%====================================================================
+%% HotCI Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+hotci_upgrade_check() ->
+    %% Perform HotCI upgrade checks
+    Children = supervisor:which_children(?MODULE),
+    ok = hotci_check_children_alive(Children),
+    ok = hotci_check_child_memory(Children),
+    ok = hotci_check_child_response(Children).
+
+hotci_check_children_alive(Children) ->
+    lists:foreach(fun({_, Pid, _, _}) ->
+        case is_process_alive(Pid) of
+            true -> ok;
+            false -> error(child_dead)
+        end
+    end, Children).
+
+hotci_check_child_memory(Children) ->
+    lists:foreach(fun({_, Pid, _, _}) ->
+        case process_info(Pid, memory) of
+            {memory, Mem} when Mem < 100000000 -> ok; % 100MB limit
+            {memory, _} -> warning(high_memory);
+            undefined -> error(no_memory_info)
+        end
+    end, Children).
+
+hotci_check_child_response(Children) ->
+    lists:foreach(fun({_, Pid, _, _}) ->
+        case process_info(Pid, status) of
+            {status, Status} when Status == running; Status == waiting -> ok;
+            {status, _} -> warning(unexpected_status);
+            undefined -> error(no_status_info)
+        end
+    end, Children).
+{%- endif %}
+
+%%====================================================================
+%% Cleanup Functions
+%%====================================================================
+
+cleanup() ->
+    %% Graceful shutdown
+    Children = supervisor:which_children(?MODULE),
+    lists:foreach(fun({Id, Pid, _, _}) ->
+        supervisor:terminate_child(?MODULE, Id),
+        supervisor:delete_child(?MODULE, Id)
+    end, Children).
+
+%%====================================================================
+%% EUnit Tests
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+start_stop_test() ->
+    {ok, Pid} = start_link(),
+    unlink(Pid),
+    exit(Pid, kill),
+    ok.
+
+child_restart_test() ->
+    {ok, _} = start_link(),
+    {%- if module.hotci_enabled %}
+    ?assertEqual(ok, restart_child(test_child)),
+    {%- endif %}
+    ok.
+
+{%- if module.hotci_enabled %}
+hotci_check_test() ->
+    {ok, _} = start_link(),
+    ?assertEqual(ok, hotci_upgrade_check()),
+    ok.
+{%- endif %}
+
+-endif.
+{%- endif -%}

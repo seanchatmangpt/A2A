@@ -1,0 +1,495 @@
+---
+description: "Generate Erlang ETS wrapper module"
+output_dir: "src/"
+file_extension: ".erl"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating Erlang ETS wrapper modules.
+Usage: Generate from modules with type = "ets_table"
+{%- endcomment -%}
+
+{%- if module.type == "ets_table" -%}
+-module({{ module.module_name }}).
+
+%%====================================================================
+%% Exports
+%%====================================================================
+
+-export([
+    start/0,
+    stop/0,
+    lookup/1,
+    lookup/2,
+    insert/1,
+    insert/2,
+    delete/1,
+    delete/2,
+    update/2,
+    match/1,
+    match/2,
+    foldl/3,
+    foldr/3,
+    select/1,
+    select/2,
+    info/0,
+    clear/0,
+    tab2list/0
+]).
+
+-export([
+    start_link/0,
+    init/1,
+    terminate/2
+]).
+
+-export([
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2
+]).
+
+%%====================================================================
+%% Records
+%%====================================================================
+
+-record(state, {
+    table :: ets:tid() | undefined,
+    name :: atom(),
+    type :: set | bag | duplicate_bag | ordered_set,
+    protection :: public | protected | private,
+    options :: list(),
+    metrics :: map()
+}).
+
+%%====================================================================
+%% Public API Functions
+%%====================================================================
+
+start() ->
+    case start_link() of
+        {ok, Pid} -> {ok, Pid};
+        Error -> Error
+    end.
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+stop() ->
+    gen_server:stop({local, ?MODULE}).
+
+lookup(Key) ->
+    gen_server:call(?MODULE, {lookup, Key}).
+
+lookup(Key, Default) ->
+    case gen_server:call(?MODULE, {lookup, Key}) of
+        undefined -> Default;
+        Value -> Value
+    end.
+
+insert(Key) ->
+    gen_server:call(?MODULE, {insert, Key}).
+
+insert(Key, Value) ->
+    gen_server:call(?MODULE, {insert, Key, Value}).
+
+delete(Key) ->
+    gen_server:call(?MODULE, {delete, Key}).
+
+delete(Key, Return) ->
+    gen_server:call(?MODULE, {delete, Key, Return}).
+
+update(Key, Value) ->
+    gen_server:call(?MODULE, {update, Key, Value}).
+
+match(Spec) ->
+    gen_server:call(?MODULE, {match, Spec}).
+
+match(Pattern, Guard) ->
+    gen_server:call(?MODULE, {match, Pattern, Guard}).
+
+foldl(Fun, Acc0, Options) ->
+    gen_server:call(?MODULE, {foldl, Fun, Acc0, Options}).
+
+foldr(Fun, Acc0, Options) ->
+    gen_server:call(?MODULE, {foldr, Fun, Acc0, Options}).
+
+select(MatchSpec) ->
+    gen_server:call(?MODULE, {select, MatchSpec}).
+
+select(MatchSpec, Options) ->
+    gen_server:call(?MODULE, {select, MatchSpec, Options}).
+
+info() ->
+    gen_server:call(?MODULE, info).
+
+clear() ->
+    gen_server:call(?MODULE, clear).
+
+tab2list() ->
+    gen_server:call(?MODULE, tab2list).
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(Args) ->
+    %% Get table configuration
+    Table = case application:get_env({{ module.module_name }}, table_name) of
+        {ok, Name} when is_atom(Name) -> Name;
+        _ -> {{ module.module_name | underscore | atomize }}
+    end,
+
+    Type = get_table_type(),
+    Protection = get_table_protection(),
+    Options = get_table_options(),
+
+    %% Create ETS table
+    case ets:new(Table, [Type, Protection] ++ Options) of
+        Tid when is_reference(Tid) ->
+            %% Initialize state
+            State = #state{
+                table = Tid,
+                name = Table,
+                type = Type,
+                protection = Protection,
+                options = Options,
+                metrics = #{
+                    created => erlang:system_time(millisecond),
+                    operations => 0
+                }
+            },
+
+            %% Initialize from args
+            State2 = handle_init_args(State, Args),
+
+            %% Start HotCI monitoring if enabled
+            {%- if module.hotci_enabled %}
+            State3 = maybe_start_hotci_monitor(State2),
+            {%- else %}
+            State3 = State2,
+            {%- endif %}
+
+            {ok, State3};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
+
+handle_call({lookup, Key}, _From, State) ->
+    Result = do_lookup(State, Key),
+    {reply, Result, update_metrics(lookup, State)};
+
+handle_call({lookup, Key, Default}, _From, State) ->
+    Result = case do_lookup(State, Key) of
+        undefined -> Default;
+        Value -> Value
+    end,
+    {reply, Result, update_metrics(lookup, State)};
+
+handle_call({insert, Key}, _From, State) ->
+    Result = do_insert(State, Key, true),
+    {reply, Result, update_metrics(insert, State)};
+
+handle_call({insert, Key, Value}, _From, State) ->
+    Result = do_insert(State, Key, Value),
+    {reply, Result, update_metrics(insert, State)};
+
+handle_call({delete, Key}, _From, State) ->
+    Result = do_delete(State, Key, false),
+    {reply, Result, update_metrics(delete, State)};
+
+handle_call({delete, Key, Return}, _From, State) ->
+    Result = do_delete(State, Key, Return),
+    {reply, Result, update_metrics(delete, State)};
+
+handle_call({update, Key, Value}, _From, State) ->
+    Result = do_update(State, Key, Value),
+    {reply, Result, update_metrics(update, State)};
+
+handle_call({match, Spec}, _From, State) ->
+    Result = do_match(State, Spec),
+    {reply, Result, update_metrics(match, State)};
+
+handle_call({match, Pattern, Guard}, _From, State) ->
+    Result = do_match(State, Pattern, Guard),
+    {reply, Result, update_metrics(match, State)};
+
+handle_call({foldl, Fun, Acc0, Options}, _From, State) ->
+    Result = do_foldl(State, Fun, Acc0, Options),
+    {reply, Result, update_metrics(foldl, State)};
+
+handle_call({foldr, Fun, Acc0, Options}, _From, State) ->
+    Result = do_foldr(State, Fun, Acc0, Options),
+    {reply, Result, update_metrics(foldr, State)};
+
+handle_call({select, MatchSpec}, _From, State) ->
+    Result = do_select(State, MatchSpec, []),
+    {reply, Result, update_metrics(select, State)};
+
+handle_call({select, MatchSpec, Options}, _From, State) ->
+    Result = do_select(State, MatchSpec, Options),
+    {reply, Result, update_metrics(select, State)};
+
+handle_call(info, _From, State) ->
+    Info = #{
+        table => State#state.table,
+        name => State#state.name,
+        type => State#state.type,
+        protection => State#state.protection,
+        options => State#state.options,
+        metrics => State#state.metrics
+    },
+    {reply, Info, State};
+
+handle_call(clear, _From, State) ->
+    ok = ets:delete_all_objects(State#state.table),
+    {reply, ok, update_metrics(clear, State)};
+
+handle_call(tab2list, _From, State) ->
+    Result = ets:tab2list(State#state.table),
+    {reply, Result, update_metrics(tab2list, State)};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, State) ->
+    %% Clean up ETS table
+    case State#state.table of
+        undefined -> ok;
+        Tid -> ets:delete(Tid)
+    end,
+    ok.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+get_table_type() ->
+    %% Get table type from module config
+    {%- if module.properties %}
+    {%- for prop in module.properties %}
+    {%- if prop.name == "type" %}
+    {{ prop.value | default("set") | lower }},
+    {%- endif %}
+    {%- endfor %}
+    {%- else %}
+    set,
+    {%- endif %}
+
+get_table_protection() ->
+    %% Get table protection from module config
+    {%- if module.properties %}
+    {%- for prop in module.properties %}
+    {%- if prop.name == "protection" %}
+    {{ prop.value | default("public") | lower }},
+    {%- endif %}
+    {%- endfor %}
+    {%- else %}
+    public,
+    {%- endif %}
+
+get_table_options() ->
+    %% Get table options from module config
+    {%- if module.properties %}
+    {%- for prop in module.properties %}
+    {%- if prop.name == "options" %}
+    [{{ prop.value | default("[]") }}],
+    {%- endif %}
+    {%- endfor %}
+    {%- else %}
+    [],
+    {%- endif %}
+
+handle_init_args(#state{} = State, Args) ->
+    %% Process initialization arguments
+    maps:fold(fun(K, V, S) -> init_arg(K, V, S) end, State, Args).
+
+init_arg(_Key, _Value, State) ->
+    State.
+
+do_lookup(#state{table = Tid}, Key) ->
+    ets:lookup_element(Tid, Key, 2, undefined).
+
+do_insert(#state{table = Tid}, Key, Value) ->
+    ets:insert(Tid, {Key, Value}).
+
+do_delete(#state{table = Tid}, Key, Return) ->
+    case Return of
+        true -> ets:take(Tid, Key);
+        false -> ets:delete(Tid, Key)
+    end.
+
+do_update(#state{table = Tid}, Key, Value) ->
+    ets:insert(Tid, {Key, Value}).
+
+do_match(#state{table = Tid}, Pattern) ->
+    ets:match_object(Tid, Pattern).
+
+do_match(#state{table = Tid}, Pattern, Guard) ->
+    ets:match_object(Tid, Pattern, Guard).
+
+do_foldl(#state{table = Tid}, Fun, Acc0, Options) ->
+    ets:foldl(Fun, Acc0, Tid, Options).
+
+do_foldr(#state{table = Tid}, Fun, Acc0, Options) ->
+    ets:foldr(Fun, Acc0, Tid, Options).
+
+do_select(#state{table = Tid}, MatchSpec, Options) ->
+    ets:select(Tid, MatchSpec, Options).
+
+update_metrics(Operation, #state{metrics = Metrics} = State) ->
+    Operations = maps:get(operations, Metrics, 0) + 1,
+    State#state{
+        metrics = Metrics#{operations => Operations}
+    }.
+
+{%- if module.hotci_enabled %}
+maybe_start_hotci_monitor(#state{} = State) ->
+    case application:get_env(a2a_erl, enable_hotci, false) of
+        true ->
+            case whereis({{ module.module_name | underscore }}_monitor) of
+                undefined ->
+                    {ok, _} = a2a_hotci_monitor:start(),
+                    State;
+                _ ->
+                    State
+            end;
+        false ->
+            State
+    end.
+
+hotci_monitor() ->
+    case whereis({{ module.module_name | underscore }}_monitor) of
+        undefined ->
+            a2a_hotci_monitor:start();
+        Pid ->
+            Pid
+    end.
+{%- endif %}
+
+%%====================================================================
+%% Query Functions
+%%====================================================================
+
+count() ->
+    gen_server:call(?MODULE, count).
+
+keys() ->
+    gen_server:call(?MODULE, keys).
+
+values() ->
+    gen_server:call(?MODULE, values).
+
+size() ->
+    gen_server:call(?MODULE, size).
+
+is_key(Key) ->
+    gen_server:call(?MODULE, {is_key, Key}).
+
+keypos(N) ->
+    gen_server:call(?MODULE, {keypos, N}).
+
+%%====================================================================
+%% Maintenance Functions
+%%====================================================================
+
+backup(File) ->
+    gen_server:call(?MODULE, {backup, File}).
+
+restore(File) ->
+    gen_server:call(?MODULE, {restore, File}).
+
+dump() ->
+    gen_server:call(?MODULE, dump).
+
+load(Data) ->
+    gen_server:call(?MODULE, {load, Data}).
+
+%%====================================================================
+%% Debug Functions
+%%====================================================================
+
+debug_dump() ->
+    gen_server:call(?MODULE, debug_dump).
+
+debug_info() ->
+    gen_server:call(?MODULE, debug_info).
+
+set_debug(Enabled) ->
+    gen_server:call(?MODULE, {set_debug, Enabled}).
+
+%%====================================================================
+%% HotCI Functions
+%%====================================================================
+
+{%- if module.hotci_enabled %}
+hotci_check_integrity() ->
+    %% Check ETS table integrity
+    gen_server:call(?MODULE, hotci_check_integrity).
+
+hotci_check_performance() ->
+    %% Check ETS table performance
+    gen_server:call(?MODULE, hotci_check_performance).
+
+hotci_backup_check() ->
+    %% Check backup consistency
+    gen_server:call(?MODULE, hotci_backup_check).
+{%- endif %}
+
+%%====================================================================
+%% EUnit Tests
+%%====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+start_stop_test() ->
+    {ok, Pid} = start_link(),
+    unlink(Pid),
+    exit(Pid, kill),
+    ok.
+
+insert_lookup_test() ->
+    {ok, _} = start_link(),
+    ok = insert(key1, value1),
+    ?assertEqual(value1, lookup(key1)),
+    ok.
+
+delete_test() ->
+    {ok, _} = start_link(),
+    ok = insert(key1, value1),
+    ok = delete(key1),
+    ?assertEqual(undefined, lookup(key1)),
+    ok.
+
+update_test() ->
+    {ok, _} = start_link(),
+    ok = insert(key1, value1),
+    ok = update(key1, value2),
+    ?assertEqual(value2, lookup(key1)),
+    ok.
+
+foldl_test() ->
+    {ok, _} = start_link(),
+    ok = insert(key1, value1),
+    ok = insert(key2, value2),
+    Sum = foldl(fun({K, V}, Acc) -> Acc + V end, 0, []),
+    ?assertEqual(value1 + value2, Sum),
+    ok.
+
+hotci_test() ->
+    {ok, _} = start_link(),
+    {%- if module.hotci_enabled %}
+    ?assertEqual(ok, hotci_check_integrity()),
+    ?assertEqual(ok, hotci_check_performance()),
+    {%- endif %}
+    ok.
+
+-endif.
+{%- endif -%}

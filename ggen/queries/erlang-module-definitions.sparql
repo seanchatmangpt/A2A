@@ -1,0 +1,102 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Extract comprehensive Erlang module definitions from OTP patterns
+CONSTRUCT {
+    ?module a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviourType ;
+        a2a:behaviour_strategy ?behaviourStrategy ;
+        a2a:exported_functions ?exportedFunctions ;
+        a2a:exported_types ?exportedTypes ;
+        a2a:record_definitions ?recordDefinitions ;
+        a2a:callback_functions ?callbackFunctions ;
+        a2a:hotci_enabled ?hotciEnabled ;
+        a2a:upgrade_monitor ?upgradeMonitor ;
+        a2a:rollback_support ?rollbackSupport ;
+        rdfs:label ?moduleLabel ;
+        rdfs:comment ?moduleComment .
+}
+WHERE {
+    # Find all modules that implement OTP behaviours
+    ?module a rdfs:Class ;
+        rdfs:subClassOf* ?behaviour .
+
+    ?behaviour a erl:behaviour .
+
+    # Extract module name from label or URI
+    OPTIONAL {
+        ?module rdfs:label ?moduleLabel .
+        FILTER(BOUND(?moduleLabel))
+    }
+    BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+    # Get behaviour type
+    OPTIONAL {
+        ?module a ?behaviour .
+        ?behaviour rdfs:label ?behaviourLabel .
+        BIND(STR(?behaviourLabel) AS ?behaviourType)
+    }
+
+    # Get supervisor-specific strategy
+    OPTIONAL {
+        ?module a erl:supervisor ;
+            a2a:supervisor_strategy ?strategy .
+        BIND(STR(?strategy) AS ?behaviourStrategy)
+    }
+
+    # Extract exported functions
+    OPTIONAL {
+        ?module a2a:exported_functions ?functions .
+        BIND(STR(?functions) AS ?exportedFunctions)
+    }
+
+    # Extract exported types
+    OPTIONAL {
+        ?module a2a:exported_types ?types .
+        BIND(STR(?types) AS ?exportedTypes)
+    }
+
+    # Extract callback functions for behaviours
+    OPTIONAL {
+        ?module a ?behaviour .
+        ?behaviour rdfs:subClassOf erl:behaviour .
+        ?behaviour rdfs:comment ?callbackComment .
+        FILTER(STRSTARTS(STR(?callbackComment), "Callbacks:"))
+        BIND(SUBSTR(STR(?callbackComment), 10) AS ?callbackFunctions)
+    }
+
+    # Extract record definitions
+    OPTIONAL {
+        ?record a a2a:record ;
+            rdfs:label ?recordLabel ;
+            a2a:record_field ?recordField .
+        ?record rdfs:comment ?recordComment .
+        BIND(CONCAT(?recordLabel, "(", ?recordField, ")") AS ?recordDefinitions)
+    }
+
+    # HotCI properties
+    OPTIONAL {
+        ?module a2a:hotci_enabled ?hotciEnabled .
+    }
+    BIND(COALESCE(?hotciEnabled, false) AS ?hotciEnabled)
+
+    OPTIONAL {
+        ?module a2a:upgrade_monitor ?upgradeMonitor .
+    }
+    BIND(COALESCE(?upgradeMonitor, false) AS ?upgradeMonitor)
+
+    OPTIONAL {
+        ?module a2a:rollback_support ?rollbackSupport .
+    }
+    BIND(COALESCE(?rollbackSupport, false) AS ?rollbackSupport)
+
+    # Module comment
+    OPTIONAL {
+        ?module rdfs:comment ?moduleComment .
+    }
+}

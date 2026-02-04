@@ -1,0 +1,112 @@
+---
+description: "Generate sys.config file"
+output_dir: "config/"
+file_extension: ".config"
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating sys.config file
+Usage: Generate from application configuration
+{%- endcomment -%}
+
+{{
+{
+    "{% raw %}[{{ module.name }}]{% endraw %}": {
+        "http_port": {{ module.http_port | default(8080) }},
+        "enable_sse": {{ module.enable_sse | default(true) }},
+        "enable_metrics": {{ module.enable_metrics | default(true) }},
+        "log_level": "{{ module.log_level | default("info") }}",
+        {%- if module.hotci_enabled %}
+        "enable_hotci": true,
+        "hotci_monitor_interval": {{ module.hotci_monitor_interval | default(30000) }},
+        {%- endif %}
+        {%- if module.ets_tables %}
+        "ets_tables": [
+            {%- for table in module.ets_tables %}
+            {
+                "name": "{{ table.name }}",
+                "type": "{{ table.type | default("set") }}",
+                "protection": "{{ table.protection | default("public") }}",
+                "options": [{{ table.options | default("[]") }}]
+            }
+            {%- endfor %}
+        ],
+        {%- endif %}
+        {%- if module.ets_tables %}
+        "supervisor_children": [
+            {%- for child in module.supervisor_children %}
+            {
+                "id": "{{ child.id }}",
+                "module": "{{ child.module }}",
+                "function": "{{ child.function }}",
+                "args": {{ child.args | default("[]") }},
+                "restart": "{{ child.restart | default("permanent") }}",
+                "shutdown": {{ child.shutdown | default(5000) }},
+                "type": "{{ child.type | default("worker") }}"
+            }
+            {%- endfor %}
+        ],
+        {%- endif %}
+        {%- if module.plugins %}
+        "plugins": [
+            {%- for plugin in module.plugins %}
+            "{{ plugin }}"
+            {%- endfor %}
+        ],
+        {%- endif %}
+        {%- if module.env_vars %}
+        "environment": [
+            {%- for env in module.env_vars %}
+            {
+                "name": "{{ env.name }}",
+                "value": "{{ env.value }}"
+            }
+            {%- endfor %}
+        ],
+        {%- endif %}
+        {%- if module.database %}
+        "database": {
+            {%- for key, value in module.database %}
+            {{ key }}: {{ value }},
+            {%- endfor %}
+            {%- if module.database %}
+            {%- endif %}
+        },
+        {%- endif %}
+        {%- if module.security %}
+        "security": {
+            "auth_enabled": {{ module.security.auth_enabled | default(false) }},
+            "api_key_required": {{ module.security.api_key_required | default(false) }},
+            "rate_limiting": {
+                "enabled": {{ module.security.rate_limiter.enabled | default(false) }},
+                "requests_per_minute": {{ module.security.rate_limiter.requests_per_minute | default(100) }}
+            }
+        },
+        {%- endif %}
+        "metrics": {
+            "enabled": {{ module.metrics.enabled | default(true) }},
+            "collection_interval": {{ module.metrics.collection_interval | default(10000) }},
+            "exporter": "{{ module.metrics.exporter | default("prometheus") }}"
+        }
+    },
+    {%- if module.dependencies %}
+    "{% raw %}[sasl]{% endraw %}": {
+        "errlog_type": "error",
+        "sasl_error_logger": {file, "log/sasl-error.log"}
+    },
+    {%- if module.hotci_enabled %}
+    "{% raw %}[a2a_hotci]{% endraw %}": {
+        "enabled": true,
+        "upgrade_validation": true,
+        "rollback_timeout": {{ module.rollback_timeout | default(30000) }},
+        "monitoring_interval": {{ module.monitoring_interval | default(10000) }}
+    },
+    {%- endif %}
+    {%- endif %}
+    "{% raw %}[kernel]{% endraw %}": {
+        "inet_dist_listen_min": 9100,
+        "inet_dist_listen_max": 9105,
+        "dist_auto_connect": never
+    }
+} | json_encode
+}}

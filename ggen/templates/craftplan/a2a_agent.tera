@@ -1,0 +1,215 @@
+{#- Craftplan A2A Agent Template -#}
+-module({{ module_name }}_a2a_agent).
+-behaviour(gen_server).
+
+%% API
+-export([start_link/0, stop/0]).
+-export([submit_task/2, get_task/1, send_message/2]).
+-export([list_agents/0, discover_agents/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
+-include("a2a.hrl").
+
+-define(SERVER, ?MODULE).
+-define(AGENT_ID, <<"craftplan-erp-agent">>).
+
+-record(state, {
+    agent_id :: binary(),
+    tasks :: map(),
+    connections :: map(),
+    mcp_server_url :: binary(),
+    metrics :: map()
+}).
+
+%%====================================================================
+%% API
+%%====================================================================
+
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() ->
+    gen_server:stop(?SERVER).
+
+%% @doc Submit a task to this agent
+-spec submit_task(binary(), map()) -> {ok, binary()} | {error, term()}.
+submit_task(TaskType, Params) ->
+    gen_server:call(?SERVER, {submit_task, TaskType, Params}).
+
+%% @doc Get task details
+-spec get_task(binary()) -> {ok, map()} | {error, not_found}.
+get_task(TaskId) ->
+    gen_server:call(?SERVER, {get_task, TaskId}).
+
+%% @doc Send a message to a task
+-spec send_message(binary(), map()) -> ok | {error, term()}.
+send_message(TaskId, Message) ->
+    gen_server:call(?SERVER, {send_message, TaskId, Message}).
+
+%% @doc List all known agents
+-spec list_agents() -> {ok, [map()]}.
+list_agents() ->
+    gen_server:call(?SERVER, list_agents).
+
+%% @doc Discover agents via Agent Card
+-spec discover_agents(binary()) -> {ok, [map()]} | {error, term()}.
+discover_agents(AgentURL) ->
+    gen_server:call(?SERVER, {discover_agents, AgentURL}).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+init([]) ->
+    MCPURL = application:get_env({{ module_name }}_a2a, mcp_server_url,
+        "http://localhost:8090/mcp"),
+
+    State = #state{
+        agent_id = ?AGENT_ID,
+        tasks = #{},
+        connections = #{},
+        mcp_server_url = list_to_binary(MCPURL),
+        metrics = #{tasks_submitted => 0, tasks_completed => 0}
+    },
+
+    %% Start SSE listener for real-time updates
+    start_sse_listener(),
+
+    io:format("Craftplan A2A Agent started: ~s~n", [?AGENT_ID]),
+    {ok, State}.
+
+handle_call({submit_task, TaskType, Params}, _From, State) ->
+    TaskId = generate_task_id(),
+
+    Task = #{
+        task_id => TaskId,
+        task_type => TaskType,
+        status => submitted,
+        params => Params,
+        created_at => os:system_time(millisecond),
+        updated_at => os:system_time(millisecond),
+        artifacts => []
+    },
+
+    %% Execute task via MCP bridge
+    Result = execute_via_mcp(TaskType, Params, State),
+
+    NewTask = case Result of
+        {ok, Artifacts} ->
+            Task#{status => completed, artifacts => Artifacts};
+        {error, Reason} ->
+            Task#{status => failed, error => Reason}
+    end,
+
+    NewTasks = maps:put(TaskId, NewTask, State#state.tasks),
+    NewMetrics = State#state.metrics#{
+        tasks_submitted => State#state.metrics.tasks_submitted + 1
+    },
+
+    {reply, {ok, TaskId}, State#state{tasks = NewTasks, metrics = NewMetrics}};
+
+handle_call({get_task, TaskId}, _From, State) ->
+    case maps:get(TaskId, State#state.tasks, undefined) of
+        undefined -> {reply, {error, not_found}, State};
+        Task -> {reply, {ok, Task}, State}
+    end;
+
+handle_call({send_message, TaskId, Message}, _From, State) ->
+    case maps:get(TaskId, State#state.tasks, undefined) of
+        undefined ->
+            {reply, {error, not_found}, State};
+        Task ->
+            %% Forward message to MCP server
+            Result = send_message_to_task(TaskId, Message, State),
+            {reply, Result, State}
+    end;
+
+handle_call(list_agents, _From, State) ->
+    Agents = maps:fold(fun(_Id, AgentData, Acc) ->
+        [AgentData | Acc]
+    end, [], State#state.connections),
+    {reply, {ok, Agents}, State};
+
+handle_call({discover_agents, AgentURL}, _From, State) ->
+    Result = discover_agent(AgentURL),
+    {reply, Result, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({sse_event, Event}, State) ->
+    io:format("SSE Event: ~p~n", [Event]),
+    {noreply, State};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+%% Execute task via MCP bridge
+execute_via_mcp(TaskType, Params, _State) ->
+    %% Map A2A task types to MCP tools
+    ToolName = task_type_to_tool(TaskType),
+    MCPParams = params_to_mcp_format(TaskType, Params),
+
+    %% Call MCP server
+    case craftplan_mcp_server:call_tool(ToolName, MCPParams) of
+        {ok, Result} ->
+            {ok, [Result]};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Map task type to MCP tool name
+task_type_to_tool(<<"customer_management">>) -> <<"customer_management">>;
+task_type_to_tool(<<"order_management">>) -> <<"order_management">>;
+task_type_to_tool(<<"inventory_management">>) -> <<"inventory_management">>;
+task_type_to_tool(<<"production_planning">>) -> <<"production_planning">>;
+task_type_to_tool(<<"analytics">>) -> <<"analytics">>;
+task_type_to_tool(<<"shipping">>) -> <<"shipping">>;
+task_type_to_tool(Other) -> Other.
+
+%% Convert A2A params to MCP format
+params_to_mcp_format(_TaskType, Params) ->
+    Params.
+
+%% Send message to task
+send_message_to_task(_TaskId, _Message, _State) ->
+    %% Implement message forwarding to MCP/A2A bridge
+    ok.
+
+%% Discover agent via Agent Card
+discover_agent(AgentURL) ->
+    CardURL = <<AgentURL/binary, "/.well-known/agent-card">>,
+
+    case httpc:request(get, {binary_to_list(CardURL), []}, [], []) of
+        {ok, {{_, 200, _}, _, Body}} ->
+            {ok, jiffy:decode(Body, [return_maps])};
+        {ok, {{_, Code, _}, _, _}} ->
+            {error, {http_error, Code}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Start SSE listener
+start_sse_listener() ->
+    %% In real implementation, start gun or hackney for SSE
+    ok.
+
+%% Generate unique task ID
+generate_task_id() ->
+    Timestamp = os:system_time(millisecond),
+    Random = rand:uniform(1000000),
+    iolist_to_binary(io_lib:format("task_~p_~p", [Timestamp, Random])).

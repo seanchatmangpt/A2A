@@ -1,0 +1,154 @@
+---
+description: "Kubernetes ConfigMap for application configuration"
+output_dir: "k8s"
+file_extension: ".yaml"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  app_port: "{{ port | default(8080) }}"
+  hotci_enabled: "{{ module.hotci_enabled | default(false) }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+  health_check_path: "{{ health_check_path | default('/health') }}"
+---
+{%- comment -%}
+Kubernetes ConfigMap for application configuration
+{-% endcomment -%}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ app_name }}-config
+  namespace: {{ namespace }}
+  labels:
+    app: {{ app_name }}
+    version: {{ version | default('1.0.0') }}
+  annotations:
+    description: "{{ app_name }} application configuration"
+    app.kubernetes.io/name: {{ app_name }}
+    app.kubernetes.io/instance: {{ app_name }}
+    app.kubernetes.io/version: {{ version | default('1.0.0') }}
+    app.kubernetes.io/component: configuration
+data:
+  # Application configuration
+  app.config: |
+    %% Erlang application configuration
+    {port, {{ app_port }}}.
+    {log_level, {{ log_level | default('info') }}}.
+    {environment, {{ environment | default('production') }}}.
+    {metrics_port, {{ metrics_port }}}.
+    {health_check_path, "{{ health_check_path }}}.
+
+    %% HotCI configuration (if enabled)
+    {%- if hotci_enabled %}
+    {hotci, [
+        {enabled, true},
+        {check_interval, {{ hotci_check_interval | default('30s') }}},
+        {upgrade_validation, {{ hotci_upgrade_validation | default(true) }}},
+        {rollback_timeout, {{ hotci_rollback_timeout | default('30000') }}}
+    ]}.
+    {%- endif %}
+
+    %% Database configuration
+    {database, [
+        {host, {{ db_host | default('postgres') }}},
+        {port, {{ db_port | default(5432) }}},
+        {name, {{ db_name | default('app_db') }}},
+        {user, {{ db_user | default('app_user') }}},
+        {password, {{ db_password | default('secure_password') }}},
+        {ssl_mode, {{ db_ssl_mode | default('require') }}},
+        {pool_size, {{ db_pool_size | default(10) }}}
+    ]}.
+
+    %% Redis configuration
+    {redis, [
+        {host, {{ redis_host | default('redis') }}},
+        {port, {{ redis_port | default(6379) }}},
+        {password, {{ redis_password | default('') }}},
+        {database, {{ redis_database | default(0) }}}
+    ]}.
+
+    %% RabbitMQ configuration
+    {rabbitmq, [
+        {host, {{ rabbitmq_host | default('rabbitmq') }}},
+        {port, {{ rabbitmq_port | default(5672) }}},
+        {username, {{ rabbitmq_user | default('app_user') }}},
+        {password, {{ rabbitmq_password | default('rabbitmq_password') }}},
+        {vhost, {{ rabbitmq_vhost | default('/') }}}
+    ]}.
+
+  # Log configuration
+  log.config: |
+    %% Logging configuration
+    {log_level, {{ log_level | default('info') }}}.
+    {log_format, {{ log_format | default('json') }}}.
+    {outputs, [
+        {file, [
+            {path, "/app/log/app.log"},
+            {max_size, "100MB"},
+            {max_backups, 5},
+            {max_age, 30},
+            {compress, true}
+        ]},
+        {console, [
+            {enabled, true}
+        ]}
+    ]}.
+
+  # Security configuration
+  security.config: |
+    %% Security configuration
+    {auth, [
+        {enabled, {{ auth_enabled | default(true) }}},
+        {jwt_secret, "{{ jwt_secret | default('your-secret-key') }}"},
+        {jwt_expires_in, {{ jwt_expires_in | default('1h') }}},
+        {bcrypt_rounds, {{ bcrypt_rounds | default(12) }}}
+    ]}.
+
+    {cors, [
+        {enabled, {{ cors_enabled | default(true) }}},
+        {allowed_origins, {{ cors_allowed_origins | default(['*']) | safe }}},
+        {allowed_methods, {{ cors_allowed_methods | default(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) | safe }}},
+        {allowed_headers, {{ cors_allowed_headers | default(['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']) | safe }}}
+    ]}.
+
+    {rate_limit, [
+        {enabled, {{ rate_limit_enabled | default(true) }}},
+        {requests_per_minute, {{ rate_limit_requests | default(100) }}}
+    ]}.
+
+  # Monitoring configuration
+  monitoring.config: |
+    %% Monitoring configuration
+    {monitoring, [
+        {enabled, {{ monitoring_enabled | default(true) }}},
+        {metrics_port, {{ metrics_port }}},
+        {health_check_path, "{{ health_check_path }}"},
+        {prometheus, [
+            {enabled, {{ prometheus_enabled | default(true) }}},
+            {scrape_interval, {{ prometheus_scrape_interval | default('30s') }}},
+            {scrape_timeout, {{ prometheus_scrape_timeout | default('10s') }}}
+        ]},
+        {grafana, [
+            {enabled, {{ grafana_enabled | default(true) }}},
+            {dashboard_url, {{ grafana_dashboard_url | default('http://grafana:3000') }}}
+        ]}
+    ]}.
+
+  # Performance configuration
+  performance.config: |
+    %% Performance tuning
+    {performance, [
+        {erlang, [
+            {scheduler_count, {{ erl_schedulers | default(8) }}},
+            {process_count, {{ erl_processes | default(1024) }}},
+            {port, {{ erl_port | default(4369) }}}
+        ]},
+        {memory, [
+            {heap_size, "{{ memory_heap_size | default('1024M') }}"},
+            {stack_size, "{{ memory_stack_size | default('8M') }}"}
+        ]},
+        {files, [
+            {soft_limit, {{ files_soft_limit | default(10240) }}},
+            {hard_limit, {{ files_hard_limit | default(20480) }}}
+        ]}
+    ]}.

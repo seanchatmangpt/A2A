@@ -1,0 +1,34 @@
+# SPARQL Query to Extract MCP Servers from Erlang MCP Ontology
+# Returns MCP server configurations and properties
+
+PREFIX : <https://github.com/a2a/ontology/erlang-mcp#>
+PREFIX erl: <https://github.com/a2a/ontology/erlang-otp#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?server ?serverName ?serverHost ?serverPort ?protocolVersion
+               ?maxConnections ?heartbeatInterval ?hotCIEnabled ?hotCIMonitorInterval
+               ?upgradeMonitor ?rollbackTimeout ?applicationName ?releaseName
+WHERE {
+    # Find MCP servers
+    ?server a :ErlangMCPServer .
+
+    # Extract server properties
+    OPTIONAL { ?server :mcpServerName ?serverName }
+    OPTIONAL { ?server :mcpServerHost ?serverHost }
+    OPTIONAL { ?server :mcpServerPort ?serverPort }
+    OPTIONAL { ?server :mcpProtocolVersion ?protocolVersion }
+    OPTIONAL { ?server :mcpMaxConnections ?maxConnections }
+    OPTIONAL { ?server :mcpHeartbeatInterval ?heartbeatInterval }
+    OPTIONAL { ?server :mcpHotCIEnabled ?hotCIEnabled }
+    OPTIONAL { ?server :mcpHotCIMonitorInterval ?hotCIMonitorInterval }
+    OPTIONAL { ?server :mcpHotCIUpgradeMonitor ?upgradeMonitor }
+    OPTIONAL { ?server :mcpHotCIRollbackTimeout ?rollbackTimeout }
+
+    # Extract Erlang application information
+    OPTIONAL { ?server erl:applicationName ?applicationName }
+    OPTIONAL { ?server erl:releaseName ?releaseName }
+
+    # Filter for enabled servers only
+    FILTER (?hotCIEnabled = true || !BOUND(?hotCIEnabled))
+}
+ORDER BY ?serverName

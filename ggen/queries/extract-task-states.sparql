@@ -1,0 +1,33 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX a2a: <https://a2a.com/schema/>
+
+# Extract task state machine states and transitions
+CONSTRUCT {
+    ?state a a2a:task_state ;
+        r2a:state_name ?stateName ;
+        rdfs:comment ?comment ;
+        a2a:state_transition ?targetState .
+}
+WHERE {
+    # Find all task states
+    ?state a a2a:task_state .
+
+    # Get state name
+    OPTIONAL {
+        ?state rdfs:label ?stateName .
+        FILTER(BOUND(?stateName))
+    }
+    BIND(COALESCE(?stateName, REPLACE(STR(?state), ".*(#|/)", "")) AS ?stateName)
+
+    # Get comment
+    OPTIONAL {
+        ?state rdfs:comment ?comment .
+    }
+
+    # Extract transitions (this requires manual annotation in the ontology)
+    OPTIONAL {
+        ?state a2a:state_transition ?targetState .
+        ?targetState a a2a:task_state .
+    }
+}

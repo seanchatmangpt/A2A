@@ -1,0 +1,39 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX docker: <https://docker.io/schema/>
+
+# Extract Docker configuration
+CONSTRUCT {
+    ?dockerConfig a a2a:docker_config ;
+        a2a:base_image ?baseImage ;
+        a2a:expose_port ?exposePort ;
+        a2a:volume_mount ?volumeMount ;
+        a2a:environment_variable ?envVar .
+}
+WHERE {
+    # Find Docker configurations
+    ?dockerConfig a a2a:docker_config .
+
+    # Get base image
+    OPTIONAL {
+        ?dockerConfig a2a:base_image ?baseImage .
+    }
+    BIND(COALESCE(?baseImage, "erlang:27-alpine") AS ?baseImage)
+
+    # Get exposed ports
+    OPTIONAL {
+        ?dockerConfig a2a:expose_port ?exposePort .
+    }
+    BIND(COALESCE(?exposePort, 8080) AS ?exposePort)
+
+    # Get volume mounts
+    OPTIONAL {
+        ?dockerConfig a2a:volume_mount ?volumeMount .
+    }
+
+    # Get environment variables
+    OPTIONAL {
+        ?dockerConfig a2a:environment_variable ?envVar .
+    }
+}

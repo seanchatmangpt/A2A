@@ -1,0 +1,155 @@
+{
+  "$schema": "https://raw.githubusercontent.com/a2a-org/a2a-spec/main/schemas/agent-card.json",
+  "agent_id": "craftplan-erp-agent",
+  "name": "Craftplan ERP Agent",
+  "version": "1.0.0",
+  "description": "Self-hosted ERP agent for artisanal D2C micro-businesses. Manages customers, orders, inventory, production planning, and analytics.",
+  "capabilities": {
+    "skills": [
+      {
+        "id": "customer_management",
+        "name": "Customer Management",
+        "description": "Create, read, update, and delete customer records",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": ["list", "get", "create", "update", "delete"]
+            },
+            "customer_id": {"type": "string"},
+            "customer_data": {"type": "object"}
+          },
+          "required": ["operation"]
+        }
+      },
+      {
+        "id": "order_management",
+        "name": "Order Management",
+        "description": "Create, update, process, and manage orders",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": ["list", "get", "create", "update", "cancel", "fulfill", "refund"]
+            },
+            "order_id": {"type": "string"},
+            "order_data": {"type": "object"}
+          },
+          "required": ["operation"]
+        }
+      },
+      {
+        "id": "inventory_management",
+        "name": "Inventory Management",
+        "description": "Manage products, inventory levels, and stock movements",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": ["list_products", "get_product", "create_product", "update_product", "check_stock", "adjust_stock", "low_stock_report"]
+            },
+            "product_id": {"type": "string"},
+            "quantity": {"type": "integer"}
+          },
+          "required": ["operation"]
+        }
+      },
+      {
+        "id": "production_planning",
+        "name": "Production Planning",
+        "description": "Plan and track production orders, schedules, and work orders",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": ["list_orders", "create_order", "update_status", "schedule", "get_materials", "record_production"]
+            },
+            "production_order_id": {"type": "string"},
+            "order_data": {"type": "object"}
+          },
+          "required": ["operation"]
+        }
+      },
+      {
+        "id": "analytics",
+        "name": "Business Analytics",
+        "description": "Generate sales, inventory, and production reports",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "report_type": {
+              "type": "string",
+              "enum": ["sales_summary", "revenue", "inventory_value", "production_efficiency", "customer_metrics"]
+            },
+            "date_range": {"type": "object"},
+            "group_by": {"type": "string"}
+          },
+          "required": ["report_type"]
+        }
+      },
+      {
+        "id": "shipping",
+        "name": "Shipping & Fulfillment",
+        "description": "Process shipments, track packages, manage carriers",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": ["create_shipment", "track", "list_carriers", "get_rates", "process_return"]
+            },
+            "order_id": {"type": "string"},
+            "tracking_number": {"type": "string"}
+          },
+          "required": ["operation"]
+        }
+      }
+    ]
+  },
+  "endpoints": {
+    "a2a": {
+      "url": "http://craftplan-a2a-agent:8080/a2a",
+      "protocol": "jsonrpc",
+      "version": "1.0.0"
+    },
+    "mcp": {
+      "url": "http://craftplan-mcp-server:8090/mcp",
+      "protocol": "jsonrpc",
+      "version": "2024-11-05",
+      "transport": "http"
+    },
+    "sse": {
+      "url": "http://craftplan-a2a-agent:8080/sse",
+      "events": ["task_update", "message", "notification"]
+    },
+    "health": {
+      "url": "http://craftplan-a2a-agent:8080/health"
+    }
+  },
+  "authentication": {
+    "type": "bearer",
+    "token_endpoint": "http://craftplan-a2a-agent:8080/auth/token"
+  },
+  "orchestrator": {
+    "supported": true,
+    "delegation": true,
+    "long_running": true,
+    "streaming": true
+  },
+  "metadata": {
+    "category": "erp",
+    "tags": ["erp", "ecommerce", "manufacturing", "inventory", "production"],
+    "website": "https://github.com/puemos/craftplan",
+    "documentation": "https://craftplan.example.com/docs",
+    "pricing": "open_source"
+  },
+  "contact": {
+    "name": "Craftplan Community",
+    "email": "community@craftplan.example.com",
+    "repository": "https://github.com/puemos/craftplan"
+  }
+}

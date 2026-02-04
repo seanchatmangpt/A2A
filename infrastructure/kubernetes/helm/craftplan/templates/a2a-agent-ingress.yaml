@@ -1,0 +1,52 @@
+{{- if .Values.a2aAgent.enabled -}}
+{{- if .Values.a2aAgent.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "craftplan.fullname" . }}-a2a
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: a2a-agent
+  annotations:
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.a2aAgent.ingress.annotations }}
+    {{- toYaml .Values.a2aAgent.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.global.ingress.className }}
+    kubernetes.io/ingress.class: {{ .Values.global.ingress.className }}
+    {{- end }}
+    {{- if .Values.global.ingress.tls }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+    {{- if .Values.global.ingress.ingressClassName }}
+    nginx.ingress.kubernetes.io/ingress.class: {{ .Values.global.ingress.ingressClassName }}
+    {{- end }}
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.global.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.global.ingress.ingressClassName }}
+  {{- else if .Values.global.ingress.className }}
+  ingressClassName: {{ .Values.global.ingress.className }}
+  {{- end }}
+  {{- if .Values.global.ingress.tls }}
+  tls:
+    {{- toYaml .Values.global.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.a2aAgent.ingress.host | default "a2a.example.com" }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "craftplan.fullname" . }}-a2a
+                port:
+                  number: {{ .Values.a2aAgent.service.port }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,27 @@
+{{- if .Values.a2aAgent.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-a2a
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: a2a-agent
+  annotations:
+    {{- if .Values.a2aAgent.annotations }}
+    {{- toYaml .Values.a2aAgent.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.a2aAgent.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.a2aAgent.service.port }}
+      targetPort: 8080
+      {{- if .Values.a2aAgent.service.nodePort }}
+      nodePort: {{ .Values.a2aAgent.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: a2a-agent
+{{- end }}

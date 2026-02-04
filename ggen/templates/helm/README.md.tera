@@ -1,0 +1,234 @@
+---
+description: "Generate Helm README.md file"
+output_dir: "helm/{{ chart_name | default("a2a-erl") }}/README.md"
+file_extension: ""
+dependencies: ["extract-k8s-resources.sparql"]
+---
+{%- comment -%}
+Template for generating Helm README.md file
+Usage: Generate from Helm configuration
+{%- endcomment -%}
+
+# {{ chart_name | default("A2A Erlang Application") }}
+
+{{ description | default("A2A Erlang Application Helm Chart") }}
+
+## TL;DR
+
+```bash
+helm repo add a2a {{ repository | default("https://a2a.github.io/helm-charts") }}
+helm install {{ chart_name | default("a2a-erl") }} a2a/{{ chart_name | default("a2a-erl") }}
+```
+
+## Introduction
+
+This chart bootstraps a {{ chart_name | default("a2a-erl") }} deployment on a [Kubernetes](https://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.
+
+## Prerequisites
+
+- Kubernetes {{ kube_version | default(">= 1.19.0") }}
+- Helm 3.x
+
+## Installing the Chart
+
+To install the chart with the release name `my-release`:
+
+```bash
+helm install my-release a2a/{{ chart_name | default("a2a-erl") }}
+```
+
+The command deploys {{ chart_name | default("a2a-erl") }} on the Kubernetes cluster in the default configuration. The [configuration](#configuration) section lists the parameters that can be configured during installation.
+
+> **Tip**: List all releases using `helm list`
+
+## Uninstalling the Chart
+
+To uninstall/delete the `my-release` deployment:
+
+```bash
+helm delete my-release
+```
+
+The command removes all the Kubernetes components associated with the chart and deletes the release.
+
+## Configuration
+
+The following table lists the configurable parameters of the {{ chart_name | default("a2a-erl") }} chart and their default values.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `replicaCount` | Number of replicas | `2` |
+| `image.repository` | Image repository | `ghcr.io/a2a/a2a-erl` |
+| `image.tag` | Image tag | `v0.2.0` |
+| `service.type` | Service type | `ClusterIP` |
+| `service.port` | Service port | `8080` |
+| `resources.requests.cpu` | CPU requests | `100m` |
+| `resources.requests.memory` | Memory requests | `128Mi` |
+| `resources.limits.cpu` | CPU limits | `500m` |
+| `resources.limits.memory` | Memory limits | `256Mi` |
+
+Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example,
+
+```bash
+helm install my-release a2a/{{ chart_name | default("a2a-erl") }} --set replicaCount=3
+```
+
+Alternatively, a YAML file that specifies the values for the parameters can be provided while installing the chart. For example,
+
+```bash
+helm install my-release a2a/{{ chart_name | default("a2a-erl") }} -f values.yaml
+```
+
+> **Tip**: You can refer to the [values.yaml](./values.yaml) file to see the default values.
+
+## Configuration and Chart Parameters
+
+### HotCI Configuration
+
+The chart supports HotCI (Hot Code Loading CI) configuration:
+
+```yaml
+hotci:
+  enabled: true
+  checkInterval: "30s"
+  upgradeValidation: true
+  rollbackTimeout: 30000
+  monitoringInterval: "10s"
+```
+
+### Application Configuration
+
+Application-specific configuration:
+
+```yaml
+application:
+  httpPort: 8080
+  enableSSE: true
+  enableMetrics: true
+  logLevel: info
+  environment:
+    NODE_ENV: production
+```
+
+### Monitoring Configuration
+
+Prometheus monitoring configuration:
+
+```yaml
+monitoring:
+  enabled: true
+  port: 8080
+  path: "/metrics"
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+    scrapeTimeout: "10s"
+```
+
+### Network Policy
+
+Network policy configuration:
+
+```yaml
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: a2a-erl
+        namespaceSelector:
+          matchLabels:
+            name: a2a-system
+```
+
+### Backup Configuration
+
+Backup configuration:
+
+```yaml
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: "7d"
+  storageClass: standard
+```
+
+### Service Mesh Integration
+
+Istio service mesh integration:
+
+```yaml
+serviceMesh:
+  enabled: true
+  injectAnnotation: "true"
+  gateway:
+    enabled: true
+    host: "a2a.example.com"
+    port: 80
+```
+
+## Resources
+
+| CPU | Memory | Description |
+| --- | --- | --- |
+| {{ resources.requests.cpu | default("100m") }} | {{ resources.requests.memory | default("128Mi") }} | Minimum resources for pod |
+| {{ resources.limits.cpu | default("500m") }} | {{ resources.limits.memory | default("256Mi") }} | Maximum resources for pod |
+
+## Persistence
+
+The chart does not create any persistent volume claims by default. If you need persistent storage for your application, you can configure it in the `values.yaml` file:
+
+```yaml
+volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: a2a-data
+
+volumeMounts:
+  - name: data
+    mountPath: /app/data
+```
+
+## Troubleshooting
+
+### Events
+
+To list events for the last hour:
+
+```bash
+kubectl get events --field-selector involvedObject.name=my-release-{{ chart_name | default("a2a-erl") }} --sort-by=.metadata.creationTimestamp
+```
+
+### Logs
+
+To view application logs:
+
+```bash
+kubectl logs -f deployment/my-release-{{ chart_name | default("a2a-erl") }}
+```
+
+### Pod Information
+
+To describe pod information:
+
+```bash
+kubectl describe pod my-release-{{ chart_name | default("a2a-erl") }}-xxxxx
+```
+
+### Debug Shell
+
+To get a shell in a running pod:
+
+```bash
+kubectl exec -it my-release-{{ chart_name | default("a2a-erl") }}-xxxxx -- /bin/sh
+```
+
+## Support
+
+- For issues with the chart, please open an issue [here](https://github.com/a2a/helm-charts/issues)
+- For general questions about the A2A Erlang application, see the [documentation](https://docs.a2a.com)
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

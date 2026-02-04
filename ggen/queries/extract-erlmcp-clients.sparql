@@ -1,0 +1,29 @@
+# SPARQL Query to Extract MCP Clients from Erlang MCP Ontology
+# Returns MCP client configurations and connection properties
+
+PREFIX : <https://github.com/a2a/ontology/erlang-mcp#>
+PREFIX erl: <https://github.com/a2a/ontology/erlang-otp#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?client ?clientName ?serverURI ?reconnectInterval ?maxReconnectAttempts
+               ?hotCIEnabled ?hotCIMonitorInterval ?applicationName ?releaseName
+WHERE {
+    # Find MCP clients
+    ?client a :ErlangMCPClient .
+
+    # Extract client properties
+    OPTIONAL { ?client :mcpClientName ?clientName }
+    OPTIONAL { ?client :mcpServerURI ?serverURI }
+    OPTIONAL { ?client :mcpReconnectInterval ?reconnectInterval }
+    OPTIONAL { ?client :mcpMaxReconnectAttempts ?maxReconnectAttempts }
+    OPTIONAL { ?client :mcpHotCIEnabled ?hotCIEnabled }
+    OPTIONAL { ?client :mcpHotCIMonitorInterval ?hotCIMonitorInterval }
+
+    # Extract Erlang application information
+    OPTIONAL { ?client erl:applicationName ?applicationName }
+    OPTIONAL { ?client erl:releaseName ?releaseName }
+
+    # Filter for enabled clients only
+    FILTER (?hotCIEnabled = true || !BOUND(?hotCIEnabled))
+}
+ORDER BY ?clientName

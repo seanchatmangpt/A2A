@@ -1,0 +1,415 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Generate conditional patterns based on ontology properties and constraints
+CONSTRUCT {
+    # Conditional Module Patterns
+    ?conditionalModule a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviourType ;
+        a2a:hotci_enabled ?hotciEnabled ;
+        a2a:rollback_support ?rollbackSupport ;
+        a2a:upgrade_monitor ?upgradeMonitor ;
+        a2a:conditional_feature ?conditionalFeature ;
+        rdfs:label ?moduleLabel .
+
+    # Conditional Infrastructure Patterns
+    ?conditionalInfra a a2a:cloud_infrastructure ;
+        a2a:base_image ?baseImage ;
+        a2a:expose_port ?exposePort ;
+        a2a:replicas ?replicas ;
+        a2a:resource_request_cpu ?cpuRequest ;
+        a2a:resource_request_memory ?memoryRequest ;
+        a2a:resource_limit_cpu ?cpuLimit ;
+        a2a:resource_limit_memory ?memoryLimit ;
+        a2a:conditional_scaling ?conditionalScaling ;
+        rdfs:label ?infraLabel .
+
+    # Conditional Agent Patterns
+    ?conditionalAgent a a2a:agent ;
+        a2a:agent_id ?agentId ;
+        a2a:agent_name ?agentName ;
+        a2a:agent_capabilities ?agentCapabilities ;
+        a2a:conditional_capability ?conditionalCapability ;
+        a2a:conditional_state ?conditionalState ;
+        rdfs:label ?agentLabel .
+
+    # Conditional Task Patterns
+    ?conditionalTask a a2a:task ;
+        a2a:task_id ?taskId ;
+        a2a:task_status ?taskStatus ;
+        a2a:task_type ?taskType ;
+        a2a:conditional_state ?conditionalState ;
+        a2a:conditional_priority ?conditionalPriority ;
+        rdfs:label ?taskLabel .
+
+    # Conditional Message Patterns
+    ?conditionalMessage a a2a:message ;
+        a2a:message_type ?messageType ;
+        a2a:message_content ?messageContent ;
+        a2a:sender_id ?senderId ;
+        a2a:recipient_id ?recipientId ;
+        a2a:conditional_routing ?conditionalRouting ;
+        rdfs:label ?messageLabel .
+
+    # Conditional Event Patterns
+    ?conditionalEvent a a2a:event ;
+        a2a:event_type ?eventType ;
+        a2a:event_payload ?eventPayload ;
+        a2a:event_timestamp ?eventTimestamp ;
+        a2a:conditional_trigger ?conditionalTrigger ;
+        r2a:conditional_handler ?conditionalHandler ;
+        rdfs:label ?eventLabel .
+}
+WHERE {
+    # Conditional Module Patterns
+    # Pattern 1: HotCI-enabled modules with rollback support
+    {
+        SELECT ?module ?moduleName ?behaviourType ?hotciEnabled ?rollbackSupport ?upgradeMonitor ?conditionalFeature ?moduleLabel
+        WHERE {
+            ?module a erl:module ;
+                rdfs:subClassOf* ?behaviour .
+            ?behaviour a erl:behaviour .
+
+            # Module name extraction
+            OPTIONAL {
+                ?module rdfs:label ?moduleLabel .
+                FILTER(BOUND(?moduleLabel))
+            }
+            BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+            # Behaviour type
+            OPTIONAL {
+                ?module a ?behaviour .
+                ?behaviour rdfs:label ?behaviourLabel .
+                BIND(STR(?behaviourLabel) AS ?behaviourType)
+            }
+
+            # HotCI properties
+            OPTIONAL {
+                ?module a2a:hotci_enabled ?hotciEnabled .
+            }
+            BIND(COALESCE(?hotciEnabled, false) AS ?hotciEnabled)
+
+            OPTIONAL {
+                ?module a2a:rollback_support ?rollbackSupport .
+            }
+            BIND(COALESCE(?rollbackSupport, false) AS ?rollbackSupport)
+
+            OPTIONAL {
+                ?module a2a:upgrade_monitor ?upgradeMonitor .
+            }
+            BIND(COALESCE(?upgradeMonitor, false) AS ?upgradeMonitor)
+
+            # Conditional feature: HotCI + rollback enabled
+            BIND(
+                IF(?hotciEnabled = true && ?rollbackSupport = true,
+                   "hotci_rollback_enabled",
+                   IF(?hotciEnabled = true, "hotci_only", IF(?rollbackSupport = true, "rollback_only", "standard")))
+                AS ?conditionalFeature
+            )
+
+            # Filter for modules with any HotCI feature
+            FILTER(?hotciEnabled = true || ?rollbackSupport = true || ?upgradeMonitor = true)
+        }
+        LIMIT 100
+    }
+
+    # Conditional Infrastructure Patterns
+    # Pattern 1: Production vs Development scaling
+    {
+        SELECT ?infra ?baseImage ?exposePort ?replicas ?cpuRequest ?memoryRequest ?cpuLimit ?memoryLimit ?conditionalScaling ?infraLabel
+        WHERE {
+            ?infra a a2a:cloud_infrastructure ;
+                a ?infraType .
+            FILTER(?infraType IN (a2a:deployment, a2a:kubernetes_config))
+
+            # Base image
+            OPTIONAL {
+                ?infra a a2a:docker_config ;
+                    a2a:base_image ?baseImage .
+            }
+            BIND(COALESCE(?baseImage, "erlang:27-alpine") AS ?baseImage)
+
+            # Exposed ports
+            OPTIONAL {
+                ?infra a2a:expose_port ?exposePort .
+            }
+            BIND(COALESCE(?exposePort, 8080) AS ?exposePort)
+
+            # Replicas
+            OPTIONAL {
+                ?infra a2a:kubernetes_config ;
+                    a2a:replicas ?replicas .
+            }
+            BIND(COALESCE(?replicas, 2) AS ?replicas)
+
+            # Resource requests
+            OPTIONAL {
+                ?infra a2a:resource_request_cpu ?cpuRequest .
+            }
+            BIND(COALESCE(?cpuRequest, "100m") AS ?cpuRequest)
+
+            OPTIONAL {
+                ?infra a2a:resource_request_memory ?memoryRequest .
+            }
+            BIND(COALESCE(?memoryRequest, "128Mi") AS ?memoryRequest)
+
+            # Resource limits
+            OPTIONAL {
+                ?infra a2a:resource_limit_cpu ?cpuLimit .
+            }
+            BIND(COALESCE(?cpuLimit, "500m") AS ?cpuLimit)
+
+            OPTIONAL {
+                ?infra a2a:resource_limit_memory ?memoryLimit .
+            }
+            BIND(COALESCE(?memoryLimit, "256Mi") AS ?memoryLimit)
+
+            # Infrastructure label
+            OPTIONAL {
+                ?infra rdfs:label ?infraLabel .
+            }
+
+            # Conditional scaling based on resource requirements
+            BIND(
+                IF(?replicas >= 5 && ?cpuLimit >= "1000m",
+                   "high_availability",
+                   IF(?replicas >= 3 && ?cpuLimit >= "500m",
+                      "medium_scaling",
+                      IF(?replicas = 1 && ?cpuLimit < "500m",
+                         "single_instance",
+                         "standard_scaling")))
+                AS ?conditionalScaling
+            )
+        }
+        LIMIT 100
+    }
+
+    # Conditional Agent Patterns
+    # Pattern 1: Agent capabilities and state
+    {
+        SELECT ?agent ?agentId ?agentName ?agentCapabilities ?conditionalCapability ?conditionalState ?agentLabel
+        WHERE {
+            ?agent a a2a:agent .
+
+            # Agent ID
+            OPTIONAL {
+                ?agent a2a:agent_id ?agentId .
+            }
+            BIND(COALESCE(?agentId, UUID()) AS ?agentId)
+
+            # Agent name
+            OPTIONAL {
+                ?agent a2a:agent_name ?agentName .
+            }
+            BIND(COALESCE(?agentName, "agent_" + ?agentId) AS ?agentName)
+
+            # Agent capabilities
+            OPTIONAL {
+                ?agent a2a:agent_capabilities ?capabilities .
+            }
+
+            # Agent label
+            OPTIONAL {
+                ?agent rdfs:label ?agentLabel .
+            }
+
+            # Conditional capability based on capabilities
+            BIND(
+                IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "database|storage", "i"),
+                   "data_capable",
+                   IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "network|communication", "i"),
+                      "communication_capable",
+                      IF(BOUND(?capabilities) && REGEX(STR(?capabilities), "compute|processing", "i"),
+                         "compute_capable",
+                         "general_capable")))
+                AS ?conditionalCapability
+            )
+
+            # Conditional state (simulated based on name)
+            BIND(
+                IF(STRSTARTS(?agentName, "master"),
+                   "master_state",
+                   IF(STRSTARTS(?agentName, "worker"),
+                      "worker_state",
+                      IF(STRSTARTS(?agentName, "proxy"),
+                         "proxy_state",
+                         "standard_state")))
+                AS ?conditionalState
+            )
+        }
+        LIMIT 100
+    }
+
+    # Conditional Task Patterns
+    # Pattern 1: Task state and priority
+    {
+        SELECT ?task ?taskId ?taskStatus ?taskType ?conditionalState ?conditionalPriority ?taskLabel
+        WHERE {
+            ?task a a2a:task .
+
+            # Task ID
+            OPTIONAL {
+                ?task a2a:task_id ?taskId .
+            }
+            BIND(COALESCE(?taskId, UUID()) AS ?taskId)
+
+            # Task status
+            OPTIONAL {
+                ?task a2a:task_status ?taskStatus .
+                FILTER(?taskStatus IN ("submitted", "working", "input_required", "auth_required", "completed", "failed", "canceled", "rejected"))
+            }
+
+            # Task type
+            OPTIONAL {
+                ?task a2a:task_type ?taskType .
+            }
+
+            # Task label
+            OPTIONAL {
+                ?task rdfs:label ?taskLabel .
+            }
+
+            # Conditional state based on status
+            BIND(
+                IF(?taskStatus = "completed",
+                   "completed_state",
+                   IF(?taskStatus = "failed" || ?taskStatus = "canceled",
+                      "failed_state",
+                      IF(?taskStatus = "working",
+                         "active_state",
+                         IF(?taskStatus = "input_required" || ?taskStatus = "auth_required",
+                            "pending_state",
+                            "initial_state"))))
+                AS ?conditionalState
+            )
+
+            # Conditional priority based on type
+            BIND(
+                IF(?taskType = "critical",
+                   "critical_priority",
+                   IF(?taskType = "high",
+                      "high_priority",
+                      IF(?taskType = "medium",
+                         "medium_priority",
+                         IF(?taskType = "low",
+                            "low_priority",
+                            "normal_priority"))))
+                AS ?conditionalPriority
+            )
+        }
+        LIMIT 100
+    }
+
+    # Conditional Message Patterns
+    # Pattern 1: Message routing based on type
+    {
+        SELECT ?message ?messageType ?messageContent ?senderId ?recipientId ?conditionalRouting ?messageLabel
+        WHERE {
+            ?message a a2a:message .
+
+            # Message type
+            OPTIONAL {
+                ?message a2a:message_type ?messageType .
+                FILTER(?messageType IN ("request", "response", "notification", "error"))
+            }
+
+            # Message content
+            OPTIONAL {
+                ?message a2a:message_content ?messageContent .
+            }
+
+            # Sender and recipient
+            OPTIONAL {
+                ?message a2a:sender_id ?senderId .
+            }
+
+            OPTIONAL {
+                ?message a2a:recipient_id ?recipientId .
+            }
+
+            # Message label
+            OPTIONAL {
+                ?message rdfs:label ?messageLabel .
+            }
+
+            # Conditional routing based on message type
+            BIND(
+                IF(?messageType = "request" && BOUND(?recipientId),
+                   "directed_request",
+                   IF(?messageType = "response" && BOUND(?senderId),
+                      "targeted_response",
+                      IF(?messageType = "notification",
+                         "broadcast_notification",
+                         IF(?messageType = "error",
+                            "error_broadcast",
+                            "standard_routing"))))
+                AS ?conditionalRouting
+            )
+        }
+        LIMIT 100
+    }
+
+    # Conditional Event Patterns
+    # Pattern 1: Event handling based on type
+    {
+        SELECT ?event ?eventType ?eventPayload ?eventTimestamp ?conditionalTrigger ?conditionalHandler ?eventLabel
+        WHERE {
+            ?event a a2a:event .
+
+            # Event type
+            OPTIONAL {
+                ?event a2a:event_type ?eventType .
+            }
+            BIND(COALESCE(?eventType, "system") AS ?eventType)
+
+            # Event payload
+            OPTIONAL {
+                ?event a2a:event_payload ?eventPayload .
+            }
+
+            # Event timestamp
+            OPTIONAL {
+                ?event a2a:event_timestamp ?eventTimestamp .
+            }
+            BIND(COALESCE(?eventTimestamp, NOW()) AS ?eventTimestamp)
+
+            # Event label
+            OPTIONAL {
+                ?event rdfs:label ?eventLabel .
+            }
+
+            # Conditional trigger based on event type
+            BIND(
+                IF(?eventType = "error",
+                   "error_trigger",
+                   IF(?eventType = "warning",
+                      "warning_trigger",
+                      IF(?eventType = "info",
+                         "info_trigger",
+                         IF(?eventType = "debug",
+                            "debug_trigger",
+                            "standard_trigger"))))
+                AS ?conditionalTrigger
+            )
+
+            # Conditional handler based on trigger type
+            BIND(
+                IF(?conditionalTrigger = "error_trigger",
+                   "error_handler",
+                   IF(?conditionalTrigger = "warning_trigger",
+                      "warning_handler",
+                      IF(?conditionalTrigger = "info_trigger",
+                         "info_handler",
+                         "standard_handler"))))
+                AS ?conditionalHandler
+            )
+        }
+        LIMIT 100
+    }
+}

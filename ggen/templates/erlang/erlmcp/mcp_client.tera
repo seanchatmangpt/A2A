@@ -1,0 +1,354 @@
+-module({{ module_name }}_client).
+-behaviour(application).
+-behaviour(gen_server).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/0, stop/0]).
+-export([connect/1, disconnect/0, list_tools/0, call_tool/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+
+%%====================================================================
+%% Records and Macros
+%%====================================================================
+
+-record(state, {
+    server_uri :: string(),
+    reconnect_interval :: pos_integer(),
+    max_reconnect_attempts :: pos_integer(),
+    connection :: pid() | undefined,
+    reconnect_attempts :: integer(),
+    tools :: list(),  % List of available tools
+    metrics :: map(),  #{string() => integer()},
+    hotci_monitor_ref :: reference() | undefined
+}).
+
+-define(SERVER, ?MODULE).
+-define(RECONNECT_INTERVAL, {{ reconnect_interval }}).
+-define(MAX_RECONNECT_ATTEMPTS, {{ max_reconnect_attempts }}).
+-define(CONNECT_TIMEOUT, 5000).
+-define(HOTCI_MONITOR_INTERVAL, {{ hotci_monitor_interval }}).
+
+%%====================================================================
+%% Type Definitions
+%%====================================================================
+
+-type tool_info() :: #{
+    name := string(),
+    description := string(),
+    input_schema := map(),
+    output_schema := map()
+}.
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() ->
+    gen_server:call(?SERVER, stop).
+
+connect(ServerURI) ->
+    gen_server:call(?SERVER, {connect, ServerURI}).
+
+disconnect() ->
+    gen_server:call(?SERVER, disconnect).
+
+list_tools() ->
+    gen_server:call(?SERVER, list_tools, ?CONNECT_TIMEOUT).
+
+call_tool(ToolName, Args, Options) ->
+    gen_server:call(?SERVER, {call_tool, ToolName, Args, Options}, ?CONNECT_TIMEOUT).
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(_Args) ->
+    io:format("Initializing MCP client~n"),
+
+    State = #state{
+        server_uri = "http://localhost:8090",
+        reconnect_interval = ?RECONNECT_INTERVAL,
+        max_reconnect_attempts = ?MAX_RECONNECT_ATTEMPTS,
+        connection = undefined,
+        reconnect_attempts = 0,
+        tools = [],
+        metrics = #{}
+    },
+
+    % Start HotCI monitor if enabled
+    HotciMonitorRef = erlang:start_timer(?HOTCI_MONITOR_INTERVAL, self(), hotci_monitor),
+
+    {ok, State#state{hotci_monitor_ref = HotciMonitorRef}}.
+
+handle_call({connect, ServerURI}, _From, State) ->
+    case State#state.connection of
+        undefined ->
+            case create_connection(ServerURI) of
+                {ok, Pid} ->
+                    % Discover tools
+                    case discover_tools(Pid) of
+                        {ok, Tools} ->
+                            NewMetrics = increment_metric(State#state.metrics, "connections_success"),
+                            {reply, {ok, connected}, State#state{
+                                connection = Pid,
+                                server_uri = ServerURI,
+                                tools = Tools,
+                                reconnect_attempts = 0,
+                                metrics = NewMetrics
+                            }};
+                        {error, Reason} ->
+                            disconnect_server(Pid),
+                            NewMetrics = increment_metric(State#state.metrics, "connections_failed"),
+                            {reply, {error, Reason}, State#state{
+                                metrics = NewMetrics
+                            }}
+                    end;
+                {error, Reason} ->
+                    NewMetrics = increment_metric(State#state.metrics, "connections_failed"),
+                    {reply, {error, Reason}, State#state{
+                        metrics = NewMetrics
+                    }}
+            end;
+        _ ->
+            {reply, {error, already_connected}, State}
+    end;
+
+handle_call(disconnect, _From, State) ->
+    case State#state.connection of
+        undefined ->
+            {reply, ok, State};
+        Pid ->
+            disconnect_server(Pid),
+            NewMetrics = increment_metric(State#state.metrics, "disconnections"),
+            {reply, ok, State#state{
+                connection = undefined,
+                reconnect_attempts = 0,
+                metrics = NewMetrics
+            }}
+    end;
+
+handle_call(list_tools, _From, State) ->
+    {reply, {ok, State#state.tools}, State};
+
+handle_call({call_tool, ToolName, Args, Options}, _From, State) ->
+    case State#state.connection of
+        undefined ->
+            {reply, {error, not_connected}, State};
+        Pid ->
+            Request = build_request(ToolName, Args, Options),
+            Response = send_request(Pid, Request),
+            NewMetrics = increment_metric(State#state.metrics, "tool_calls"),
+            {reply, Response, State#state{metrics = NewMetrics}}
+    end;
+
+handle_call(stop, _From, State) ->
+    {stop, normal, stopped, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({timeout, Ref, hotci_monitor}, State) ->
+    % Handle HotCI monitoring
+    io:format("MCP client HotCI monitor tick~n"),
+    NewMetrics = increment_metric(State#state.metrics, "hotci_checks"),
+    {noreply, State#state{
+        metrics = NewMetrics,
+        hotci_monitor_ref = erlang:start_timer(?HOTCI_MONITOR_INTERVAL, self(), hotci_monitor)
+    }};
+
+handle_info({disconnected, Reason}, State) ->
+    io:format("MCP client disconnected: ~p~n", [Reason]),
+    NewConnection = attempt_reconnect(State),
+    NewMetrics = increment_metric(State#state.metrics, "reconnections"),
+    {noreply, State#state{
+        connection = NewConnection,
+        metrics = NewMetrics
+    }};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    io:format("MCP client terminating~n"),
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+create_connection(ServerURI) ->
+    % Simulate connection creation
+    % In real implementation, this would create HTTP/WebSocket connection
+    ConnectionPid = spawn_link(fun() -> connection_loop(ServerURI) end),
+    {ok, ConnectionPid}.
+
+connection_loop(ServerURI) ->
+    receive
+        {request, From, Request} ->
+            Response = simulate_request(ServerURI, Request),
+            From ! {response, Response},
+            connection_loop(ServerURI);
+        {discover, From} ->
+            From ! {tools, [
+                #{name => "file_system", description => "File system operations"},
+                #{name => "math", description => "Mathematical operations"},
+                #{name => "text", description => "Text processing"}
+            ]},
+            connection_loop(ServerURI);
+        stop ->
+            ok;
+        _ ->
+            connection_loop(ServerURI)
+    end.
+
+disconnect_server(Pid) ->
+    Pid ! stop.
+
+discover_tools(Pid) ->
+    Pid ! {discover, self()},
+    receive
+        {tools, Tools} ->
+            {ok, Tools};
+        {error, Reason} ->
+            {error, Reason}
+    after ?CONNECT_TIMEOUT ->
+        {error, timeout}
+    end.
+
+build_request(ToolName, Args, _Options) ->
+    #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"id">> => erlang:system_time(millisecond),
+        <<"method">> => <<"call_tool">>,
+        <<"params">> => #{
+            <<"tool">> => ToolName,
+            <<"args">> => Args
+        }
+    }.
+
+send_request(Pid, Request) ->
+    Pid ! {request, self(), Request},
+    receive
+        {response, Response} ->
+            Response;
+        {error, Error} ->
+            {error, Error}
+    after ?CONNECT_TIMEOUT ->
+        {error, timeout}
+    end.
+
+simulate_request(_ServerURI, Request) ->
+    case Request of
+        #{<<"method">> := <<"list_tools">>} ->
+            #{<<"result">> => #{<<"tools">> => []}};
+        #{<<"method">> := <<"call_tool">>, <<"params">> := Params} ->
+            simulate_tool_call(Params);
+        _ ->
+            #{<<"error">> => #{<<"code">> => -32601, <<"message">> => <<"Method not found">>}}
+    end.
+
+simulate_tool_call(Params) ->
+    #{<<"tool">> := ToolName, <<"args">> := Args} = Params,
+    ToolResponse = case ToolName of
+        <<"file_system">> ->
+            #{<<"operation">> := Op, <<"path">> := Path} = Args,
+            #{<<"result">> => #{<<"operation">> => Op, <<"path">> => Path, <<"status">> => <<"ok">>}};
+        <<"math">> ->
+            #{<<"operation">> := Op, <<"a">> := A, <<"b">> := B} = Args,
+            Result = case Op of
+                <<"add">> -> A + B;
+                <<"subtract">> -> A - B;
+                <<"multiply">> -> A * B;
+                <<"divide">> -> A / B
+            end,
+            #{<<"result">> => #{<<"value">> => Result}};
+        <<"text">> ->
+            #{<<"operation">> := Op, <<"text">> := Text} = Args,
+            Result = case Op of
+                <<"uppercase">> -> string:uppercase(binary_to_list(Text));
+                <<"lowercase">> -> string:lowercase(binary_to_list(Text));
+                <<"length">> -> byte_size(Text)
+            end,
+            #{<<"result">> => #{<<"value">> => Result}};
+        _ ->
+            {error, unknown_tool}
+    end,
+
+    case ToolResponse of
+        {error, _} = Error ->
+            #{<<"error">> => #{<<"code">> => -1, <<"message">> => <<"Tool error">>, <<"data">> => Error}};
+        _ ->
+            #{<<"result">> => ToolResponse}
+    end.
+
+attempt_reconnect(#state{reconnect_attempts = Attempts} = State) when Attempts < ?MAX_RECONNECT_ATTEMPTS ->
+    timer:sleep(State#state.reconnect_interval),
+    case create_connection(State#state.server_uri) of
+        {ok, Pid} ->
+            io:format("Reconnected to MCP server~n"),
+            State#state{reconnect_attempts = 0, connection = Pid};
+        {error, _} ->
+            attempt_reconnect(State#state{reconnect_attempts = Attempts + 1})
+    end;
+
+attempt_reconnect(State) ->
+    io:format("Max reconnection attempts reached~n"),
+    undefined.
+
+increment_metric(Metrics, Name) ->
+    Current = maps:get(Name, Metrics, 0),
+    Metrics#{Name => Current + 1}.
+
+%%====================================================================
+%% HotCI Support Functions
+%%====================================================================
+
+-ifdef(HOTCI).
+hotci_status() ->
+    case whereis(?SERVER) of
+        undefined -> not_running;
+        Pid -> {running, Pid, get_state_metrics()}
+    end.
+
+hotci_upgrade(NewModule) ->
+    io:format("Upgrading MCP client to ~p~n", [NewModule]),
+    case code:ensure_loaded(NewModule) of
+        {module, NewModule} ->
+            gen_server:call(?SERVER, {upgrade_client, NewModule});
+        {error, _} = Error ->
+            Error
+    end.
+
+get_state_metrics() ->
+    gen_server:call(?SERVER, get_state_metrics).
+
+handle_call(get_state_metrics, _From, State) ->
+    {reply, State#state.metrics, State}.
+
+handle_call({upgrade_client, NewModule}, _From, State) ->
+    % Perform hot code upgrade for client
+    io:format("Upgrading client to ~p~n", [NewModule]),
+    case code:ensure_loaded(NewModule) of
+        {module, NewModule} ->
+            % Upgrade connection if exists
+            case State#state.connection of
+                undefined -> ok;
+                Pid -> Pid ! {upgrade, NewModule}
+            end,
+            {reply, {ok, upgrading}, State};
+        {error, _} = Error ->
+            {reply, Error, State}
+    end.
+-endif.

@@ -1,0 +1,29 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-alertmanager
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: alertmanager
+  annotations:
+    {{- if .Values.monitoring.prometheus.annotations }}
+    {{- toYaml .Values.monitoring.prometheus.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.monitoring.prometheus.service.type }}
+  ports:
+    - name: http
+      port: 9093
+      targetPort: 9093
+      {{- if .Values.monitoring.prometheus.service.nodePort }}
+      nodePort: {{ .Values.monitoring.prometheus.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: alertmanager
+{{- end }}
+{{- end }}

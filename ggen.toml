@@ -1,0 +1,47 @@
+[project]
+name = "a2a-erl-generator"
+version = "0.2.0"
+description = "ggen-based code generator for A2A Erlang applications and cloud infrastructure"
+
+[ontology]
+source = "ontology/"
+schema_dir = "ontology/"
+
+[generation]
+output_dir = "generated/"
+preserve_existing = false
+overwrite_strategy = "merge"
+
+[generation.templates]
+erlang_src = "templates/erlang/src/"
+erlang_config = "templates/erlang/config/"
+erlang_test = "templates/erlang/test/"
+docker = "templates/docker/"
+k8s = "templates/k8s/"
+helm = "templates/helm/"
+docs = "templates/docs/"
+
+[ai]
+enabled = false
+provider = "openai"
+model = "gpt-4-turbo"
+api_key = ""
+
+[ai.custom_templates]
+description = "Custom AI-powered template generation for complex patterns"
+
+[paas]
+enabled = false
+provider = "kubernetes"
+namespace = "a2a-system"
+registry = "ghcr.io/a2a"
+
+[generation.validation]
+sparql_validation = true
+template_syntax_check = true
+output_checksums = true
+
+[logging]
+level = "info"
+format = "json"
+file = "ggen.log"

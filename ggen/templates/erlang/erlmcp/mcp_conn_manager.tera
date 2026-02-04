@@ -1,0 +1,295 @@
+-module({{ module_name }}_conn_manager).
+-behaviour(gen_server).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/1, connect/2, disconnect/1, get_connections/0]).
+-export([handle_call/3, handle_cast/2, handle_info/2, init/1, terminate/2, code_change/3]).
+
+%%====================================================================
+%% Records and Macros
+%%====================================================================
+
+-record(connection_config, {
+    host :: string(),
+    port :: integer(),
+    protocol :: string(),
+    timeout :: pos_integer(),
+    max_retries :: integer()
+}).
+
+-record(connection, {
+    id :: binary(),
+    pid :: pid(),
+    config :: connection_config(),
+    connected_at :: integer(),
+    last_activity :: integer(),
+    metadata :: map()
+}).
+
+-record(state, {
+    connections :: map(),  #{binary() => connection()},
+    config :: map(),
+    metrics :: map()  #{string() => integer()}
+}).
+
+-define(SERVER, ?MODULE).
+-define(CONNECTION_TIMEOUT, 5000).
+-define(MAX_CONNECTIONS, {{ max_connections }}).
+-define(HEARTBEAT_INTERVAL, 30000).  % 30 seconds
+
+%%====================================================================
+%% Type Definitions
+%%====================================================================
+
+-type connection_id() :: binary().
+-type connection_info() :: #{
+    id => connection_id(),
+    pid => pid(),
+    host => string(),
+    port => integer(),
+    connected_at => integer(),
+    last_activity => integer()
+}.
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link(Config) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Config, []).
+
+connect(Host, Port) ->
+    gen_server:call(?SERVER, {connect, Host, Port}, ?CONNECTION_TIMEOUT).
+
+disconnect(ConnectionId) ->
+    gen_server:call(?SERVER, {disconnect, ConnectionId}).
+
+get_connections() ->
+    gen_server:call(?SERVER, get_connections).
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(Config) ->
+    io:format("Initializing MCP connection manager~n"),
+
+    State = #state{
+        connections = #{},
+        config = Config,
+        metrics = #{
+            connections_attempted => 0,
+            connections_success => 0,
+            connections_failed => 0,
+            disconnections => 0,
+            heartbeats => 0
+        }
+    },
+
+    % Start heartbeat timer
+    erlang:start_timer(?HEARTBEAT_INTERVAL, self(), heartbeat),
+
+    {ok, State}.
+
+handle_call({connect, Host, Port}, _From, State) ->
+    ConnectionId = generate_connection_id(Host, Port),
+
+    case check_connection_limit(State) of
+        true ->
+            Response = case maps:find(ConnectionId, State#state.connections) of
+                {ok, _} ->
+                    {reply, {error, already_connected}, State};
+                error ->
+                    case create_connection(ConnectionId, Host, Port, State#state.config) of
+                        {ok, Pid} ->
+                            NewConnections = State#state.connections#{
+                                ConnectionId => #connection{
+                                    id = ConnectionId,
+                                    pid = Pid,
+                                    config = #connection_config{
+                                        host = Host,
+                                        port = Port,
+                                        protocol = "http",
+                                        timeout = 5000,
+                                        max_retries = 3
+                                    },
+                                    connected_at = os:system_time(millisecond),
+                                    last_activity = os:system_time(millisecond),
+                                    metadata = #{}
+                                }
+                            },
+                            NewMetrics = increment_metric(State#state.metrics, "connections_success"),
+                            {reply, {ok, ConnectionId}, State#state{
+                                connections = NewConnections,
+                                metrics = NewMetrics
+                            }};
+                        {error, Reason} ->
+                            NewMetrics = increment_metric(State#state.metrics, "connections_failed"),
+                            {reply, {error, Reason}, State#state{
+                                metrics = NewMetrics
+                            }}
+                    end
+            end;
+        false ->
+            {reply, {error, connection_limit_reached}, State}
+    end;
+
+handle_call({disconnect, ConnectionId}, _From, State) ->
+    case maps:find(ConnectionId, State#state.connections) of
+        {ok, Connection} ->
+            disconnect_connection(Connection),
+            NewConnections = maps:remove(ConnectionId, State#state.connections),
+            NewMetrics = increment_metric(State#state.metrics, "disconnections"),
+            {reply, ok, State#state{
+                connections = NewConnections,
+                metrics = NewMetrics
+            }};
+        error ->
+            {reply, {error, not_found}, State}
+    end;
+
+handle_call(get_connections, _From, State) ->
+    ConnectionList = maps:fold(fun(Id, Conn, Acc) ->
+        Info = #{
+            id => Id,
+            host => Conn#connection.config#connection_config.host,
+            port => Conn#connection.config#connection_config.port,
+            connected_at => Conn#connection.connected_at,
+            last_activity => Conn#connection.last_activity
+        },
+        [Info | Acc]
+    end, [], State#state.connections),
+
+    {reply, {ok, ConnectionList}, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({timeout, Ref, heartbeat}, State) ->
+    handle_heartbeat(State);
+
+handle_info({disconnected, ConnectionId}, State) ->
+    case maps:find(ConnectionId, State#state.connections) of
+        {ok, _} ->
+            NewConnections = maps:remove(ConnectionId, State#state.connections),
+            NewMetrics = increment_metric(State#state.metrics, "disconnections"),
+            io:format("Connection ~p disconnected~n", [ConnectionId]),
+            {noreply, State#state{
+                connections = NewConnections,
+                metrics = NewMetrics
+            }};
+        error ->
+            {noreply, State}
+    end;
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    % Disconnect all connections
+    maps:fold(fun(_Id, Connection, _Acc) ->
+        disconnect_connection(Connection)
+    end, [], State#state.connections),
+    io:format("Connection manager terminating~n"),
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+generate_connection_id(Host, Port) ->
+    binary_to_list(integer_to_binary(erlang:phash2({Host, Port}))).
+
+check_connection_limit(#state{connections = Connections}) ->
+    maps:size(Connections) < ?MAX_CONNECTIONS.
+
+create_connection(ConnectionId, Host, Port, Config) ->
+    % Simulate connection creation
+    % In real implementation, this would create actual HTTP/TCP connections
+    Pid = spawn(fun() -> connection_loop(ConnectionId, Host, Port) end),
+    {ok, Pid}.
+
+connection_loop(ConnectionId, Host, Port) ->
+    receive
+        {ping, From} ->
+            From ! {pong, ConnectionId},
+            connection_loop(ConnectionId, Host, Port);
+        {execute, From, Request} ->
+            % Simulate request execution
+            Response = simulate_request(Host, Port, Request),
+            From ! {response, ConnectionId, Response},
+            connection_loop(ConnectionId, Host, Port);
+        stop ->
+            ok;
+        _ ->
+            connection_loop(ConnectionId, Host, Port)
+    end.
+
+disconnect_connection(Connection) ->
+    Connection#connection.pid ! stop.
+
+simulate_request(Host, Port, Request) ->
+    % Simulate MCP request/response
+    case Request of
+        #{<<"method">> := <<"list_tools">>} ->
+            #{<<"result">> => #{<<"tools">> => []}};
+        #{<<"method">> := <<"call_tool">>, <<"params">> := Params} ->
+            #{<<"result">> => #{<<"status">> => <<"simulated">>, <<"params">> => Params}};
+        _ ->
+            #{<<"error">> => #{<<"code">> => -1, <<"message">> => <<"unknown method">>}}
+    end.
+
+handle_heartbeat(#state{connections = Connections} = State) ->
+    io:format("Connection manager heartbeat - ~p connections~n", [maps:size(Connections)]),
+
+    % Send heartbeat to all connections
+    maps:foreach(fun(Id, Connection) ->
+        Connection#connection.pid ! {ping, self()}
+    end, Connections),
+
+    % Schedule next heartbeat
+    erlang:start_timer(?HEARTBEAT_INTERVAL, self(), heartbeat),
+
+    NewMetrics = increment_metric(State#state.metrics, "heartbeats"),
+    {noreply, State#state{metrics = NewMetrics}}.
+
+increment_metric(Metrics, Name) ->
+    Current = maps:get(Name, Metrics, 0),
+    Metrics#{Name => Current + 1}.
+
+%%====================================================================
+%% HotCI Support Functions
+%%====================================================================
+
+-ifdef(HOTCI).
+hotci_status() ->
+    Connections = get_connections(),
+    {ok, ConnectionList} = Connections,
+    #{
+        total_connections => length(ConnectionList),
+        connections => ConnectionList,
+        metrics => get_metrics()
+    }.
+
+hotci_upgrade(NewModule) ->
+    io:format("Upgrading connection manager to ~p~n", [NewModule]),
+    % Upgrade all connection processes
+    maps:fold(fun(_Id, Connection, _Acc) ->
+        Connection#connection.pid ! {upgrade, NewModule}
+    end, [], get_connections()).
+
+get_metrics() ->
+    gen_server:call(?SERVER, get_metrics).
+
+handle_call(get_metrics, _From, State) ->
+    {reply, State#state.metrics, State}.
+-endif.

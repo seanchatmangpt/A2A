@@ -1,0 +1,37 @@
+---
+description: "Generate vm.args file"
+output_dir: "config/"
+file_extension: ""
+dependencies: ["extract-erlang-modules.sparql"]
+---
+{%- comment -%}
+Template for generating vm.args file
+Usage: Generate from application configuration
+{%- endcomment -%}
+
+-name {{ module.name }}@{{ node_name | default("localhost") }}
+-setcookie {{ cookie | default("a2a-cookie") }}
+-kernel inet_dist_listen_min {{ dist_port_min | default(9100) }}
+-kernel inet_dist_listen_max {{ dist_port_max | default(9105) }}
++pc unicode
++sbwt none
++sbwtdcpu none
++sbwtdio none
+{%- if module.hotci_enabled %}
++K true
+{%- endif %}
+{%- if module.memory %}
++hms {{ memory.heap_size | default(1024) }}m
++hds {{ memory.heap_dump_size | default(1024) }}m
+{%- endif %}
+{%- if module.smp %}
++smp {{ module.smp | default("auto") }}
+{%- endif %}
+{%- if module.async_threads %}
++A {{ module.async_threads | default(16) }}
+{%- endif %}
+{%- if module.erts_options %}
+{%- for opt in module.erts_options %}
+{{ opt }}
+{%- endfor %}
+{%- endif %}

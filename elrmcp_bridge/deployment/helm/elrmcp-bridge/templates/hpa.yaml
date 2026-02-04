@@ -1,0 +1,58 @@
+{{- if and .Values.autoscaling.enabled (include "elrmcp-bridge.hpaEnabled" .) }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "elrmcp-bridge.fullname" . }}-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elrmcp-bridge.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "elrmcp-bridge.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilization }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilization }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilization }}
+    {{- end }}
+    {{- range .Values.autoscaling.customMetrics }}
+    - type: Pods
+      pods:
+        metric:
+          {{- if .metric.name }}
+          name: {{ .metric.name }}
+          {{- end }}
+          {{- if .metric.selector }}
+          selector:
+            {{- toYaml .metric.selector | nindent 12 }}
+          {{- end }}
+        target:
+          {{- if .target.type }}
+          type: {{ .target.type }}
+          {{- end }}
+          {{- if .target.value }}
+          value: {{ .target.value }}
+          {{- end }}
+          {{- if .target.averageValue }}
+          averageValue: {{ .target.averageValue }}
+          {{- end }}
+          {{- if .target.averageUtilization }}
+          averageUtilization: {{ .target.averageUtilization }}
+          {{- end }}
+    {{- end }}
+{{- end }}

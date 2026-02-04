@@ -1,0 +1,184 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.grafana.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.fullname" . }}-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: grafana
+data:
+  grafana.ini: |
+    [server]
+    http_port = 3000
+    domain = localhost
+    root_url = %(protocol)s://%(domain)s:%(http_port)s/
+    serve_from_sub_path = false
+
+    [database]
+    type = sqlite3
+    path = /var/lib/grafana/grafana.db
+
+    [log]
+    mode = console
+    filters = 5
+
+    [users]
+    default_theme = light
+    default_role = Viewer
+
+    [analytics]
+    reporting_enabled = false
+    check_for_updates = false
+
+    [security]
+    admin_password = {{ .Values.secrets.grafana.adminPassword }}
+    admin_user = admin
+    allow_embedding = true
+
+    [alerting]
+    enabled = true
+
+    [dashboards]
+    default_home_dashboard_path = /var/lib/grafana/dashboards/default/home.json
+
+  provisioning/dashboards/prometheus-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Prometheus Overview",
+        "tags": ["prometheus"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "type": "stat",
+            "title": "Prometheus Target Health",
+            "targets": [{
+              "expr": "up{job=\"prometheus\"}",
+              "legendFormat": "{{ instance }}: {{ job }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 0
+            }
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        }
+      }
+    }
+
+  provisioning/dashboards/craftplan-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Craftplan System Overview",
+        "tags": ["craftplan"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "type": "graph",
+            "title": "Craftplan API Request Rate",
+            "targets": [{
+              "expr": "rate(http_requests_total[5m])",
+              "legendFormat": "{{ method }} {{ path }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": 2,
+            "type": "graph",
+            "title": "Craftplan Response Time",
+            "targets": [{
+              "expr": "histogram_quantile(0.95, http_request_duration_seconds_bucket)",
+              "legendFormat": "{{ method }} {{ path }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 8
+            }
+          },
+          {
+            "id": 3,
+            "type": "graph",
+            "title": "Craftplan Error Rate",
+            "targets": [{
+              "expr": "rate(http_requests_total{status=~\"5..\"}[5m])",
+              "legendFormat": "{{ method }} {{ path }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 16
+            }
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        }
+      }
+    }
+
+  provisioning/dashboards/a2a-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "A2A Agent Overview",
+        "tags": ["a2a"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "type": "graph",
+            "title": "A2A Agent Message Rate",
+            "targets": [{
+              "expr": "rate(a2a_messages_total[5m])",
+              "legendFormat": "{{ direction }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": 2,
+            "type": "graph",
+            "title": "A2A Agent Processing Time",
+            "targets": [{
+              "expr": "histogram_quantile(0.95, a2a_processing_duration_seconds_bucket)",
+              "legendFormat": "{{ action }}"
+            }],
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 8
+            }
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        }
+      }
+    }
+{{- end }}
+{{- end }}

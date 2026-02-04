@@ -1,0 +1,766 @@
+# Default values for Craftplan Integration
+# This is a YAML-formatted file.
+# DO NOT EDIT DIRECTLY - use environment-specific values files
+
+# Global settings
+global:
+  # Environment configuration
+  environment: "staging" # dev, staging, production
+  namespace: "craftplan"
+  release: "craftplan"
+  domain: "example.com"
+
+  # Image registry configuration
+  registry: "ghcr.io"
+  imagePrefix: "puemos/a2a"
+
+  # Resource limits
+  limits:
+    cpu: "1"
+    memory: "2Gi"
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      # Ingress annotations
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/websocket-services: "craftplan-service,mcp-service,a2a-service,elrmcp-service"
+    hosts:
+      - host: craftplan.{{ .Values.global.domain }}
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: mcp.{{ .Values.global.domain }}
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: a2a.{{ .Values.global.domain }}
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: elrmcp.{{ .Values.global.domain }}
+        paths:
+          - path: /
+            pathType: Prefix
+
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+    prometheus:
+      enabled: true
+      port: 9090
+    grafana:
+      enabled: true
+      port: 3000
+      adminPassword: "admin"
+    loki:
+      enabled: true
+      port: 3100
+
+# Craftplan Application Configuration
+craftplan:
+  enabled: true
+  replicas: 2
+  image:
+    repository: "{{ .Values.global.registry }}/{{ .Values.global.imagePrefix }}/craftplan"
+    tag: "{{ .Chart.AppVersion }}"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 4000
+  ingress:
+    enabled: true
+    host: craftplan.{{ .Values.global.domain }}
+    annotations: {}
+  resources:
+    limits:
+      cpu: "{{ .Values.global.limits.cpu }}"
+      memory: "{{ .Values.global.limits.memory }}"
+    requests:
+      cpu: "{{ .Values.global.requests.cpu }}"
+      memory: "{{ .Values.global.requests.memory }}"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    # Application configuration
+    PORT: "4000"
+    HOST: "0.0.0.0"
+    SCHEME: "http"
+    ENVIRONMENT: "{{ .Values.global.environment }}"
+
+    # Database configuration
+    DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/craftplan?sslmode=disable"
+
+    # Cache configuration
+    REDIS_URL: "redis://redis:6379"
+
+    # File storage
+    STORAGE_BACKEND: "s3"
+    S3_ENDPOINT: "http://minio:9000"
+    S3_BUCKET: "craftplan"
+    S3_ACCESS_KEY: "{{ .Values.secrets.minio.accessKey }}"
+    S3_SECRET_KEY: "{{ .Values.secrets.minio.secretKey }}"
+    S3_REGION: "us-east-1"
+
+    # Security
+    SECRET_KEY_BASE: "{{ .Values.secrets.craftplan.secretKeyBase }}"
+    JWT_SECRET: "{{ .Values.secrets.craftplan.jwtSecret }}"
+
+    # Feature flags
+    ENABLE_METRICS: "true"
+    ENABLE_TRACING: "true"
+    ENABLE_LOGGING: "true"
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 4000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 4000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# MCP Server Configuration
+mcpServer:
+  enabled: true
+  replicas: 2
+  image:
+    repository: "{{ .Values.global.registry }}/{{ .Values.global.imagePrefix }}/mcp-server"
+    tag: "{{ .Chart.AppVersion }}"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 8090
+  ingress:
+    enabled: true
+    host: mcp.{{ .Values.global.domain }}
+    annotations: {}
+  resources:
+    limits:
+      cpu: "{{ .Values.global.limits.cpu }}"
+      memory: "{{ .Values.global.limits.memory }}"
+    requests:
+      cpu: "{{ .Values.global.requests.cpu }}"
+      memory: "{{ .Values.global.requests.memory }}"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    # MCP Server configuration
+    PORT: "8090"
+    HOST: "0.0.0.0"
+    LOG_LEVEL: "info"
+
+    # Craftplan API connection
+    CRAFTPLAN_API_URL: "http://craftplan:4000/api"
+    CRAFTPLAN_API_TOKEN: "{{ .Values.secrets.mcpServer.craftplanToken }}"
+
+    # MCP configuration
+    MCP_PORT: "8090"
+    MCP_SECRET: "{{ .Values.secrets.mcpServer.mcpSecret }}"
+
+    # Feature flags
+    ENABLE_HEALTH_CHECK: "true"
+    ENABLE_METRICS: "true"
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8090
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8090
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# A2A Agent Configuration
+a2aAgent:
+  enabled: true
+  replicas: 2
+  image:
+    repository: "{{ .Values.global.registry }}/{{ .Values.global.imagePrefix }}/a2a-agent"
+    tag: "{{ .Chart.AppVersion }}"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: true
+    host: a2a.{{ .Values.global.domain }}
+    annotations: {}
+  resources:
+    limits:
+      cpu: "{{ .Values.global.limits.cpu }}"
+      memory: "{{ .Values.global.limits.memory }}"
+    requests:
+      cpu: "{{ .Values.global.requests.cpu }}"
+      memory: "{{ .Values.global.requests.memory }}"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    # A2A Agent configuration
+    PORT: "8080"
+    HOST: "0.0.0.0"
+    LOG_LEVEL: "info"
+
+    # MCP Server connection
+    MCP_SERVER_URL: "http://mcp-server:8090/mcp"
+    MCP_SERVER_TOKEN: "{{ .Values.secrets.a2aAgent.mcpToken }}"
+
+    # Agent configuration
+    AGENT_ID: "craftplan-erp-agent"
+    AGENT_NAME: "Craftplan ERP Agent"
+    AGENT_VERSION: "{{ .Chart.AppVersion }}"
+
+    # Feature flags
+    ENABLE_HEALTH_CHECK: "true"
+    ENABLE_METRICS: "true"
+    ENABLE_TRACING: "true"
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# elrmcp Configuration
+elrmcp:
+  enabled: true
+  replicas: 2
+  image:
+    repository: "{{ .Values.global.registry }}/{{ .Values.global.imagePrefix }}/elrmcp"
+    tag: "{{ .Chart.AppVersion }}"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 8081
+  ingress:
+    enabled: true
+    host: elrmcp.{{ .Values.global.domain }}
+    annotations: {}
+  resources:
+    limits:
+      cpu: "{{ .Values.global.limits.cpu }}"
+      memory: "{{ .Values.global.limits.memory }}"
+    requests:
+      cpu: "{{ .Values.global.requests.cpu }}"
+      memory: "{{ .Values.global.requests.memory }}"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    # elrmcp configuration
+    PORT: "8081"
+    HOST: "0.0.0.0"
+    LOG_LEVEL: "info"
+
+    # elrmcp configuration
+    ERLMCP_PORT: "8081"
+    ERLMCP_SECRET: "{{ .Values.secrets.elrmcp.erlmcpSecret }}"
+
+    # Feature flags
+    ENABLE_HEALTH_CHECK: "true"
+    ENABLE_METRICS: "true"
+    ENABLE_TRACING: "true"
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8081
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Database Configuration
+postgres:
+  enabled: true
+  replicas: 1
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    POSTGRES_DB: "craftplan"
+    POSTGRES_USER: "postgres"
+    POSTGRES_PASSWORD: "{{ .Values.secrets.postgres.password }}"
+    PGDATA: "/var/lib/postgresql/data/pgdata"
+
+  livenessProbe:
+    exec:
+      command:
+        - pg_isready
+        - -U
+        - postgres
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    exec:
+      command:
+        - pg_isready
+        - -U
+        - postgres
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Redis Configuration
+redis:
+  enabled: true
+  replicas: 1
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 6379
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    REDIS_PASSWORD: "{{ .Values.secrets.redis.password }}"
+    REDIS_DATABASE: "0"
+
+  livenessProbe:
+    tcpSocket:
+      port: 6379
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    tcpSocket:
+      port: 6379
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# MinIO Configuration
+minio:
+  enabled: true
+  replicas: 1
+  image:
+    repository: minio/minio
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 9000
+    consolePort: 9001
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    accessModes:
+      - ReadWriteOnce
+    size: 50Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  env:
+    MINIO_ROOT_USER: "{{ .Values.secrets.minio.accessKey }}"
+    MINIO_ROOT_PASSWORD: "{{ .Values.secrets.minio.secretKey }}"
+    MINIO_BROWSER_REDIRECT_URL: "http://minio:9001"
+
+  command:
+    - server
+    - /data
+    - --console-address
+    - ":9001"
+
+  livenessProbe:
+    httpGet:
+      path: /minio/health/live
+      port: 9000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /minio/health/ready
+      port: 9000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    image:
+      repository: prom/prometheus
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 9090
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  grafana:
+    enabled: true
+    image:
+      repository: grafana/grafana
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3000
+    resources:
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    env:
+      GF_SECURITY_ADMIN_PASSWORD: "{{ .Values.secrets.grafana.adminPassword }}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+
+  loki:
+    enabled: true
+    image:
+      repository: grafana/loki
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3100
+    resources:
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# Deployment Strategy Configuration
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+# Auto-scaling Configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Network Configuration
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: craftplan
+  egress:
+    - to:
+        - namespaceSelector: {}
+        - podSelector: {}
+
+# Pod Security Context
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsNonRoot: true
+
+# Container Security Context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Service Account Configuration
+serviceAccount:
+  create: true
+  name: "craftplan-service-account"
+  annotations:
+    eks.amazonaws.com/role-arn: "{{ .Values.iam.roleArn }}"
+
+# IAM Configuration
+iam:
+  roleArn: "" # Set via external secret management
+
+# Secrets Configuration
+secrets:
+  postgres:
+    password: "" # Set via external secret management
+
+  redis:
+    password: "" # Set via external secret management
+
+  minio:
+    accessKey: "" # Set via external secret management
+    secretKey: "" # Set via external secret management
+
+  craftplan:
+    secretKeyBase: "" # Set via external secret management
+    jwtSecret: "" # Set via external secret management
+
+  mcpServer:
+    craftplanToken: "" # Set via external secret management
+    mcpSecret: "" # Set via external secret management
+
+  a2aAgent:
+    mcpToken: "" # Set via external secret management
+
+  elrmcp:
+    erlmcpSecret: "" # Set via external secret management
+
+  grafana:
+    adminPassword: "" # Set via external secret management
+
+# Storage Configuration
+storage:
+  class: "standard"
+  accessModes:
+    - ReadWriteOnce
+  reclaimPolicy: Delete
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *" # Daily at 2 AM
+  retention:
+    days: 30
+  # Backup resources
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+
+# Logging Configuration
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  # Log rotation
+  rotation:
+    enabled: true
+    maxAge: 7
+    maxSize: 100
+
+# Security Configuration
+security:
+  # Security scan
+  scan:
+    enabled: true
+    schedule: "0 3 * * *" # Daily at 3 AM
+    vulnerabilityScan: true
+    complianceScan: true
+  # Network policies
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                name: monitoring
+        - podSelector:
+            matchLabels:
+              app: craftplan
+      - ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 4000
+    egress:
+      - to:
+          - namespaceSelector: {}
+          - podSelector: {}
+
+# Cost Optimization Configuration
+costOptimization:
+  enabled: true
+  # Spot instances for non-critical workloads
+  spotInstances:
+    enabled: true
+    instanceTypes:
+      - m6g.large
+      - m6g.xlarge
+      - m5.large
+      - m5.xlarge
+  # Resource limits
+  resourceLimits:
+    enabled: true
+    maxCPU: "2"
+    maxMemory: "4Gi"
+  # Autoscaling
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPU: 70
+    targetMemory: 70
+
+# Configuration for different environments
+environments:
+  dev:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    monitoring:
+      enabled: false
+
+  staging:
+    replicas: 2
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+    monitoring:
+      enabled: true
+
+  production:
+    replicas: 3
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    monitoring:
+      enabled: true
+    backup:
+      enabled: true
+    autoscaling:
+      enabled: true
+    costOptimization:
+      enabled: true

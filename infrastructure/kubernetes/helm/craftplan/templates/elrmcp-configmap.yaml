@@ -1,0 +1,54 @@
+{{- if .Values.elrmcp.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.configMapName" . }}-elrmcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+data:
+  config.json: |
+    {
+      "server": {
+        "host": "{{ .Values.elrmcp.env.HOST }}",
+        "port": {{ .Values.elrmcp.env.PORT }},
+        "log_level": "{{ .Values.elrmcp.env.LOG_LEVEL }}"
+      },
+      "elrmcp": {
+        "port": {{ .Values.elrmcp.env.ERLMCP_PORT }},
+        "secret": "{{ .Values.elrmcp.env.ERLMCP_SECRET }}"
+      },
+      "features": {
+        "health_check": {{ .Values.elrmcp.env.ENABLE_HEALTH_CHECK | default "true" }},
+        "metrics": {{ .Values.elrmcp.env.ENABLE_METRICS | default "true" }},
+        "tracing": {{ .Values.elrmcp.env.ENABLE_TRACING | default "true" }}
+      }
+    }
+  logging.yml: |
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      json:
+        format: "%(asctime)s %(name)s %(levelname)s %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: json
+        stream: ext://sys.stdout
+    loggers:
+      elrmcp:
+        level: {{ .Values.elrmcp.env.LOG_LEVEL | default "INFO" }}
+        handlers: [console]
+        propagate: false
+    root:
+      level: {{ .Values.elrmcp.env.LOG_LEVEL | default "INFO" }}
+      handlers: [console]
+  monitoring.yml: |
+    version: 1
+    services:
+      prometheus:
+        enabled: {{ .Values.global.monitoring.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.prometheus.port | default 9090 }}
+        metrics_path: /metrics
+{{- end }}

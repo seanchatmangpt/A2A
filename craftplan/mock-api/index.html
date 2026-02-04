@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mock Craftplan API</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { background: #f0f4f8; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .endpoint { background: #fff; padding: 15px; margin: 10px 0; border: 1px solid #e0e0e0; border-radius: 4px; }
+        .method { color: #0066cc; font-weight: bold; }
+        .url { color: #009900; }
+        .status { color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mock Craftplan API</h1>
+            <p>This is a mock API server for local development testing</p>
+        </div>
+
+        <h2>Available Endpoints</h2>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/health</div>
+            <div class="status">- Health check endpoint</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/products</div>
+            <div class="status">- List all products</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/orders</div>
+            <div class="status">- List all orders</div>
+        </div>
+
+        <div class="endpoint">
+            <div class="method">GET</div>
+            <div class="url">/api/customers</div>
+            <div class="status">- List all customers</div>
+        </div>
+    </div>
+</body>
+</html>

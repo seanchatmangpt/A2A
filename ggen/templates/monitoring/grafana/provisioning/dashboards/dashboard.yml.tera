@@ -1,0 +1,71 @@
+---
+description: "Grafana dashboard provisioning configuration"
+output_dir: "monitoring/grafana/provisioning/dashboards"
+file_extension: ".yml"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  dashboard_name: "{{ dashboard_name | default('erlang-dashboard') }}"
+  dashboard_version: "{{ dashboard_version | default('1.0') }}"
+---
+{%- comment -%}
+Grafana dashboard provisioning configuration for automatic deployment
+{%- endcomment -%`
+
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+  - name: '{{ app_name }}'
+    orgId: 1
+    folder: '{{ app_name }}'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards/{{ app_name }}
+      foldersFromFilesStructure: true
+
+dashboards:
+  - name: '{{ dashboard_name }}'
+    orgId: 1
+    folder: '{{ app_name }}'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/{{ app_name }}/{{ dashboard_name }}.json
+      uid: {{ app_name }}-dashboard-{{ dashboard_version }}
+      overwrite: true
+      version: 1
+  - name: 'system-overview'
+    orgId: 1
+    folder: '{{ app_name }}'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/system-overview.json
+      uid: system-overview
+      overwrite: true
+  - name: 'node-exporter'
+    orgId: 1
+    folder: '{{ app_name }}'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/node-exporter.json
+      uid: node-exporter
+      overwrite: true
+  - name: 'kubernetes-cluster'
+    orgId: 1
+    folder: '{{ app_name }}'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/kubernetes-cluster.json
+      uid: kubernetes-cluster
+      overwrite: true

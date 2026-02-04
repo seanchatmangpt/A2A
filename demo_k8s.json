@@ -1,0 +1,21 @@
+{
+  "name": "a2a-erl",
+  "namespace": "a2a-system",
+  "replicas": 3,
+  "app_label": "a2a-erl",
+  "component_label": "application",
+  "version_label": "v0.2.0",
+  "container_port": 8080,
+  "service_port": 8080,
+  "service_type": "ClusterIP",
+  "resource_request_cpu": "100m",
+  "resource_request_memory": "128Mi",
+  "resource_limit_cpu": "500m",
+  "resource_limit_memory": "256Mi",
+  "liveness_probe_path": "/health",
+  "readiness_probe_path": "/ready",
+  "health_check_port": 8080,
+  "service_account_name": "a2a-service-account",
+  "hotci_enabled": true,
+  "hotci_check_interval": "30s"
+}

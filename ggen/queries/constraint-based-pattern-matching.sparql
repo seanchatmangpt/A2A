@@ -1,0 +1,259 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Extract patterns based on constraints and conditions
+CONSTRUCT {
+    # Constraint-based Module Patterns
+    ?constraintModule a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviourType ;
+        a2a:hotci_enabled ?hotciEnabled ;
+        a2a:rollback_support ?rollbackSupport ;
+        a2a:upgrade_monitor ?upgradeMonitor ;
+        rdfs:label ?moduleLabel .
+
+    # Constraint-based Infrastructure Patterns
+    ?constraintInfra a a2a:cloud_infrastructure ;
+        a2a:base_image ?baseImage ;
+        a2a:expose_port ?exposePort ;
+        a2a:replicas ?replicas ;
+        a2a:resource_request_cpu ?cpuRequest ;
+        a2a:resource_request_memory ?memoryRequest ;
+        a2a:resource_limit_cpu ?cpuLimit ;
+        a2a:resource_limit_memory ?memoryLimit ;
+        rdfs:label ?infraLabel .
+
+    # Constraint-based Agent Patterns
+    ?constraintAgent a a2a:agent ;
+        a2a:agent_id ?agentId ;
+        a2a:agent_name ?agentName ;
+        a2a:agent_capabilities ?agentCapabilities ;
+        rdfs:label ?agentLabel .
+
+    # Constraint-based Task Patterns
+    ?constraintTask a a2a:task ;
+        a2a:task_id ?taskId ;
+        a2a:task_status ?taskStatus ;
+        a2a:task_type ?taskType ;
+        rdfs:label ?taskLabel .
+
+    # Constraint-based Message Patterns
+    ?constraintMessage a a2a:message ;
+        a2a:message_type ?messageType ;
+        a2a:message_content ?messageContent ;
+        a2a:sender_id ?senderId ;
+        a2a:recipient_id ?recipientId ;
+        rdfs:label ?messageLabel .
+}
+WHERE {
+    # Constraint: HotCI Enabled Modules
+    {
+        SELECT ?module ?moduleName ?behaviourType ?hotciEnabled ?rollbackSupport ?upgradeMonitor ?moduleLabel
+        WHERE {
+            ?module a erl:module ;
+                rdfs:subClassOf* ?behaviour .
+            ?behaviour a erl:behaviour .
+
+            # Extract module name
+            OPTIONAL {
+                ?module rdfs:label ?moduleLabel .
+                FILTER(BOUND(?moduleLabel))
+            }
+            BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+            # Get behaviour type
+            OPTIONAL {
+                ?module a ?behaviour .
+                ?behaviour rdfs:label ?behaviourLabel .
+                BIND(STR(?behaviourLabel) AS ?behaviourType)
+            }
+
+            # HotCI constraint: Only include modules with HotCI enabled
+            OPTIONAL {
+                ?module a2a:hotci_enabled ?hotciEnabled .
+            }
+            FILTER(BOUND(?hotciEnabled) && ?hotciEnabled = true)
+
+            # Rollback support constraint
+            OPTIONAL {
+                ?module a2a:rollback_support ?rollbackSupport .
+            }
+            BIND(COALESCE(?rollbackSupport, false) AS ?rollbackSupport)
+
+            # Upgrade monitor constraint
+            OPTIONAL {
+                ?module a2a:upgrade_monitor ?upgradeMonitor .
+            }
+            BIND(COALESCE(?upgradeMonitor, false) AS ?upgradeMonitor)
+        }
+        LIMIT 100
+    }
+
+    # Constraint: Production-ready Infrastructure
+    {
+        SELECT ?infra ?baseImage ?exposePort ?replicas ?cpuRequest ?memoryRequest ?cpuLimit ?memoryLimit ?infraLabel
+        WHERE {
+            ?infra a a2a:cloud_infrastructure ;
+                a ?infraType .
+            FILTER(?infraType IN (a2a:deployment, a2a:kubernetes_config))
+
+            # Get base image constraint: Erlang 27+ for production
+            OPTIONAL {
+                ?infra a a2a:docker_config ;
+                    a2a:base_image ?baseImage .
+            }
+            FILTER(BOUND(?baseImage) && REGEX(STR(?baseImage), "erlang:[2][7-9]|erlang:[3][0-9]", "i"))
+
+            # Exposed port constraint: HTTP/HTTPS only
+            OPTIONAL {
+                ?infra a2a:expose_port ?exposePort .
+            }
+            FILTER(BOUND(?exposePort) && (?exposePort = 80 || ?exposePort = 443 || ?exposePort = 8080))
+
+            # Replicas constraint: At least 2 for HA
+            OPTIONAL {
+                ?infra a a2a:kubernetes_config ;
+                    a2a:replicas ?replicas .
+            }
+            FILTER(BOUND(?replicas) && ?replicas >= 2)
+
+            # Resource constraints: Production-grade resource limits
+            OPTIONAL {
+                ?infra a2a:resource_request_cpu ?cpuRequest .
+            }
+            FILTER(BOUND(?cpuRequest) && REGEX(STR(?cpuRequest), "[0-9]+m", "i") && STRLEN(STR(?cpuRequest)) >= 3)
+
+            OPTIONAL {
+                ?infra a2a:resource_request_memory ?memoryRequest .
+            }
+            FILTER(BOUND(?memoryRequest) && REGEX(STR(?memoryRequest), "[0-9]+Mi", "i"))
+
+            # Resource limits constraint
+            OPTIONAL {
+                ?infra a2a:resource_limit_cpu ?cpuLimit .
+            }
+            FILTER(BOUND(?cpuLimit) && REGEX(STR(?cpuLimit), "[0-9]+m", "i"))
+
+            OPTIONAL {
+                ?infra a2a:resource_limit_memory ?memoryLimit .
+            }
+            FILTER(BOUND(?memoryLimit) && REGEX(STR(?memoryLimit), "[0-9]+Mi", "i"))
+
+            # Get label
+            OPTIONAL {
+                ?infra rdfs:label ?infraLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Constraint: Capable Agents
+    {
+        SELECT ?agent ?agentId ?agentName ?agentCapabilities ?agentLabel
+        WHERE {
+            ?agent a a2a:agent .
+
+            # Agent ID constraint: Must have valid ID
+            OPTIONAL {
+                ?agent a2a:agent_id ?agentId .
+            }
+            FILTER(BOUND(?agentId) && STRLEN(STR(?agentId)) >= 5)
+
+            # Agent name constraint: Must be descriptive
+            OPTIONAL {
+                ?agent a2a:agent_name ?agentName .
+            }
+            FILTER(BOUND(?agentName) && STRLEN(STR(?agentName)) >= 3)
+
+            # Capabilities constraint: Must have capabilities
+            OPTIONAL {
+                ?agent a2a:agent_capabilities ?capabilities .
+            }
+            FILTER(BOUND(?capabilities) && STRLEN(STR(?capabilities)) >= 10)
+
+            # Agent label constraint: Must have label
+            OPTIONAL {
+                ?agent rdfs:label ?agentLabel .
+            }
+            FILTER(BOUND(?agentLabel))
+        }
+        LIMIT 100
+    }
+
+    # Constraint: Active Tasks
+    {
+        SELECT ?task ?taskId ?taskStatus ?taskType ?taskLabel
+        WHERE {
+            ?task a a2a:task .
+
+            # Task ID constraint: Must have valid ID
+            OPTIONAL {
+                ?task a2a:task_id ?taskId .
+            }
+            FILTER(BOUND(?taskId))
+
+            # Task status constraint: Only active states
+            OPTIONAL {
+                ?task a2a:task_status ?taskStatus .
+            }
+            FILTER(?taskStatus IN ("submitted", "working", "input_required", "auth_required"))
+
+            # Task type constraint: Must have type
+            OPTIONAL {
+                ?task a2a:task_type ?taskType .
+            }
+            FILTER(BOUND(?taskType) && STRLEN(STR(?taskType)) >= 3)
+
+            # Task label constraint: Must have label
+            OPTIONAL {
+                ?task rdfs:label ?taskLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Constraint: Valid Messages
+    {
+        SELECT ?message ?messageType ?messageContent ?senderId ?recipientId ?messageLabel
+        WHERE {
+            ?message a a2a:message .
+
+            # Message type constraint: Valid message types only
+            OPTIONAL {
+                ?message a2a:message_type ?messageType .
+            }
+            FILTER(?messageType IN ("request", "response", "notification", "error"))
+
+            # Message content constraint: Must have content
+            OPTIONAL {
+                ?message a2a:message_content ?messageContent .
+            }
+            FILTER(BOUND(?messageContent) && STRLEN(STR(?messageContent)) >= 1)
+
+            # Sender constraint: Must have sender
+            OPTIONAL {
+                ?message a2a:sender_id ?senderId .
+            }
+            FILTER(BOUND(?senderId))
+
+            # Recipient constraint: Must have recipient (not applicable for notifications)
+            OPTIONAL {
+                ?message a2a:recipient_id ?recipientId .
+            }
+            FILTER(?messageType = "notification" || BOUND(?recipientId))
+
+            # Message label constraint: Must have label
+            OPTIONAL {
+                ?message rdfs:label ?messageLabel .
+            }
+        }
+        LIMIT 100
+    }
+
+    # Bind variables from subqueries to main CONSTRUCT
+    # This ensures the results are available for the final triple construction
+}

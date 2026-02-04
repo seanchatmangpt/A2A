@@ -1,0 +1,86 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-alertmanager
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: alertmanager
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.monitoring.prometheus.annotations }}
+    {{- toYaml .Values.monitoring.prometheus.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: alertmanager
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: alertmanager
+        app.kubernetes.io/component: alertmanager
+        {{- if .Values.monitoring.prometheus.podLabels }}
+        {{- toYaml .Values.monitoring.prometheus.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.monitoring.prometheus.podAnnotations }}
+        {{- toYaml .Values.monitoring.prometheus.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:latest
+          imagePullPolicy: {{ .Values.monitoring.prometheus.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 9093
+              protocol: TCP
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/data
+            - --web.external-url=http://localhost:9093
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          {{- if .Values.monitoring.prometheus.resources }}
+          resources:
+            {{- toYaml .Values.monitoring.prometheus.resources | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+              readOnly: true
+            - name: storage
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "craftplan.configMapName" . }}-alertmanager
+        - name: storage
+          emptyDir: {}
+{{- end }}
+{{- end }}

@@ -1,0 +1,86 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.grafana.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "craftplan.fullname" . }}-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: grafana
+  annotations:
+    {{- if .Values.global.deploymentStrategy }}
+    deployment.kubernetes.io/revision: "{{ .Values.global.deploymentStrategy.revision | default 1 }}"
+    {{- end }}
+    {{- if .Values.monitoring.grafana.annotations }}
+    {{- toYaml .Values.monitoring.grafana.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  strategy:
+    type: {{ .Values.global.deploymentStrategy.type | default "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.global.deploymentStrategy.rollingUpdate.maxSurge | default "25%" }}
+      maxUnavailable: {{ .Values.global.deploymentStrategy.rollingUpdate.maxUnavailable | default "0" }}
+  selector:
+    matchLabels:
+      {{- include "craftplan.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "craftplan.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/component: grafana
+        {{- if .Values.monitoring.grafana.podLabels }}
+        {{- toYaml .Values.monitoring.grafana.podLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.monitoring.grafana.podAnnotations }}
+        {{- toYaml .Values.monitoring.grafana.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "craftplan.config" . | sha256sum }}
+        checksum/secrets: {{ include "craftplan.secret" . | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "craftplan.securityContext" . | nindent 8 }}
+      containers:
+        - name: grafana
+          image: "{{ .Values.monitoring.grafana.image.repository }}:{{ .Values.monitoring.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.monitoring.grafana.image.pullPolicy }}
+          securityContext:
+            {{- include "craftplan.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            {{- if .Values.monitoring.grafana.env }}
+            {{- toYaml .Values.monitoring.grafana.env | nindent 12 }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          {{- if .Values.monitoring.grafana.resources }}
+          resources:
+            {{- toYaml .Values.monitoring.grafana.resources | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/grafana
+            - name: config
+              mountPath: /etc/grafana
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "craftplan.configMapName" . }}-grafana
+        - name: storage
+          emptyDir: {}
+{{- end }}
+{{- end }}

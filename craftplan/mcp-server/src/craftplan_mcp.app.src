@@ -1,0 +1,12 @@
+{application, craftplan_mcp,
+ [{description, "Craftplan MCP Server"},
+  {vsn, "1.0.0"},
+  {modules, [craftplan_mcp_app,
+            craftplan_mcp_sup,
+            craftplan_mcp_server,
+            craftplan_a2a_bridge,
+            craftplan_api_client,
+            craftplan_tools_sup]},
+  {registered, [craftplan_mcp]},
+  {applications, [kernel, stdlib, cowboy, jiffy]},
+  {mod, {craftplan_mcp_app, []}}]}.

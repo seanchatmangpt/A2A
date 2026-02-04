@@ -1,0 +1,30 @@
+# SPARQL Query to Extract MCP Tools from Erlang MCP Ontology
+# Returns MCP tool definitions with schemas and configurations
+
+PREFIX : <https://github.com/a2a/ontology/erlang-mcp#>
+PREFIX erl: <https://github.com/a2a/ontology/erlang-otp#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?tool ?toolName ?toolDescription ?moduleName ?behaviour
+                 ?inputSchema ?outputSchema ?timeout ?maxRetries ?enabled
+WHERE {
+    # Find MCP tools
+    ?tool a :MCPTool .
+
+    # Extract tool properties
+    OPTIONAL { ?tool :mcpToolName ?toolName }
+    OPTIONAL { ?tool :mcpToolDescription ?toolDescription }
+    OPTIONAL { ?tool :mcpToolInputSchema ?inputSchema }
+    OPTIONAL { ?tool :mcpToolOutputSchema ?outputSchema }
+    OPTIONAL { ?tool :mcpToolTimeout ?timeout }
+    OPTIONAL { ?tool :mcpToolMaxRetries ?maxRetries }
+    OPTIONAL { ?tool :mcpToolEnabled ?enabled }
+
+    # Extract Erlang module information
+    OPTIONAL { ?tool erl:hasModule ?moduleName }
+    OPTIONAL { ?tool erl:hasOTPBehaviour ?behaviour }
+
+    # Filter for enabled tools only
+    FILTER (?enabled = true || !BOUND(?enabled))
+}
+ORDER BY ?toolName

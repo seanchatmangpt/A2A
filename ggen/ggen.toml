@@ -1,0 +1,372 @@
+# A2A GGen Configuration File
+# Comprehensive configuration for Erlang, Cloud, and A2A pattern generation
+
+[project]
+name = "a2a-ggen"
+version = "0.2.0"
+description = "A2A Code Generation System for Erlang Applications"
+authors = ["a2a-ggen"]
+license = "MIT"
+repository = "https://github.com/a2a/ggen"
+
+[build]
+target_dir = "generated"
+clean_on_generate = true
+validate_output = true
+parallel_generation = true
+max_concurrent_tasks = 4
+
+[ontology]
+sources = [
+    { path = "ontology/erlang-otp.ttl", prefix = "erl" },
+    { path = "ontology/cloud-infrastructure.ttl", prefix = "k8s" },
+    { path = "ontology/a2a-spec.ttl", prefix = "a2a" },
+    { path = "ontology/erlang-mcp.ttl", prefix = "mcp" },
+    { path = "../craftplan/ontology/craftplan-mcp.ttl", prefix = "craft" }
+]
+
+sparql_queries = [
+    { file = "queries/extract-erlang-modules.sparql", id = "extract-erlang-modules" },
+    { file = "queries/extract-task-states.sparql", id = "extract-task-states" },
+    { file = "queries/extract-records.sparql", id = "extract-records" },
+    { file = "queries/extract-k8s-resources.sparql", id = "extract-k8s-resources" },
+    { file = "queries/extract-docker-config.sparql", id = "extract-docker-config" },
+    { file = "queries/extract-erlmcp-tools.sparql", id = "extract-erlmcp-tools" },
+    { file = "queries/extract-erlmcp-servers.sparql", id = "extract-erlmcp-servers" },
+    { file = "queries/extract-erlmcp-clients.sparql", id = "extract-erlmcp-clients" }
+]
+
+[templates]
+paths = [
+    "templates/erlang",
+    "templates/erlang/erlmcp",
+    "templates/docker",
+    "templates/k8s",
+    "templates/helm",
+    "templates/craftplan"
+]
+
+default_variables = { app_name = "a2a_erl", version = "0.2.0" }
+
+[output]
+structure = [
+    { type = "directory", path = "generated/erlang/src", create = true },
+    { type = "directory", path = "generated/erlang/config", create = true },
+    { type = "directory", path = "generated/erlang/erlmcp", create = true },
+    { type = "directory", path = "generated/docker", create = true },
+    { type = "directory", path = "generated/k8s", create = true },
+    { type = "directory", path = "generated/helm/a2a-erl", create = true },
+    { type = "directory", path = "generated/helm/a2a-erl/templates", create = true },
+    { type = "directory", path = "generated/tests", create = true }
+]
+
+file_permissions = { erl = "644", yaml = "644", md = "644", txt = "644" }
+
+[generation]
+phases = [
+    { name = "ontology", description = "Load and validate ontologies", dependencies = [] },
+    { name = "sparql", description = "Execute SPARQL queries", dependencies = ["ontology"] },
+    { name = "erlang", description = "Generate Erlang modules and configs", dependencies = ["sparql"] },
+    { name = "erlmcp", description = "Generate ErlMCP server, client, and tools", dependencies = ["sparql"] },
+    { name = "docker", description = "Generate Docker configurations", dependencies = ["sparql"] },
+    { name = "k8s", description = "Generate Kubernetes manifests", dependencies = ["sparql"] },
+    { name = "helm", description = "Generate Helm charts", dependencies = ["sparql"] },
+    { name = "validation", description = "Validate generated files", dependencies = ["erlang", "erlmcp", "docker", "k8s", "helm"] },
+    { name = "hooks", description = "Run post-generation hooks", dependencies = ["validation"] }
+]
+
+[generation.modes]
+all = ["erlang", "docker", "k8s", "helm", "erlmcp", "craftplan"]
+erlang = ["erlang"]
+erlmcp = ["erlmcp"]
+craftplan = ["craftplan"]
+docker = ["docker"]
+k8s = ["k8s"]
+helm = ["helm"]
+
+[validation]
+rules = [
+    { name = "erlang-syntax", description = "Validate Erlang syntax", type = "file", pattern = "*.erl", command = "erlc -o /tmp {file}" },
+    { name = "erlmcp-syntax", description = "Validate ErlMCP module syntax", type = "file", pattern = "*_mcp*.erl", command = "erlc -o /tmp {file}" },
+    { name = "yaml-syntax", description = "Validate YAML syntax", type = "file", pattern = "*.yaml", command = "yq eval . {file}" },
+    { name = "required-files", description = "Ensure required files are generated", type = "required", files = ["src/*.erl", "erlmcp/*.erl", "*.yaml", "Chart.yaml"] },
+    { name = "module-naming", description = "Validate module naming conventions", type = "content", pattern = "-module\\(\\w+\\)", file_pattern = "*.erl" },
+    { name = "mcp-tool-validation", description = "Validate MCP tool configurations", type = "content", pattern = "mcpToolName.*string", file_pattern = "*.erl" }
+]
+
+[validation.rules.enforcement]
+strict_mode = true
+fail_on_error = true
+allow_warnings = false
+
+[hooks]
+pre_generation = [
+    { command = "echo 'Starting A2A code generation...'", type = "shell" },
+    { command = "mkdir -p logs", type = "directory" }
+]
+
+post_generation = [
+    { command = "echo 'Code generation completed successfully!'", type = "shell" },
+    { command = "find generated -type f -name '*.erl' | wc -l > logs/erlang_count.txt", type = "shell" },
+    { command = "find generated -type f -name '*.yaml' | wc -l > logs/yaml_count.txt", type = "shell" },
+    { command = "git add generated/ 2>/dev/null || true", type = "git" },
+    { command = "git status 2>/dev/null || true", type = "git" }
+]
+
+[notifications]
+enabled = true
+slack_webhook = ""
+discord_webhook = ""
+email_smtp = ""
+
+[metrics]
+enabled = true
+track_generation_time = true
+track_file_count = true
+track_template_usage = true
+output_file = "metrics/ggen_metrics.json"
+
+[logging]
+level = "info"
+format = "json"
+file = "logs/ggen.log"
+max_size_mb = 100
+max_files = 5
+
+[performance]
+cache_ttl_seconds = 300
+max_memory_mb = 512
+gc_threshold_mb = 100
+parallel_workers = 4
+
+[cloud]
+docker_enabled = true
+kubernetes_enabled = true
+helm_enabled = true
+
+[cloud.docker]
+base_image = "erlang:27-alpine"
+build_args = []
+push_registry = "ghcr.io"
+push_username = ""
+
+[cloud.kubernetes]
+namespace = "a2a-system"
+default_replicas = 2
+default_service_type = "ClusterIP"
+ingress_enabled = false
+
+[cloud.kubernetes.resources]
+limits = { cpu = "500m", memory = "256Mi" }
+requests = { cpu = "100m", memory = "128Mi" }
+
+[cloud.kubernetes.health_probes]
+liveness_probe_path = "/health"
+liveness_probe_port = 8080
+liveness_probe_interval = "30s"
+liveness_probe_timeout = "5s"
+
+readiness_probe_path = "/health"
+readiness_probe_port = 8080
+readiness_probe_interval = "30s"
+readiness_probe_timeout = "5s"
+
+[cloud.kubernetes.service]
+name = "a2a-erl"
+type = "ClusterIP"
+port = 8080
+target_port = 8080
+
+[cloud.kubernetes.labels]
+app = "a2a-erl"
+component = "application"
+managed_by = "ggen"
+version = "0.2.0"
+
+[cloud.helm]
+chart_name = "a2a-erl"
+chart_version = "0.2.0"
+app_version = "0.2.0"
+description = "A2A Erlang Application Helm Chart"
+
+[cloud.helm.values]
+replicaCount = 2
+image = { repository = "ghcr.io/a2a/a2a_erl", tag = "v0.2.0", pullPolicy = "IfNotPresent" }
+
+[cloud.helm.values.service]
+type = "ClusterIP"
+port = 8080
+
+[cloud.helm.values.resources]
+limits = { cpu = "500m", memory = "256Mi" }
+requests = { cpu = "100m", memory = "128Mi" }
+
+[cloud.helm.values.ingress]
+enabled = false
+annotations = ""
+hosts = ""
+tls = ""
+
+[cloud.helm.values."serviceAccount"]
+create = false
+name = ""
+
+[cloud.helm.values."podAnnotations"]
+"prometheus.io/scrape" = "true"
+"prometheus.io/port" = "8081"
+"prometheus.io/path" = "/metrics"
+
+[cloud.helm.values."podSecurityContext"]
+fsGroup = 1000
+runAsUser = 1000
+
+[cloud.helm.values."securityContext"]
+runAsUser = 1000
+runAsGroup = 1000
+fsGroup = 1000
+
+[cloud.helm.values.nodeSelector]
+
+[cloud.helm.values.tolerations]
+
+[cloud.helm.values.affinity]
+
+[erlang]
+otp_version = "27"
+rebar3_path = "rebar3"
+erts_version = "27"
+release_name = "a2a_erl"
+sys_config_path = "sys.config"
+vm_args_path = "vm.args"
+application_name = "a2a_erl"
+
+[erlang.dependencies]
+core = ["cowboy", "lager", "jiffy", "jsx"]
+optional = ["recon", "observer"]
+dev = ["eunit", "common_test", "proper"]
+
+[erlang.hotci]
+enabled = true
+test_types = ["upgrade", "downgrade", "consistency", "performance"]
+upgrade_monitor_interval = "30s"
+rollback_timeout = "5m"
+consistency_check_interval = "60s"
+
+[erlang.validation]
+strict_compilation = true
+include_debug_info = true
+enable_warnings = false
+require_tests = true
+
+[erlang.monitoring]
+metrics_enabled = true
+metrics_port = 8081
+metrics_endpoint = "/metrics"
+health_check_port = 8080
+health_check_endpoint = "/health"
+
+[docker]
+multi_stage_build = true
+base_image_stage = "builder"
+final_image_stage = "runtime"
+build_context = "."
+dockerfile_path = "Dockerfile"
+dockerignore_path = ".dockerignore"
+tag = "latest"
+
+[docker.build]
+build_args = []
+no_cache = false
+pull_latest = true
+platform = "linux/amd64"
+
+[docker.runtime]
+user = "1000:1000"
+workdir = "/app"
+ports = ["8080:8080", "8081:8081"]
+volumes = ["/app/log:/app/log", "/app/data:/app/data"]
+health_check_interval = "30s"
+health_check_timeout = "5s"
+
+[docker.registry]
+enabled = false
+registry_url = "ghcr.io"
+repository = "a2a/a2a_erl"
+username = ""
+password = ""
+
+[security]
+enable_secret_scanning = true
+enable_vulnerability_scanning = true
+
+[security.secret_scanning]
+patterns = ["password", "secret", "token", "key", "credential"]
+scan_output_file = "security/secrets.json"
+
+[security.vulnerability_scanning]
+enabled = true
+scanners = ["safety", "bandit", "trivy"]
+scan_output_file = "security/vulnerabilities.json"
+
+[security.dependency_scanning]
+enabled = true
+max_depth = 10
+ignore_packages = []
+scan_output_file = "security/dependencies.json"
+
+[security.code_analysis]
+enabled = true
+rules = [
+    "no_hardcoded_secrets",
+    "no_insecure_crypto",
+    "no_sql_injection",
+    "no_xss_vulnerabilities"
+]
+
+[compatibility]
+erlang_versions = ["27", "26", "25"]
+otp_behaviours = ["gen_server", "gen_statem", "supervisor", "application"]
+cloud_platforms = ["kubernetes", "docker", "ecs", "gke"]
+a2a_protocol_versions = ["1.0.0"]
+
+[compatibility.versions.erlang]
+min = "27"
+max = "27"
+recommended = "27"
+
+[documentation]
+enabled = true
+output_dir = "docs"
+auto_generate = true
+include_examples = true
+include_api_docs = true
+
+[backup]
+enabled = false
+backup_dir = "backups"
+max_backups = 10
+compression = true
+
+[backup.settings]
+compression_format = "gzip"
+compression_level = 6
+exclude_patterns = ["*.tmp", "*.log", "node_modules/"]
+include_patterns = ["generated/", "templates/", "ontology/"]
+
+[caching]
+enabled = true
+cache_dir = ".cache/ggen"
+cache_ttl_seconds = 300
+max_cache_size_mb = 1000
+
+[plugins]
+enabled = false
+plugin_dir = "plugins"
+auto_load = true
+
+[tracing]
+enabled = false
+jaeger_endpoint = ""
+otlp_endpoint = ""
+service_name = "a2a-ggen"
+sample_rate = "0.1"

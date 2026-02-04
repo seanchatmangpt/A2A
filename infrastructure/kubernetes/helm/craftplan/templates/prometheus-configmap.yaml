@@ -1,0 +1,105 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.fullname" . }}-prometheus
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        monitor: 'craftplan-monitor'
+
+    rule_files:
+      - "alert_rules.yml"
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'craftplan'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-craftplan:4000']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'mcp-server'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-mcp:8090']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'a2a-agent'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-a2a:8080']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'elrmcp'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-elrmcp:8081']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'postgres'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-postgres:5432']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'redis'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-redis:6379']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'minio'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-minio:9000']
+        metrics_path: /minio/prometheus/metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'grafana'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-grafana:3000']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      - job_name: 'loki'
+        scheme: http
+        static_configs:
+          - targets: ['{{ include "craftplan.fullname" . }}-loki:3100']
+        metrics_path: /metrics
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+{{- end }}
+{{- end }}

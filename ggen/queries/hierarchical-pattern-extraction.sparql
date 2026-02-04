@@ -1,0 +1,378 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX erl: <https://erlang.org/otp/>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Extract hierarchical patterns from ontologies
+CONSTRUCT {
+    # Application Hierarchy
+    ?application a erl:application ;
+        a2a:application_name ?appName ;
+        a2a:version ?appVersion ;
+        a2a:description ?appDescription ;
+        a2a:contains_module ?module ;
+        a2a:has_supervisor ?supervisor ;
+        rdfs:label ?appLabel .
+
+    # Module Hierarchy
+    ?module a erl:module ;
+        a2a:module_name ?moduleName ;
+        a2a:behaviour_type ?behaviourType ;
+        a2a:belongs_to_application ?application ;
+        a2a:has_child_module ?childModule ;
+        a2a:has_callback ?callback ;
+        rdfs:label ?moduleLabel .
+
+    # Behaviour Hierarchy
+    ?behaviour a erl:behaviour ;
+        rdfs:label ?behaviourLabel ;
+        rdfs:comment ?behaviourComment ;
+        r2a:has_subclass ?subBehaviour ;
+        r2a:implements_interface ?interface ;
+        r2a:used_by_module ?module ;
+        a2a:requires_callback ?callback .
+
+    # Task Hierarchy
+    ?parentTask a a2a:task ;
+        a2a:task_id ?parentId ;
+        a2a:has_child_task ?childTask ;
+        a2a:has_parent_task ?parentTask ;
+        a2a:workflow_contains ?subTask ;
+        rdfs:label ?parentLabel .
+
+    # State Hierarchy
+    ?parentState a a2a:task_state ;
+        rdfs:label ?parentStateLabel ;
+        a2a:has_substate ?childState ;
+        a2a:state_group ?stateGroup ;
+        a2a:parent_state ?parentState ;
+        rdfs:comment ?stateComment .
+
+    # Agent Hierarchy
+    ?parentAgent a a2a:agent ;
+        a2a:agent_id ?parentId ;
+        a2a:has_child_agent ?childAgent ;
+        a2a:has_parent_agent ?parentAgent ;
+        a2a:group_contains ?subAgent ;
+        a2a:manages_agent ?managedAgent ;
+        rdfs:label ?parentAgentLabel .
+
+    # Infrastructure Hierarchy
+    ?cluster a a2a:cluster ;
+        a2a:cluster_name ?clusterName ;
+        a2a:contains_namespace ?namespace ;
+        a2a:has_deployment ?deployment ;
+        rdfs:label ?clusterLabel .
+
+    ?namespace a a2a:kubernetes_namespace ;
+        a2a:namespace_name ?namespaceName ;
+        a2a:contains_deployment ?deployment ;
+        a2a:contains_service ?service ;
+        a2a:has_configmap ?configmap ;
+        rdfs:label ?namespaceLabel .
+
+    ?deployment a a2a:deployment ;
+        a2a:deployment_name ?deploymentName ;
+        a2a:contains_pod ?pod ;
+        a2a:has_container ?container ;
+        a2a:replicas ?replicas ;
+        rdfs:label ?deploymentLabel .
+
+    ?pod a a2a:kubernetes_pod ;
+        a2a:pod_name ?podName ;
+        a2a:has_container ?container ;
+        a2a:has_volume ?volume ;
+        rdfs:label ?podLabel .
+
+    # Event Hierarchy
+    ?parentEvent a a2a:event ;
+        a2a:event_type ?parentEventType ;
+        a2a:has_child_event ?childEvent ;
+        a2a:event_contains_subevent ?subevent ;
+        a2a:event_group ?eventGroup ;
+        rdfs:label ?parentEventLabel .
+
+    # Skill Hierarchy
+    ?parentSkill a a2a:skill ;
+        a2a:skill_name ?parentSkillName ;
+        a2a:has_child_skill ?childSkill ;
+        a2a:skill_group ?skillGroup ;
+        a2a:depends_on_skill ?dependency ;
+        a2a:used_by_agent ?agent ;
+        rdfs:label ?parentSkillLabel .
+}
+WHERE {
+    # Application Hierarchy
+    ?application a erl:application .
+
+    # Application properties
+    OPTIONAL {
+        ?application a2a:application_name ?appName .
+    }
+    BIND(COALESCE(?appName, "a2a-app") AS ?appName)
+
+    OPTIONAL {
+        ?application a2a:version ?appVersion .
+    }
+    BIND(COALESCE(?appVersion, "1.0.0") AS ?appVersion)
+
+    OPTIONAL {
+        ?application a2a:description ?appDescription .
+    }
+
+    # Application label
+    OPTIONAL {
+        ?application rdfs:label ?appLabel .
+    }
+
+    # Module hierarchy
+    ?module a rdfs:Class ;
+        rdfs:subClassOf* ?behaviour .
+
+    ?behaviour a erl:behaviour .
+
+    # Module properties
+    OPTIONAL {
+        ?module rdfs:label ?moduleLabel .
+    }
+    BIND(COALESCE(?moduleLabel, REPLACE(STR(?module), ".*(#|/)", "")) AS ?moduleName)
+
+    # Belongs to application
+    OPTIONAL {
+        ?application rdfs:contains ?module .
+    }
+
+    # Child modules
+    OPTIONAL {
+        ?module rdfs:subClassOf ?childModule ;
+            rdfs:label ?childLabel .
+    }
+
+    # Callback functions
+    OPTIONAL {
+        ?behaviour rdfs:comment ?comment ;
+            rdfs:label ?callbackLabel .
+        FILTER(STRSTARTS(STR(?comment), "Callbacks:"))
+    }
+
+    # Behaviour hierarchy
+    ?behaviour a erl:behaviour .
+
+    # Behaviour properties
+    OPTIONAL {
+        ?behaviour rdfs:label ?behaviourLabel .
+    }
+
+    OPTIONAL {
+        ?behaviour rdfs:comment ?behaviourComment .
+    }
+
+    # Sub-behaviours
+    OPTIONAL {
+        ?behaviour rdfs:subClassOf ?subBehaviour ;
+            rdfs:label ?subBehaviourLabel .
+    }
+
+    # Task hierarchy
+    ?parentTask a a2a:task .
+
+    # Parent task properties
+    OPTIONAL {
+        ?parentTask a2a:task_id ?parentId .
+    }
+    BIND(COALESCE(?parentId, "task_" + UUID()) AS ?parentId)
+
+    # Child tasks
+    OPTIONAL {
+        ?childTask a a2a:task ;
+            a2a:has_parent_task ?parentTask ;
+            a2a:task_id ?childId .
+    }
+
+    # Workflow tasks
+    OPTIONAL {
+        ?subTask a a2a:task ;
+            a2a:workflow_contains ?parentTask ;
+            a2a:task_type ?subTaskType .
+    }
+
+    # Parent task label
+    OPTIONAL {
+        ?parentTask rdfs:label ?parentLabel .
+    }
+
+    # State hierarchy
+    ?parentState a a2a:task_state .
+
+    # State properties
+    OPTIONAL {
+        ?parentState rdfs:label ?parentStateLabel .
+    }
+    BIND(COALESCE(?parentStateLabel, REPLACE(STR(?parentState), ".*(#|/)", "")) AS ?parentStateLabel)
+
+    # Substates
+    OPTIONAL {
+        ?childState a a2a:task_state ;
+            a2a:has_parent_state ?parentState ;
+            rdfs:label ?childStateLabel .
+    }
+
+    # State groups
+    OPTIONAL {
+        ?parentState rdfs:comment ?stateComment ;
+            rdfs:label ?stateLabel .
+        FILTER(STRSTARTS(STR(?stateComment), "Group:"))
+        BIND(SUBSTR(STR(?stateComment), 7) AS ?stateGroup)
+    }
+
+    # Agent hierarchy
+    ?parentAgent a a2a:agent .
+
+    # Parent agent properties
+    OPTIONAL {
+        ?parentAgent a2a:agent_id ?parentId .
+    }
+    BIND(COALESCE(?parentId, "agent_" + UUID()) AS ?parentId)
+
+    # Child agents
+    OPTIONAL {
+        ?childAgent a a2a:agent ;
+            a2a:has_parent_agent ?parentAgent ;
+            a2a:agent_name ?childName .
+    }
+
+    # Group agents
+    OPTIONAL {
+        ?subAgent a a2a:agent ;
+            a2a:group_contains ?parentAgent ;
+            a2a:agent_name ?subName .
+    }
+
+    # Managed agents
+    OPTIONAL {
+        ?managedAgent a a2a:agent ;
+            a2a:manages_agent ?parentAgent ;
+            a2a:agent_name ?managedName .
+    }
+
+    # Parent agent label
+    OPTIONAL {
+        ?parentAgent rdfs:label ?parentAgentLabel .
+    }
+
+    # Infrastructure hierarchy
+    # Cluster (virtual concept)
+    ?cluster a a2a:cluster .
+
+    # Cluster properties
+    OPTIONAL {
+        ?cluster rdfs:label ?clusterLabel .
+    }
+    BIND(COALESCE(?clusterLabel, "a2a-cluster") AS ?clusterLabel)
+
+    # Namespaces in cluster
+    OPTIONAL {
+        ?namespace a a2a:kubernetes_namespace ;
+            rdfs:label ?namespaceLabel .
+    }
+    BIND(COALESCE(?namespaceLabel, "default") AS ?namespaceLabel)
+
+    # Deployments in namespace
+    ?deployment a a2a:deployment .
+
+    # Deployment properties
+    OPTIONAL {
+        ?deployment rdfs:label ?deploymentLabel .
+    }
+    BIND(COALESCE(?deploymentLabel, "a2a-deployment") AS ?deploymentLabel)
+
+    # Pods in deployment
+    ?pod a a2a:kubernetes_pod .
+
+    # Pod properties
+    OPTIONAL {
+        ?pod rdfs:label ?podLabel .
+    }
+    BIND(COALESCE(?podLabel, "a2a-pod") AS ?podLabel)
+
+    # Event hierarchy
+    ?parentEvent a a2a:event .
+
+    # Parent event properties
+    OPTIONAL {
+        ?parentEvent a2a:event_type ?parentEventType .
+    }
+    BIND(COALESCE(?parentEventType, "system") AS ?parentEventType)
+
+    # Child events
+    OPTIONAL {
+        ?childEvent a a2a:event ;
+            a2a:has_parent_event ?parentEvent ;
+            a2a:event_type ?childEventType .
+    }
+
+    # Subevents
+    OPTIONAL {
+        ?subevent a a2a:event ;
+            a2a:event_contains_subevent ?parentEvent ;
+            a2a:event_type ?subeventType .
+    }
+
+    # Event groups
+    OPTIONAL {
+        ?parentEvent rdfs:comment ?eventComment ;
+            rdfs:label ?eventLabel .
+        FILTER(STRSTARTS(STR(?eventComment), "Group:"))
+        BIND(SUBSTR(STR(?eventComment), 7) AS ?eventGroup)
+    }
+
+    # Parent event label
+    OPTIONAL {
+        ?parentEvent rdfs:label ?parentEventLabel .
+    }
+
+    # Skill hierarchy
+    ?parentSkill a a2a:skill .
+
+    # Parent skill properties
+    OPTIONAL {
+        ?parentSkill a2a:skill_name ?parentSkillName .
+    }
+    BIND(COALESCE(?parentSkillName, "parent_skill") AS ?parentSkillName)
+
+    # Child skills
+    OPTIONAL {
+        ?childSkill a a2a:skill ;
+            a2a:has_parent_skill ?parentSkill ;
+            a2a:skill_name ?childSkillName .
+    }
+
+    # Skill groups
+    OPTIONAL {
+        ?parentSkill rdfs:comment ?skillComment ;
+            rdfs:label ?skillLabel .
+        FILTER(STRSTARTS(STR(?skillComment), "Group:"))
+        BIND(SUBSTR(STR(?skillComment), 7) AS ?skillGroup)
+    }
+
+    # Skill dependencies
+    OPTIONAL {
+        ?dependency a a2a:skill ;
+            a2a:depends_on_skill ?parentSkill ;
+            rdfs:label ?dependencyLabel .
+    }
+
+    # Agent using skill
+    OPTIONAL {
+        ?agent a a2a:agent ;
+            a2a:uses_skill ?parentSkill ;
+            a2a:agent_name ?agentName .
+    }
+
+    # Parent skill label
+    OPTIONAL {
+        ?parentSkill rdfs:label ?parentSkillLabel .
+    }
+}

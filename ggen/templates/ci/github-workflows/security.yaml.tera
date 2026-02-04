@@ -1,0 +1,252 @@
+---
+description: "GitHub Actions workflow for security scanning and compliance"
+output_dir: ".github/workflows"
+file_extension: ".yaml"
+variables:
+  app_name: "{{ module.name }}"
+  docker_image: "{{ module.name }}"
+  docker_registry: "{{ docker_registry | default('ghcr.io') }}"
+  docker_username: "{{ docker_username | default('github-username') }}"
+---
+{%- comment -%}
+GitHub Actions workflow for security scanning and compliance checks
+{%- endcomment -%}
+
+name: Security and Compliance
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+  schedule:
+    # Run daily security scan at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner for filesystem
+      uses: aquasecurity/trivy-action@v0.18.0
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-fs.sarif'
+        exit-code: '1'
+        severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+    - name: Upload Trivy scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-fs-results
+        path: trivy-fs.sarif
+        retention-days: 30
+
+    - name: Upload Trivy scan to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-fs.sarif
+
+  dependency-check:
+    name: Dependency Vulnerability Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up rebar3
+      uses: rebar3/rebar3-action@v3
+
+    - name: Generate dependency tree
+      run: |
+        rebar3 deps tree
+
+    - name: Run safety checks
+      run: |
+        rebar3 as security safety-checks
+
+    - name: Run dependency audit
+      run: |
+        rebar3 as security audit
+
+  code-analysis:
+    name: Code Security Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Erlang
+      uses: erlef/setup-beam@v1
+      with:
+        version: '27.0'
+        otp-version: '27'
+
+    - name: Set up rebar3
+      uses: rebar3/rebar3-action@v3
+
+    - name: Run dialyzer for static analysis
+      run: |
+        rebar3 dialyzer
+
+    - name: Check for secrets
+      uses: trufflesecurity/trufflehog@v3.65.1
+      with:
+        path: ./
+        branch: main
+        recursive: true
+
+  compliance:
+    name: Compliance Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check license headers
+      run: |
+        # Check if all files have proper license headers
+        find . -type f -name "*.erl" -exec grep -L "Copyright" {} \;
+
+    - name: Check for hardcoded credentials
+      run: |
+        # Look for potential hardcoded passwords, API keys, etc.
+        grep -r -i "password\s*=\s*['\"][^'\"]*['\"]" --include="*.erl" --include="*.config" . || true
+        grep -r -i "api_key\s*=\s*['\"][^'\"]*['\"]" --include="*.erl" --include="*.config" . || true
+        grep -r -i "secret\s*=\s*['\"][^'\"]*['\"]" --include="*.erl" --include="*.config" . || true
+
+    - name: Check OWASP Top 10 vulnerabilities
+      run: |
+        # Basic checks for common security issues
+        # Add specific checks based on your application
+
+  docker-security:
+    name: Docker Image Security
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.DOCKER_IMAGE }}:security-scan -f Dockerfile.production .
+
+    - name: Run Docker security scan
+      uses: aquasecurity/trivy-action@v0.18.0
+      with:
+        image-ref: ${{ env.DOCKER_IMAGE }}:security-scan
+        format: 'sarif'
+        output: 'docker-trivy.sarif'
+
+    - name: Check Docker best practices
+      run: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image ${{ env.DOCKER_IMAGE }}:security-scan
+
+  sign-artifacts:
+    name: Sign Artifacts
+    runs-on: ubuntu-latest
+    needs: [security-scan, dependency-check, code-analysis]
+    if: success()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate SBOM
+      uses:anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+      outputs:
+        sbom-path: '${{ steps.sbom.outputs.sbom-file }}'
+
+    - name: Sign SBOM
+      run: |
+        # Use GPG or other signing mechanism to sign the SBOM
+        gpg --armor --detach-sbom sbom.spdx.json
+
+    - name: Upload signed artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-artifacts
+        path: |
+          sbom.spdx.json
+          sbom.spdx.json.asc
+        retention-days: 365
+
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [security-scan, dependency-check, code-analysis, docker-security]
+    if: always()
+
+    steps:
+    - name: Generate security report
+      run: |
+        cat > security-report.md << 'EOF'
+        # Security Report for {{ app_name }}
+
+        ## Scan Results Summary
+
+        - **Filesystem Scan**: ${{ needs.security-scan.result }}
+        - **Dependency Check**: ${{ needs.dependency-check.result }}
+        - **Code Analysis**: ${{ needs.code-analysis.result }}
+        - **Docker Security**: ${{ needs.docker-security.result }}
+
+        ## Recommendations
+
+        1. Review and address all high and critical vulnerabilities
+        2. Update dependencies regularly
+        3. Implement security code reviews
+        4. Run security scans in CI/CD pipeline
+
+        ## Next Steps
+
+        - Review detailed scan results in the Security tab
+        - Create issues for vulnerabilities that need fixing
+        - Schedule regular security reviews
+
+        EOF
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-report
+        path: security-report.md
+        retention-days: 90
+
+    - name: Post security report to Slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: 'Security scan completed for {{ app_name }}'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,275 @@
+---
+description: "Jenkins pipeline configuration for CI/CD"
+output_dir: "ci"
+file_extension: "Jenkinsfile"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  docker_image: "{{ module.name }}"
+  docker_registry: "{{ docker_registry | default('docker.io') }}"
+  docker_username: "{{ docker_username | default('jenkins-user') }}"
+  k8s_cluster: "{{ k8s_cluster | default('production') }}"
+  environment: "{{ environment | default('production') }}"
+---
+{%- comment -%}
+Jenkins pipeline configuration for comprehensive CI/CD
+{-% endcomment -%}
+
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = '{{ docker_registry }}'
+        IMAGE_NAME = '{{ docker_image }}'
+        APP_NAME = '{{ app_name }}'
+        NAMESPACE = '{{ namespace }}'
+        CLUSTER = '{{ k8s_cluster }}'
+        ENVIRONMENT = '{{ environment }}'
+    }
+
+    // Stages for the CI/CD pipeline
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    // Get short commit hash
+                    env.GIT_SHORT_HASH = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    // Get branch name
+                    env.BRANCH_NAME = env.GIT_BRANCH?.replace('origin/', '')
+                }
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                // Install dependencies
+                sh '''
+                    # Install Erlang
+                    curl -sSL https://github.com/erlang/otp/releases/download/OTP-27.0/otp_src_27.0.tar.gz | tar xz
+                    cd otp_src_27.0
+                    ./configure --prefix=/usr/local
+                    make -j$(nproc)
+                    sudo make install
+
+                    # Install rebar3
+                    curl -L -o rebar3 https://github.com/erlang/rebar3/releases/download/3.23.0/rebar3
+                    chmod +x rebar3
+                    sudo mv rebar3 /usr/local/bin/
+                '''
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                // Run linting checks
+                sh '''
+                    rebar3 lint
+                '''
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                // Run security vulnerability scan
+                sh '''
+                    # Run dependency security scan
+                    rebar3 as security safety-checks
+
+                    # Check for hardcoded credentials
+                    grep -r -i "password\s*=\s*['\"][^'\"]*['\"]" --include="*.erl" --include="*.config" . || true
+                    grep -r -i "api_key\s*=\s*['\"][^'\"]*['\"]" --include="*.erl" --include="*.config" . || true
+                '''
+            }
+        }
+
+        stage('Test') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        sh '''
+                            rebar3 eunit
+                        '''
+                    }
+                }
+
+                stage('Integration Tests') {
+                    steps {
+                        sh '''
+                            rebar3 as test ct
+                        '''
+                    }
+                }
+
+                stage('Performance Tests') {
+                    steps {
+                        sh '''
+                            # Run performance tests with wrk or similar
+                            ./scripts/performance-test.sh
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                // Build Docker image
+                script {
+                    def imageTag = "${env.IMAGE_NAME}:${env.BUILD_ID}"
+
+                    sh '''
+                        docker build -f Dockerfile.production \
+                            -t ${REGISTRY}/${IMAGE_NAME}:${BUILD_ID} \
+                            -t ${REGISTRY}/${IMAGE_NAME}:${BRANCH_NAME} \
+                            -t ${REGISTRY}/${IMAGE_NAME}:${BRANCH_NAME}-${GIT_SHORT_HASH} \
+                            .
+                    '''
+
+                    // Push Docker image
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASSWORD')]) {
+                        sh '''
+                            docker login ${REGISTRY} -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
+                            docker push ${REGISTRY}/${IMAGE_NAME}:${BUILD_ID}
+                            docker push ${REGISTRY}/${IMAGE_NAME}:${BRANCH_NAME}
+                            docker push ${REGISTRY}/${IMAGE_NAME}:${BRANCH_NAME}-${GIT_SHORT_HASH}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Staging') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    def namespace = "${NAMESPACE}-staging"
+
+                    // Update Kubernetes deployment
+                    sh """
+                        helm upgrade --install ${APP_NAME}-staging ./helm \
+                            --namespace ${namespace} \
+                            --set image.tag=${BUILD_ID} \
+                            --set replicaCount=2 \
+                            --set service.type=LoadBalancer \
+                            --wait
+                    """
+
+                    // Run integration tests against staging
+                    sh """
+                        ./scripts/test-staging.sh
+                    """
+
+                    // Run canary tests if enabled
+                    if (env.CANARY_ENABLED == 'true') {
+                        sh """
+                            ./scripts/canary-test.sh
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    // Create canary deployment
+                    sh """
+                        helm upgrade --install ${APP_NAME}-canary ./helm \
+                            --namespace ${NAMESPACE} \
+                            --set image.tag=${BUILD_ID} \
+                            --set replicaCount=1 \
+                            --set service.canary.enabled=true \
+                            --wait
+                    """
+
+                    // Run canary validation
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            def result = sh(returnStatus: true, script: '''
+                                ./scripts/canary-validation.sh
+                            ''')
+
+                            if (result != 0) {
+                                error('Canary validation failed')
+                            }
+                        }
+                    }
+
+                    // Promote to production
+                    sh """
+                        helm upgrade --install ${APP_NAME} ./helm \
+                            --namespace ${NAMESPACE} \
+                            --set image.tag=${BUILD_ID} \
+                            --set replicaCount=3 \
+                            --wait
+                    """
+                }
+            }
+        }
+
+        stage('Post-deployment Tests') {
+            steps {
+                // Run smoke tests
+                sh '''
+                    ./scripts/smoke-test.sh
+                '''
+
+                // Run performance tests
+                sh '''
+                    ./scripts/production-performance-test.sh
+                '''
+            }
+        }
+    }
+
+    // Post-build actions
+    post {
+        always {
+            // Archive test results
+            archiveArtifacts artifacts: '**/junit*.xml', fingerprint: true
+
+            // Publish test results
+            publishTestResults testResultsPattern: '**/junit*.xml'
+
+            // Publish reports
+            publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'reports',
+                reportFiles: 'index.html',
+                reportName: 'Test Report'
+            ])
+        }
+
+        success {
+            // Send notification
+            slackSend message: "SUCCESS: Pipeline for ${APP_NAME} in ${ENVIRONMENT} succeeded", channel: '#deployments'
+        }
+
+        failure {
+            // Send notification
+            slackSend message: "FAILURE: Pipeline for ${APP_NAME} in ${ENVIRONMENT} failed", channel: '#deployments'
+
+            // Trigger rollback
+            script {
+                if (currentBuild.result == 'FAILURE') {
+                    sh '''
+                        kubectl rollout undo deployment/${APP_NAME} -n ${NAMESPACE}
+                    '''
+                }
+            }
+        }
+
+        cleanup {
+            // Clean up workspace
+            cleanWs()
+        }
+    }
+}

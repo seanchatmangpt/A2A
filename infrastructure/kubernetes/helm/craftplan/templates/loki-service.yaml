@@ -1,0 +1,29 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.loki.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-loki
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: loki
+  annotations:
+    {{- if .Values.monitoring.loki.annotations }}
+    {{- toYaml .Values.monitoring.loki.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.monitoring.loki.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.monitoring.loki.service.port }}
+      targetPort: 3100
+      {{- if .Values.monitoring.loki.service.nodePort }}
+      nodePort: {{ .Values.monitoring.loki.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: loki
+{{- end }}
+{{- end }}

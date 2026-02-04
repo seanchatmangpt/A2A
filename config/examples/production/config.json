@@ -1,0 +1,130 @@
+{
+  "environment": "production",
+  "config_version": "0.1.0",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8443,
+    "max_connections": 1000,
+    "timeout": 60,
+    "ssl_enabled": true
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/var/log/a2a/bridge.log",
+    "max_size": 52428800,
+    "backup_count": 10,
+    "json_format": true
+  },
+  "security": {
+    "jwt_secret": "${JWT_SECRET}",
+    "jwt_algorithm": "RS256",
+    "jwt_expiration": 7200,
+    "api_key": "${API_KEY}",
+    "ssl_cert_path": "/etc/ssl/certs/a2a.crt",
+    "ssl_key_path": "/etc/ssl/private/a2a.key",
+    "allowed_origins": ["https://app.example.com", "https://api.example.com"]
+  },
+  "database": {
+    "url": "${DATABASE_URL}",
+    "host": "${DB_HOST}",
+    "port": 5432,
+    "name": "a2a_prod",
+    "username": "${DB_USERNAME}",
+    "password": "${DB_PASSWORD}",
+    "pool_size": 50,
+    "max_overflow": 100,
+    "pool_timeout": 60
+  },
+  "mcp": {
+    "server_name": "craftplan-mcp-prod",
+    "host": "0.0.0.0",
+    "port": 9000,
+    "protocol_version": "2024-11-05",
+    "capabilities": {
+      "tools": {
+        "plan": {},
+        "execute": {},
+        "monitor": {}
+      },
+      "resources": {
+        "tasks": {},
+        "agents": {}
+      },
+      "logging": {
+        "level": "INFO"
+      }
+    },
+    "max_request_size": 10485760,
+    "request_timeout": 600
+  },
+  "a2a": {
+    "agent_name": "a2a-agent-prod",
+    "namespace": "production",
+    "service_url": "https://a2a-service.example.com",
+    "event_bus_url": "https://event-bus.example.com",
+    "task_timeout": 1800,
+    "max_retries": 5,
+    "retry_delay": 30,
+    "storage_backend": "redis"
+  },
+  "bridge": {
+    "mcp_server": {
+      "server_name": "craftplan-mcp-prod",
+      "host": "0.0.0.0",
+      "port": 9000,
+      "protocol_version": "2024-11-05",
+      "capabilities": {
+        "tools": {
+          "plan": {},
+          "execute": {},
+          "monitor": {}
+        },
+        "resources": {
+          "tasks": {},
+          "agents": {}
+        },
+        "logging": {
+          "level": "INFO"
+        }
+      },
+      "max_request_size": 10485760,
+      "request_timeout": 600
+    },
+    "a2a_agent": {
+      "agent_name": "a2a-agent-prod",
+      "namespace": "production",
+      "service_url": "https://a2a-service.example.com",
+      "event_bus_url": "https://event-bus.example.com",
+      "task_timeout": 1800,
+      "max_retries": 5,
+      "retry_delay": 30,
+      "storage_backend": "redis"
+    },
+    "auto_start": true,
+    "heartbeat_interval": 60,
+    "max_bridge_sessions": 100,
+    "message_queue_size": 10000,
+    "metrics_enabled": true
+  },
+  "custom_config": {
+    "production_mode": true,
+    "monitoring": {
+      "enabled": true,
+      "metrics_port": 9090,
+      "health_check_path": "/health",
+      "readiness_check_path": "/ready"
+    },
+    "scaling": {
+      "auto_scale": true,
+      "min_instances": 3,
+      "max_instances": 10,
+      "target_cpu_utilization": 70
+    },
+    "backup": {
+      "enabled": true,
+      "interval": "1h",
+      "retention": "7d"
+    }
+  }
+}

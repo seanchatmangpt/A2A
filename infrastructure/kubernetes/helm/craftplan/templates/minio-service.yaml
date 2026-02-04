@@ -1,0 +1,31 @@
+{{- if .Values.minio.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+  annotations:
+    {{- if .Values.minio.annotations }}
+    {{- toYaml .Values.minio.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.minio.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.minio.service.port }}
+      targetPort: 9000
+      {{- if .Values.minio.service.nodePort }}
+      nodePort: {{ .Values.minio.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+    - name: console
+      port: {{ .Values.minio.consolePort }}
+      targetPort: 9001
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+{{- end }}

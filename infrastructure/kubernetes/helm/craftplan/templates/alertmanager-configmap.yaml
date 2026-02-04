@@ -1,0 +1,48 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.fullname" . }}-alertmanager
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: alertmanager
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'localhost:587'
+      smtp_from: alertmanager@example.com
+      smtp_auth_username: alertmanager@example.com
+      smtp_auth_password: ''
+
+    route:
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'web.hook'
+
+    receivers:
+    - name: 'web.hook'
+      email_configs:
+      - to: 'admin@example.com'
+        subject: 'Alert: {{ .Values.global.environment }} - {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Status: {{ .Status }}
+          Labels: {{ .Labels }}
+          {{ end }}
+    - name: 'null'
+      slack_configs:
+      - channel: '#alerts'
+        title: 'Alertmanager'
+        text: '{{ .CommonAnnotations.summary }}'
+
+    templates:
+    - '/etc/alertmanager/templates/*.tmpl'
+{{- end }}
+{{- end }}

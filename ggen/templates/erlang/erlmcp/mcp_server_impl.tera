@@ -1,0 +1,296 @@
+-module({{ module_name }}_server).
+-behaviour(gen_server).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/1, stop/0, get_status/0, list_tools/0]).
+-export([handle_call/3, handle_cast/2, handle_info/2, init/1, terminate/2, code_change/3]).
+
+%%====================================================================
+%% Records and Macros
+%%====================================================================
+
+-record(state, {
+    port :: integer(),
+    host :: string(),
+    protocol :: string(),
+    tools :: map(),  #{tool_name() => tool_config()},
+    connections :: map(),  #{connection_id() => connection_info()},
+    metrics :: map(),  #{string() => integer()},
+    version :: string(),
+    heartbeat_ref :: reference() | undefined,
+    hotci_monitor_ref :: reference() | undefined
+}).
+
+-define(SERVER, ?MODULE).
+-define(HEARTBEAT_INTERVAL, {{ heartbeat_interval }}).
+-define(HOTCI_MONITOR_INTERVAL, {{ hotci_monitor_interval }}).
+
+%%====================================================================
+%% Type Definitions
+%%====================================================================
+
+-type tool_name() :: atom().
+-type tool_config() :: #{
+    name := string(),
+    description := string(),
+    handler := atom(),
+    input_schema := map(),
+    output_schema := map(),
+    timeout := pos_integer(),
+    max_retries := pos_integer(),
+    enabled := boolean()
+}.
+-type connection_id() :: binary().
+-type connection_info() :: #{
+    id := connection_id(),
+    pid := pid(),
+    connected_at := integer(),
+    last_activity := integer(),
+    metadata := map()
+}.
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link(Config) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Config, []).
+
+stop() ->
+    gen_server:call(?SERVER, stop).
+
+get_status() ->
+    gen_server:call(?SERVER, get_status).
+
+list_tools() ->
+    gen_server:call(?SERVER, list_tools).
+
+%%====================================================================
+%% gen_server Callbacks
+%%====================================================================
+
+init(Config) ->
+    io:format("Initializing MCP server with config: ~p~n", [Config]),
+
+    #{
+        port := Port,
+        host := Host,
+        protocol := Protocol,
+        tools := Tools,
+        version := Version,
+        hotci_enabled := HotCIE
+    } = Config,
+
+    % Initialize state
+    State = #state{
+        port = Port,
+        host = Host,
+        protocol = Protocol,
+        tools = Tools,
+        connections = #{},
+        metrics = #{},
+        version = Version
+    },
+
+    % Start heartbeat if enabled
+    HeartbeatRef = case HotCIE of
+        true -> erlang:start_timer(?HEARTBEAT_INTERVAL, self(), heartbeat);
+        false -> undefined
+    end,
+
+    % Start HotCI monitor if enabled
+    HotciMonitorRef = case HotCIE of
+        true -> erlang:start_timer(?HOTCI_MONITOR_INTERVAL, self(), hotci_monitor);
+        false -> undefined
+    end,
+
+    io:format("MCP server started on ~s:~p with ~p tools~n",
+        [Host, Port, maps:size(Tools)]),
+
+    {ok, State#state{
+        heartbeat_ref = HeartbeatRef,
+        hotci_monitor_ref = HotciMonitorRef
+    }}.
+
+handle_call(stop, _From, State) ->
+    {stop, normal, stopped, State};
+
+handle_call(get_status, _From, State) ->
+    Status = #{
+        running => true,
+        port => State#state.port,
+        host => State#state.host,
+        protocol => State#state.protocol,
+        tools_count => maps:size(State#state.tools),
+        connections_count => maps:size(State#state.connections),
+        metrics => State#state.metrics,
+        version => State#state.version
+    },
+    {reply, {ok, Status}, State};
+
+handle_call(list_tools, _From, State) ->
+    Tools = maps:map(fun(_Name, Config) ->
+        maps:without([handler], Config)
+    end, State#state.tools),
+    {reply, {ok, Tools}, State};
+
+handle_call({execute_tool, ToolName, Args}, From, State) ->
+    case maps:find(ToolName, State#state.tools) of
+        error ->
+            {reply, {error, tool_not_found}, State};
+        {ok, ToolConfig} ->
+            case ToolConfig#tool_config.enabled of
+                false ->
+                    {reply, {error, tool_disabled}, State};
+                true ->
+                    spawn(fun() -> execute_tool_async(ToolName, Args, From, State) end),
+                    {noreply, State}
+            end
+    end.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({timeout, Ref, heartbeat}, State) ->
+    % Handle heartbeat
+    io:format("MCP server heartbeat~n"),
+    NewMetrics = increment_metric(State#state.metrics, "heartbeats"),
+    NewState = State#state{
+        metrics = NewMetrics,
+        heartbeat_ref = erlang:start_timer(?HEARTBEAT_INTERVAL, self(), heartbeat)
+    },
+    {noreply, NewState};
+
+handle_info({timeout, Ref, hotci_monitor}, State) ->
+    % Handle HotCI monitoring
+    io:format("MCP server HotCI monitor tick~n"),
+    NewMetrics = increment_metric(State#state.metrics, "hotci_checks"),
+    NewState = State#state{
+        metrics = NewMetrics,
+        hotci_monitor_ref = erlang:start_timer(?HOTCI_MONITOR_INTERVAL, self(), hotci_monitor)
+    },
+    {noreply, NewState};
+
+handle_info({tool_result, ToolName, Result}, State) ->
+    io:format("Received tool result for ~p: ~p~n", [ToolName, Result]),
+    NewMetrics = increment_metric(State#state.metrics, "tool_completions"),
+    {noreply, State#state{metrics = NewMetrics}};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    io:format("MCP server terminating~n"),
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+execute_tool_async(ToolName, Args, From, State) ->
+    ToolConfig = maps:get(ToolName, State#state.tools),
+    try
+        % Simulate tool execution (in real implementation, call the actual tool handler)
+        Result = case ToolName of
+            file_system ->
+                execute_file_tool(Args);
+            math ->
+                execute_math_tool(Args);
+            _ ->
+                {error, unknown_tool}
+        end,
+
+        gen_server:reply(From, {ok, Result}),
+        self() ! {tool_result, ToolName, Result}
+    catch
+        Error:Reason ->
+            gen_server:reply(From, {error, {Error, Reason}}),
+            self() ! {tool_result, ToolName, {error, {Error, Reason}}}
+    end.
+
+execute_file_tool(Args) ->
+    #{<<"operation">> := Op, <<"path">> := Path} = Args,
+    io:format("Executing file operation: ~p on ~p~n", [Op, Path]),
+    case Op of
+        <<"read">> ->
+            case file:read_file(Path) of
+                {ok, Content} ->
+                    #{<<"result">> => #{<<"content">> => Content, <<"path">> => Path}};
+                {error, _} = Error ->
+                    Error
+            end;
+        <<"write">> ->
+            case file:write_file(Path, <<"dummy content">>) of
+                ok ->
+                    #{<<"result">> => #{<<"path">> => Path, <<"status">> => <<"written">>}};
+                {error, _} = Error ->
+                    Error
+            end;
+        _ ->
+            {error, unsupported_operation}
+    end.
+
+execute_math_tool(Args) ->
+    #{<<"operation">> := Op, <<"a">> := A, <<"b">> := B} = Args,
+    Result = case Op of
+        <<"add">> -> A + B;
+        <<"subtract">> -> A - B;
+        <<"multiply">> -> A * B;
+        <<"divide">> -> A / B;
+        _ -> {error, unsupported_operation}
+    end,
+    #{<<"result">> => Result}.
+
+increment_metric(Metrics, Name) ->
+    Current = maps:get(Name, Metrics, 0),
+    Metrics#{Name => Current + 1}.
+
+%%====================================================================
+%% HotCI Support Functions
+%%====================================================================
+
+-ifdef(HOTCI).
+consistency_check(Pid) ->
+    gen_server:call(Pid, consistency_check).
+
+upgrade_server(Pid, NewModule) ->
+    gen_server:call(Pid, {upgrade_server, NewModule}).
+
+handle_call(consistency_check, _From, State) ->
+    % Check tool configurations
+    ToolCount = maps:size(State#state.tools),
+    ConnectionCount = maps:size(State#state.connections),
+
+    % Check if metrics are consistent
+    MetricsValid = is_metrics_valid(State#state.metrics),
+
+    Consistency = #{
+        tools_count => ToolCount,
+        connections_count => ConnectionCount,
+        metrics_valid => MetricsValid,
+        timestamp => os:system_time(millisecond)
+    },
+
+    {reply, {ok, Consistency}, State};
+
+handle_call({upgrade_server, NewModule}, _From, State) ->
+    % Perform hot code upgrade
+    io:format("Upgrading server to ~p~n", [NewModule]),
+    case code:ensure_loaded(NewModule) of
+        {module, NewModule} ->
+            % Perform actual upgrade logic here
+            {reply, {ok, upgrading}, State};
+        {error, _} = Error ->
+            {reply, Error, State}
+    end.
+-endif.
+
+is_metrics_valid(Metrics) ->
+    % Simple validation - metrics should be non-negative integers
+    lists:all(fun({_, Value}) -> is_integer(Value) andalso Value >= 0 end, maps:to_list(Metrics)).

@@ -1,0 +1,27 @@
+{{- if .Values.elrmcp.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-elrmcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+  annotations:
+    {{- if .Values.elrmcp.annotations }}
+    {{- toYaml .Values.elrmcp.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.elrmcp.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.elrmcp.service.port }}
+      targetPort: 8081
+      {{- if .Values.elrmcp.service.nodePort }}
+      nodePort: {{ .Values.elrmcp.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+{{- end }}

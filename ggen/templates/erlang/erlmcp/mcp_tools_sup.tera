@@ -1,0 +1,94 @@
+-module({{ module_name }}_tools_sup).
+-behaviour(supervisor).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-export([start_link/1, start_tool/2, stop_tool/1]).
+-export([init/1]).
+
+%%====================================================================
+ Records and Macros
+%%====================================================================
+
+-record(state, {
+    tools :: map(),  #{tool_name() => pid()},
+    config :: map()
+}).
+
+-define(SERVER, ?MODULE).
+-define(DEFAULT_TOOL_TIMEOUT, 30000).  % 30 seconds
+
+%%====================================================================
+%% Type Definitions
+%%====================================================================
+
+-type tool_name() :: atom().
+-type tool_config() :: #{
+    name := string(),
+    description := string(),
+    handler := atom(),
+    input_schema := map(),
+    output_schema := map(),
+    timeout := pos_integer(),
+    max_retries := pos_integer(),
+    enabled := boolean()
+}.
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+start_link(Config) ->
+    supervisor:start_link({local, ?SERVER}, ?MODULE, Config).
+
+start_tool(ToolName, ToolConfig) ->
+    case supervisor:start_child(?SERVER, tool_child_spec(ToolName, ToolConfig)) of
+        {ok, Pid} -> {ok, Pid};
+        {error, {already_started, Pid}} -> {ok, Pid};
+        {error, Reason} -> {error, Reason}
+    end.
+
+stop_tool(ToolName) ->
+    case supervisor:terminate_child(?SERVER, ToolName) of
+        ok -> supervisor:delete_child(?SERVER, ToolName);
+        {error, not_found} -> {error, not_found};
+        {error, Reason} -> {error, Reason}
+    end.
+
+%%====================================================================
+%% Supervisor Callbacks
+%%====================================================================
+
+init(Config) ->
+    Tools = maps:get(tools, Config, #{}),
+
+    % Create dynamic tool children
+    ToolChildren = maps:fold(fun(ToolName, ToolConfig, Acc) ->
+        case ToolConfig#tool_config.enabled of
+            true -> [tool_child_spec(ToolName, ToolConfig) | Acc];
+            false -> Acc
+        end
+    end, [], Tools),
+
+    Strategy = #{strategy => one_for_one,
+                intensity => 5,
+                period => 10},
+
+    {ok, {Strategy, ToolChildren}}.
+
+%%====================================================================
+%% Internal Functions
+%%====================================================================
+
+tool_child_spec(ToolName, ToolConfig) ->
+    #{
+        id => ToolName,
+        start => {{ module_name }}_tool,
+        start_args => [ToolConfig],
+        restart => transient,
+        shutdown => ?DEFAULT_TOOL_TIMEOUT,
+        type => worker,
+        modules => [{{ module_name }}_tool]
+    }.

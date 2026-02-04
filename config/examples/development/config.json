@@ -1,0 +1,93 @@
+{
+  "environment": "development",
+  "config_version": "0.1.0",
+  "server": {
+    "host": "localhost",
+    "port": 8080,
+    "max_connections": 100,
+    "timeout": 30,
+    "ssl_enabled": false
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": null,
+    "max_size": 10485760,
+    "backup_count": 5,
+    "json_format": false
+  },
+  "security": {
+    "jwt_secret": "dev-secret-key",
+    "jwt_algorithm": "HS256",
+    "jwt_expiration": 3600,
+    "api_key": "dev-api-key",
+    "ssl_cert_path": null,
+    "ssl_key_path": null,
+    "allowed_origins": ["*"]
+  },
+  "database": {
+    "url": null,
+    "host": "localhost",
+    "port": 5432,
+    "name": "a2a_dev",
+    "username": "postgres",
+    "password": "dev_password",
+    "pool_size": 10,
+    "max_overflow": 20,
+    "pool_timeout": 30
+  },
+  "mcp": {
+    "server_name": "craftplan-mcp-dev",
+    "host": "localhost",
+    "port": 9000,
+    "protocol_version": "2024-11-05",
+    "capabilities": {
+      "tools": {},
+      "resources": {},
+      "logging": {}
+    },
+    "max_request_size": 1048576,
+    "request_timeout": 300
+  },
+  "a2a": {
+    "agent_name": "a2a-agent-dev",
+    "namespace": "development",
+    "service_url": "http://localhost:8081",
+    "event_bus_url": "http://localhost:8082",
+    "task_timeout": 300,
+    "max_retries": 3,
+    "retry_delay": 5,
+    "storage_backend": "ets"
+  },
+  "bridge": {
+    "mcp_server": {
+      "server_name": "craftplan-mcp-dev",
+      "host": "localhost",
+      "port": 9000,
+      "protocol_version": "2024-11-05",
+      "capabilities": {},
+      "max_request_size": 1048576,
+      "request_timeout": 300
+    },
+    "a2a_agent": {
+      "agent_name": "a2a-agent-dev",
+      "namespace": "development",
+      "service_url": "http://localhost:8081",
+      "event_bus_url": "http://localhost:8082",
+      "task_timeout": 300,
+      "max_retries": 3,
+      "retry_delay": 5,
+      "storage_backend": "ets"
+    },
+    "auto_start": true,
+    "heartbeat_interval": 30,
+    "max_bridge_sessions": 10,
+    "message_queue_size": 1000,
+    "metrics_enabled": true
+  },
+  "custom_config": {
+    "development_mode": true,
+    "debug_tools": true,
+    "mock_services": true
+  }
+}

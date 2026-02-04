@@ -1,0 +1,108 @@
+---
+description: "Development Dockerfile with hot-reload and debugging tools"
+output_dir: "Dockerfile"
+file_extension: ""
+variables:
+  base_image: "erlang:27-alpine"
+  app_name: "{{ module.name }}"
+  app_port: "{{ port | default(8080) }}"
+  hotci_enabled: "{{ module.hotci_enabled | default(false) }}"
+  debug_port: 4343
+  health_check_path: "/health"
+---
+{%- comment -%}
+Development Dockerfile with hot-reload support and debugging tools
+{%- endcomment -%}
+
+FROM {{ base_image }} AS builder
+
+# Install development and build dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    build-base \
+    openssl-dev \
+    vim \
+    curl \
+    wget
+
+# Install rebar3
+RUN curl -L -o rebar3 https://github.com/erlang/rebar3/releases/download/3.23.0/rebar3 && \
+    chmod +x rebar3 && \
+    mv rebar3 /usr/local/bin/
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY rebar.config.lock .
+COPY rebar.config .
+{% if module.hotci_enabled %}
+COPY src_hotci ./src
+{% else %}
+COPY src ./src
+{% endif %}
+COPY include ./include
+COPY config ./config
+
+# Build application
+{% if module.hotci_enabled %}
+RUN rebar3 as hotci compile
+{% else %}
+RUN rebar3 compile
+{% endif %}
+
+# Development stage
+FROM {{ base_image }}
+
+# Install development tools
+RUN apk add --no-cache \
+    git \
+    vim \
+    curl \
+    wget \
+    shadow \
+    bash
+
+# Create development user
+RUN useradd -m -u 1000 devuser && \
+    mkdir -p /app && \
+    chown -R devuser:devuser /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy built artifacts
+COPY --from=builder --chown=devuser:devuser /app/_build/dev/rel/{{ app_name }} /app
+COPY --from=builder --chown=devuser:devuser /app/config /app/config
+
+# Copy development scripts
+COPY scripts/ /app/scripts/
+
+# Create directories
+RUN mkdir -p /app/log /app/data /app/tmp
+
+# Set permissions
+RUN chown -R devuser:devuser /app
+
+# Switch to development user
+USER devuser
+
+# Expose ports
+EXPOSE {{ app_port }}
+EXPOSE {{ debug_port }}
+
+# Environment variables for development
+ENV ERL_AFLAGS="+pc unicode +sbwt none +sbwtdcpu none +sbwtdio none"
+ENV MIX_ENV=dev
+{% if module.hotci_enabled %}
+ENV HOTCI_ENABLED=true
+{% endif %}
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:{{ app_port }}{{ health_check_path }} || exit 1
+
+# Development command with hot reload
+CMD ["/app/scripts/dev_start.sh"]

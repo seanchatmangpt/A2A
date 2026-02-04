@@ -1,0 +1,166 @@
+# =============================================================================
+# Craftplan — Local Development Docker Configuration
+# For development and testing purposes
+# Run with: docker-compose -f docker-compose.local.yml up [-d]
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------------
+  # Craftplan MCP Server - Model Context Protocol endpoint
+  # -------------------------------------------------------------------------
+  craftplan-mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: craftplan-mcp-server
+    ports:
+      - "8090:8090"
+    environment:
+      # Craftplan API connection
+      CRAFTPLAN_API_URL: "http://localhost:4000/api"
+      CRAFTPLAN_API_TOKEN: ${CRAFTPLAN_API_TOKEN:-}
+      # MCP Server configuration
+      MCP_PORT: 8090
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    volumes:
+      - ./mcp-server:/app
+      - ./mcp-server/_build/default/rel/craftplan_mcp:/app/_build/default/rel/craftplan_mcp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - craftplan-local
+
+  # -------------------------------------------------------------------------
+  # Craftplan A2A Agent - Agent-to-Agent protocol endpoint
+  # -------------------------------------------------------------------------
+  craftplan-a2a-agent:
+    build:
+      context: ./a2a-agent
+      dockerfile: Dockerfile
+    container_name: craftplan-a2a-agent
+    ports:
+      - "8080:8080"
+    environment:
+      # A2A Agent configuration
+      A2A_PORT: 8080
+      MCP_SERVER_URL: "http://localhost:8090/mcp"
+      AGENT_ID: "craftplan-erp-agent"
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    volumes:
+      - ./a2a-agent:/app
+      - ./a2a-agent/_build/default/rel/craftplan_a2a:/app/_build/default/rel/craftplan_a2a
+      - ./agent-card:/app/priv/agent-card:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - craftplan-mcp-server
+    networks:
+      - craftplan-local
+
+  # -------------------------------------------------------------------------
+  # Mock Craftplan API (for testing purposes)
+  # -------------------------------------------------------------------------
+  mock-craftplan-api:
+    image: nginx:alpine
+    container_name: mock-craftplan-api
+    ports:
+      - "4000:80"
+    volumes:
+      - ./mock-api:/usr/share/nginx/html:ro
+      - ./mock-api/nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+    networks:
+      - craftplan-local
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL Database (for testing)
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: craftplan-postgres
+    environment:
+      POSTGRES_DB: craftplan_test
+      POSTGRES_USER: craftplan_user
+      POSTGRES_PASSWORD: craftplan_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U craftplan_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - craftplan-local
+
+  # -------------------------------------------------------------------------
+  # Redis Cache (for testing)
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: craftplan-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - craftplan-local
+
+  # -------------------------------------------------------------------------
+  # MinIO Storage (for testing)
+  # -------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: craftplan-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    networks:
+      - craftplan-local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  craftplan-local:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local

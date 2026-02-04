@@ -1,0 +1,437 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Extract comprehensive A2A protocol specifications
+CONSTRUCT {
+    # Protocol Definition
+    ?protocol a a2a:protocol ;
+        rdfs:label ?protocolLabel ;
+        rdfs:comment ?protocolComment .
+
+    # Task System
+    ?task a a2a:task ;
+        a2a:task_id ?taskId ;
+        a2a:task_status ?taskStatus ;
+        a2a:task_type ?taskType ;
+        a2a:task_created ?taskCreated ;
+        a2a:task_updated ?taskUpdated ;
+        rdfs:label ?taskLabel .
+
+    # Task States
+    ?taskState a a2a:task_state ;
+        rdfs:label ?taskStateLabel ;
+        rdfs:comment ?taskStateComment ;
+        a2a:state_transition ?targetState .
+
+    # Agent System
+    ?agent a a2a:agent ;
+        a2a:agent_id ?agentId ;
+        a2a:agent_name ?agentName ;
+        a2a:agent_capabilities ?agentCapabilities ;
+        rdfs:label ?agentLabel .
+
+    # Agent Cards and Skills
+    ?agentCard a a2a:agent_card ;
+        rdfs:label ?agentCardLabel ;
+        rdfs:comment ?agentCardComment .
+
+    ?skill a a2a:skill ;
+        a2a:skill_name ?skillName ;
+        a2a:skill_description ?skillDescription ;
+        a2a:skill_parameters ?skillParameters ;
+        rdfs:label ?skillLabel .
+
+    # Message System
+    ?message a a2a:message ;
+        a2a:message_type ?messageType ;
+        a2a:message_content ?messageContent ;
+        a2a:sender_id ?senderId ;
+        a2a:recipient_id ?recipientId ;
+        rdfs:label ?messageLabel .
+
+    # JSON-RPC Messages
+    ?jsonRpcRequest a a2a:json_rpc_request ;
+        a2a:json_rpc_method ?jsonRpcMethod ;
+        a2a:json_rpc_params ?jsonRpcParams ;
+        a2a:json_rpc_id ?jsonRpcId ;
+        rdfs:label ?jsonRpcRequestLabel .
+
+    ?jsonRpcResponse a a2a:json_rpc_response ;
+        rdfs:label ?jsonRpcResponseLabel .
+
+    ?jsonRpcError a a2a:json_rpc_error ;
+        rdfs:label ?jsonRpcErrorLabel .
+
+    # Server-Sent Events
+    ?sseEvent a a2a:sse_event ;
+        a2a:sse_event_type ?sseEventType ;
+        a2a:sse_data ?sseData ;
+        rdfs:label ?sseEventLabel .
+
+    # Configuration
+    ?config a a2a:config ;
+        a2a:http_port ?httpPort ;
+        a2a:enable_sse ?enableSSE ;
+        a2a:enable_metrics ?enableMetrics ;
+        a2a:log_level ?logLevel ;
+        rdfs:label ?configLabel .
+
+    # Metrics
+    ?metrics a a2a:metrics ;
+        a2a:metric_name ?metricName ;
+        a2a:metric_value ?metricValue ;
+        a2a:metric_timestamp ?metricTimestamp ;
+        rdfs:label ?metricsLabel .
+
+    # Database (ETS)
+    ?etsTable a a2a:ets_table ;
+        a2a:ets_table_name ?etsTableName ;
+        a2a:ets_table_type ?etsTableType ;
+        a2a:ets_table_protection ?etsTableProtection ;
+        rdfs:label ?etsTableLabel .
+
+    # Event System
+    ?event a a2a:event ;
+        a2a:event_type ?eventType ;
+        a2a:event_payload ?eventPayload ;
+        a2a:event_timestamp ?eventTimestamp ;
+        rdfs:label ?eventLabel .
+
+    # HotCI Tests
+    ?hotciTest a a2a:hotci_test ;
+        a2a:hotci_test_name ?hotciTestName ;
+        a2a:hotci_test_type ?hotciTestType ;
+        a2a:hotci_test_scenario ?hotciTestScenario ;
+        rdfs:label ?hotciTestLabel .
+}
+WHERE {
+    # Protocol Definition
+    ?protocol a a2a:protocol .
+
+    OPTIONAL {
+        ?protocol rdfs:label ?protocolLabel .
+    }
+    BIND(COALESCE(?protocolLabel, "A2A Protocol") AS ?protocolLabel)
+
+    OPTIONAL {
+        ?protocol rdfs:comment ?protocolComment .
+    }
+
+    # Task System
+    ?task a a2a:task .
+
+    # Task ID
+    OPTIONAL {
+        ?task a2a:task_id ?taskId .
+    }
+    BIND(COALESCE(?taskId, UUID()) AS ?taskId)
+
+    # Task Status
+    OPTIONAL {
+        ?task a2a:task_status ?taskStatus .
+        FILTER(?taskStatus IN ("submitted", "working", "input_required", "auth_required", "completed", "failed", "canceled", "rejected"))
+    }
+
+    # Task Type
+    OPTIONAL {
+        ?task a2a:task_type ?taskType .
+    }
+
+    # Task Timestamps
+    OPTIONAL {
+        ?task a2a:task_created ?taskCreated .
+    }
+    BIND(COALESCE(?taskCreated, NOW()) AS ?taskCreated)
+
+    OPTIONAL {
+        ?task a2a:task_updated ?taskUpdated .
+    }
+    BIND(COALESCE(?taskUpdated, NOW()) AS ?taskUpdated)
+
+    # Task Label
+    OPTIONAL {
+        ?task rdfs:label ?taskLabel .
+    }
+
+    # Task States
+    ?taskState a a2a:task_state .
+
+    # State Label
+    OPTIONAL {
+        ?taskState rdfs:label ?taskStateLabel .
+    }
+    BIND(COALESCE(?taskStateLabel, REPLACE(STR(?taskState), ".*(#|/)", "")) AS ?taskStateLabel)
+
+    # State Comment
+    OPTIONAL {
+        ?taskState rdfs:comment ?taskStateComment .
+    }
+
+    # State Transitions
+    OPTIONAL {
+        ?taskState a2a:state_transition ?targetState .
+        ?targetState a a2a:task_state .
+    }
+
+    # Agent System
+    ?agent a a2a:agent .
+
+    # Agent Properties
+    OPTIONAL {
+        ?agent a2a:agent_id ?agentId .
+    }
+    BIND(COALESCE(?agentId, UUID()) AS ?agentId)
+
+    OPTIONAL {
+        ?agent a2a:agent_name ?agentName .
+    }
+    BIND(COALESCE(?agentName, "agent_" + ?agentId) AS ?agentName)
+
+    # Agent Capabilities (as list)
+    OPTIONAL {
+        ?agent a2a:agent_capabilities ?capabilities .
+    }
+
+    # Agent Label
+    OPTIONAL {
+        ?agent rdfs:label ?agentLabel .
+    }
+
+    # Agent Cards
+    ?agentCard a a2a:agent_card .
+
+    OPTIONAL {
+        ?agentCard rdfs:label ?agentCardLabel .
+    }
+
+    OPTIONAL {
+        ?agentCard rdfs:comment ?agentCardComment .
+    }
+
+    # Skills
+    ?skill a a2a:skill .
+
+    # Skill Properties
+    OPTIONAL {
+        ?skill a2a:skill_name ?skillName .
+    }
+
+    OPTIONAL {
+        ?skill a2a:skill_description ?skillDescription .
+    }
+
+    # Skill Parameters (as list)
+    OPTIONAL {
+        ?skill a2a:skill_parameters ?parameters .
+    }
+
+    # Skill Label
+    OPTIONAL {
+        ?skill rdfs:label ?skillLabel .
+    }
+
+    # Message System
+    ?message a a2a:message .
+
+    # Message Properties
+    OPTIONAL {
+        ?message a2a:message_type ?messageType .
+        FILTER(?messageType IN ("request", "response", "notification", "error"))
+    }
+
+    OPTIONAL {
+        ?message a2a:message_content ?messageContent .
+    }
+
+    # Sender and Recipient IDs
+    OPTIONAL {
+        ?message a2a:sender_id ?senderId .
+    }
+
+    OPTIONAL {
+        ?message a2a:recipient_id ?recipientId .
+    }
+
+    # Message Label
+    OPTIONAL {
+        ?message rdfs:label ?messageLabel .
+    }
+
+    # JSON-RPC Requests
+    ?jsonRpcRequest a a2a:json_rpc_request .
+
+    # JSON-RPC Properties
+    OPTIONAL {
+        ?jsonRpcRequest a2a:json_rpc_method ?jsonRpcMethod .
+    }
+
+    OPTIONAL {
+        ?jsonRpcRequest a2a:json_rpc_params ?jsonRpcParams .
+    }
+
+    OPTIONAL {
+        ?jsonRpcRequest a2a:json_rpc_id ?jsonRpcId .
+    }
+
+    # JSON-RPC Labels
+    OPTIONAL {
+        ?jsonRpcRequest rdfs:label ?jsonRpcRequestLabel .
+    }
+
+    # JSON-RPC Responses and Errors
+    ?jsonRpcResponse a a2a:json_rpc_response .
+    ?jsonRpcError a a2a:json_rpc_error .
+
+    OPTIONAL {
+        ?jsonRpcResponse rdfs:label ?jsonRpcResponseLabel .
+    }
+
+    OPTIONAL {
+        ?jsonRpcError rdfs:label ?jsonRpcErrorLabel .
+    }
+
+    # SSE Events
+    ?sseEvent a a2a:sse_event .
+
+    # SSE Properties
+    OPTIONAL {
+        ?sseEvent a2a:sse_event_type ?sseEventType .
+    }
+
+    OPTIONAL {
+        ?sseEvent a2a:sse_data ?sseData .
+    }
+
+    # SSE Label
+    OPTIONAL {
+        ?sseEvent rdfs:label ?sseEventLabel .
+    }
+
+    # Configuration
+    ?config a a2a:config .
+
+    # Config Properties
+    OPTIONAL {
+        ?config a2a:http_port ?httpPort .
+    }
+    BIND(COALESCE(?httpPort, 8080) AS ?httpPort)
+
+    # Boolean flags
+    OPTIONAL {
+        ?config a2a:enable_sse ?enableSSE .
+    }
+    BIND(COALESCE(?enableSSE, false) AS ?enableSSE)
+
+    OPTIONAL {
+        ?config a2a:enable_metrics ?enableMetrics .
+    }
+    BIND(COALESCE(?enableMetrics, true) AS ?enableMetrics)
+
+    # Log Level
+    OPTIONAL {
+        ?config a2a:log_level ?logLevel .
+        FILTER(?logLevel IN ("debug", "info", "warn", "error", "critical"))
+    }
+    BIND(COALESCE(?logLevel, "info") AS ?logLevel)
+
+    # Config Label
+    OPTIONAL {
+        ?config rdfs:label ?configLabel .
+    }
+
+    # Metrics
+    ?metrics a a2a:metrics .
+
+    # Metric Properties
+    OPTIONAL {
+        ?metrics a2a:metric_name ?metricName .
+    }
+
+    OPTIONAL {
+        ?metrics a2a:metric_value ?metricValue .
+    }
+
+    OPTIONAL {
+        ?metrics a2a:metric_timestamp ?metricTimestamp .
+    }
+
+    # Metrics Label
+    OPTIONAL {
+        ?metrics rdfs:label ?metricsLabel .
+    }
+
+    # ETS Tables
+    ?etsTable a a2a:ets_table .
+
+    # ETS Properties
+    OPTIONAL {
+        ?etsTable a2a:ets_table_name ?etsTableName .
+    }
+
+    # ETS Table Types
+    OPTIONAL {
+        ?etsTable a2a:ets_table_type ?etsTableType .
+        FILTER(?etsTableType IN ("set", "bag", "duplicate_bag", "ordered_set"))
+    }
+    BIND(COALESCE(?etsTableType, "set") AS ?etsTableType)
+
+    # ETS Protection Levels
+    OPTIONAL {
+        ?etsTable a2a:ets_table_protection ?etsTableProtection .
+        FILTER(?etsTableProtection IN ("public", "protected", "private"))
+    }
+    BIND(COALESCE(?etsTableProtection, "protected") AS ?etsTableProtection)
+
+    # ETS Label
+    OPTIONAL {
+        ?etsTable rdfs:label ?etsTableLabel .
+    }
+
+    # Events
+    ?event a a2a:event .
+
+    # Event Properties
+    OPTIONAL {
+        ?event a2a:event_type ?eventType .
+    }
+
+    OPTIONAL {
+        ?event a2a:event_payload ?eventPayload .
+    }
+
+    OPTIONAL {
+        ?event a2a:event_timestamp ?eventTimestamp .
+    }
+
+    # Event Label
+    OPTIONAL {
+        ?event rdfs:label ?eventLabel .
+    }
+
+    # HotCI Tests
+    ?hotciTest a a2a:hotci_test .
+
+    # HotCI Properties
+    OPTIONAL {
+        ?hotciTest a2a:hotci_test_name ?hotciTestName .
+    }
+
+    # HotCI Test Types
+    OPTIONAL {
+        ?hotciTest a2a:hotci_test_type ?hotciTestType .
+        FILTER(?hotciTestType IN ("upgrade", "downgrade", "consistency", "performance"))
+    }
+
+    # HotCI Test Scenario
+    OPTIONAL {
+        ?hotciTest a2a:hotci_test_scenario ?hotciTestScenario .
+    }
+
+    # HotCI Test Label
+    OPTIONAL {
+        ?hotciTest rdfs:label ?hotciTestLabel .
+    }
+}

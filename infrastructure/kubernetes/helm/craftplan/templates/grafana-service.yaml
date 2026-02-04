@@ -1,0 +1,29 @@
+{{- if .Values.monitoring.enabled -}}
+{{- if .Values.monitoring.grafana.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "craftplan.fullname" . }}-grafana
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: grafana
+  annotations:
+    {{- if .Values.monitoring.grafana.annotations }}
+    {{- toYaml .Values.monitoring.grafana.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.monitoring.grafana.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.monitoring.grafana.service.port }}
+      targetPort: 3000
+      {{- if .Values.monitoring.grafana.service.nodePort }}
+      nodePort: {{ .Values.monitoring.grafana.service.nodePort }}
+      {{- end }}
+      protocol: TCP
+  selector:
+    {{- include "craftplan.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: grafana
+{{- end }}
+{{- end }}

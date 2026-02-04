@@ -1,0 +1,34 @@
+{application, craftplan_mcp,
+ [{description, "Craftplan MCP Server - Model Context Protocol for Craftplan ERP"},
+  {vsn, "1.0.0"},
+  {registered, [craftplan_mcp_sup,
+                craftplan_mcp_server,
+                craftplan_api_client,
+                craftplan_tools_sup,
+                craftplan_a2a_bridge]},
+  {mod, {craftplan_mcp_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    cowboy,
+    hackney,
+    jiffy,
+    logger]},
+  {env,[
+    {port, 8090},
+    {api_url, "http://localhost:4000/api"},
+    {api_token, ""}
+  ]},
+  {modules, [
+    craftplan_mcp_app,
+    craftplan_mcp_sup,
+    craftplan_mcp_server,
+    craftplan_api_client,
+    craftplan_tools_sup,
+    craftplan_a2a_bridge
+  ]},
+  {licenses, ["MIT"]},
+  {links, [
+    {"GitHub", "https://github.com/a2a/craftplan"}
+  ]}
+ ]}.

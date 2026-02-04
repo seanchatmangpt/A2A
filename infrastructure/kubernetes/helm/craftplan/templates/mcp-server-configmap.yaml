@@ -1,0 +1,61 @@
+{{- if .Values.mcpServer.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "craftplan.configMapName" . }}-mcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: mcp-server
+data:
+  config.json: |
+    {
+      "server": {
+        "host": "{{ .Values.mcpServer.env.HOST }}",
+        "port": {{ .Values.mcpServer.env.PORT }},
+        "log_level": "{{ .Values.mcpServer.env.LOG_LEVEL }}"
+      },
+      "craftplan": {
+        "api_url": "{{ .Values.mcpServer.env.CRAFTPLAN_API_URL }}",
+        "api_token": "{{ .Values.mcpServer.env.CRAFTPLAN_API_TOKEN }}"
+      },
+      "mcp": {
+        "port": {{ .Values.mcpServer.env.MCP_PORT }},
+        "secret": "{{ .Values.mcpServer.env.MCP_SECRET }}"
+      },
+      "features": {
+        "health_check": {{ .Values.mcpServer.env.ENABLE_HEALTH_CHECK | default "true" }},
+        "metrics": {{ .Values.mcpServer.env.ENABLE_METRICS | default "true" }}
+      }
+    }
+  logging.yml: |
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      json:
+        format: "%(asctime)s %(name)s %(levelname)s %(message)s"
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: json
+        stream: ext://sys.stdout
+    loggers:
+      mcp_server:
+        level: {{ .Values.mcpServer.env.LOG_LEVEL | default "INFO" }}
+        handlers: [console]
+        propagate: false
+    root:
+      level: {{ .Values.mcpServer.env.LOG_LEVEL | default "INFO" }}
+      handlers: [console]
+  monitoring.yml: |
+    version: 1
+    services:
+      prometheus:
+        enabled: {{ .Values.global.monitoring.enabled | default "true" }}
+        port: {{ .Values.global.monitoring.prometheus.port | default 9090 }}
+        metrics_path: /metrics
+      craftplan:
+        enabled: true
+        api_url: "{{ .Values.mcpServer.env.CRAFTPLAN_API_URL }}"
+        api_token: "{{ .Values.mcpServer.env.CRAFTPLAN_API_TOKEN }}"
+{{- end }}

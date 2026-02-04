@@ -1,0 +1,290 @@
+{
+    "project_name": "test_a2a_app",
+    "version": "0.1.0",
+    "description": "Test A2A application for testing",
+    "author": "Test Team",
+    "license": "Apache-2.0",
+    "modules": [
+        {
+            "name": "task_store",
+            "type": "gen_server",
+            "properties": [
+                {
+                    "name": "task_queue",
+                    "type": "queue()",
+                    "default_value": "#{}",
+                    "is_optional": false
+                },
+                {
+                    "name": "max_tasks",
+                    "type": "integer()",
+                    "default_value": "1000",
+                    "is_optional": false
+                },
+                {
+                    "name": "task_timeout",
+                    "type": "integer()",
+                    "default_value": "30000",
+                    "is_optional": true
+                }
+            ],
+            "exported_functions": [
+                {
+                    "name": "start_link",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "add_task",
+                    "args": ["term()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "get_task",
+                    "args": [],
+                    "return_type": "term()"
+                },
+                {
+                    "name": "get_stats",
+                    "args": [],
+                    "return_type": "map()"
+                }
+            ],
+            "hotci_enabled": true,
+            "rollback_support": true,
+            "dependencies": [
+                "jiffy",
+                "cowboy"
+            ]
+        },
+        {
+            "name": "metrics_collector",
+            "type": "gen_statem",
+            "properties": [
+                {
+                    "name": "metrics_data",
+                    "type": "map()",
+                    "default_value": "#{}",
+                    "is_optional": false
+                },
+                {
+                    "name": "metrics_interval",
+                    "type": "integer()",
+                    "default_value": "1000",
+                    "is_optional": false
+                },
+                {
+                    "name": "metrics_history",
+                    "type": "list()",
+                    "default_value": "[]",
+                    "is_optional": true
+                }
+            ],
+            "exported_functions": [
+                {
+                    "name": "start_link",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "record_metric",
+                    "args": ["string()", "integer()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "get_metrics",
+                    "args": [],
+                    "return_type": "map()"
+                },
+                {
+                    "name": "get_history",
+                    "args": ["integer()"],
+                    "return_type": "list()"
+                }
+            ],
+            "hotci_enabled": false,
+            "rollback_support": false,
+            "dependencies": [
+                "lager",
+                "metrics"
+            ]
+        },
+        {
+            "name": "cache_manager",
+            "type": "gen_server",
+            "properties": [
+                {
+                    "name": "cache_size",
+                    "type": "integer()",
+                    "default_value": "1000",
+                    "is_optional": false
+                },
+                {
+                    "name": "cache_ttl",
+                    "type": "integer()",
+                    "default_value": "3600",
+                    "is_optional": false
+                },
+                {
+                    "name": "eviction_strategy",
+                    "type": "string()",
+                    "default_value": "\"lru\"",
+                    "is_optional": true
+                }
+            ],
+            "exported_functions": [
+                {
+                    "name": "start_link",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "put",
+                    "args": ["string()", "term()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "get",
+                    "args": ["string()"],
+                    "return_type": "term()"
+                },
+                {
+                    "name": "delete",
+                    "args": ["string()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "clear",
+                    "args": [],
+                    "return_type": "ok"
+                }
+            ],
+            "hotci_enabled": false,
+            "rollback_support": false,
+            "dependencies": [
+                "ets",
+                "cache"
+            ]
+        },
+        {
+            "name": "notification_service",
+            "type": "supervisor",
+            "properties": [
+                {
+                    "name": "notification_channels",
+                    "type": "list()",
+                    "default_value": "[]",
+                    "is_optional": false
+                },
+                {
+                    "name": "max_retries",
+                    "type": "integer()",
+                    "default_value": "3",
+                    "is_optional": false
+                },
+                {
+                    "name": "retry_interval",
+                    "type": "integer()",
+                    "default_value": "5000",
+                    "is_optional": true
+                }
+            ],
+            "exported_functions": [
+                {
+                    "name": "start_link",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "add_channel",
+                    "args": ["string()", "pid()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "remove_channel",
+                    "args": ["string()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "notify",
+                    "args": ["string()", "term()"],
+                    "return_type": "ok"
+                }
+            ],
+            "hotci_enabled": true,
+            "rollback_support": false,
+            "dependencies": [
+                "gen_event",
+                "notification"
+            ]
+        },
+        {
+            "name": "database_pool",
+            "type": "supervisor",
+            "properties": [
+                {
+                    "name": "pool_size",
+                    "type": "integer()",
+                    "default_value": "10",
+                    "is_optional": false
+                },
+                {
+                    "name": "max_wait_time",
+                    "type": "integer()",
+                    "default_value": "30000",
+                    "is_optional": false
+                },
+                {
+                    "name": "connection_timeout",
+                    "type": "integer()",
+                    "default_value": "5000",
+                    "is_optional": true
+                }
+            ],
+            "exported_functions": [
+                {
+                    "name": "start_link",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "get_connection",
+                    "args": [],
+                    "return_type": "pid()"
+                },
+                {
+                    "name": "return_connection",
+                    "args": ["pid()"],
+                    "return_type": "ok"
+                },
+                {
+                    "name": "pool_stats",
+                    "args": [],
+                    "return_type": "map()"
+                }
+            ],
+            "hotci_enabled": false,
+            "rollback_support": true,
+            "dependencies": [
+                "poolboy",
+                "mysql",
+                "pgsql"
+            ]
+        }
+    ],
+    "config": {
+        "http_port": 8080,
+        "enable_sse": true,
+        "enable_metrics": true,
+        "log_level": "info",
+        "log_dir": "/var/log/a2a"
+    },
+    "features": {
+        "hotci": true,
+        "rollback": true,
+        "metrics": true,
+        "cache": true,
+        "notifications": true,
+        "database": true
+    }
+}

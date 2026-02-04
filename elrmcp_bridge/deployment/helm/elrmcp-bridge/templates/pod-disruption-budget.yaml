@@ -1,0 +1,15 @@
+{{- if and .Values.pdb.enabled (include "elrmcp-bridge.pdbEnabled" .) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "elrmcp-bridge.fullname" . }}-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elrmcp-bridge.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "elrmcp-bridge.selectorLabels" . | nindent 6 }}
+{{- end }}

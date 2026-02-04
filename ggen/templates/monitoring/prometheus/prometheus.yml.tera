@@ -1,0 +1,332 @@
+---
+description: "Prometheus configuration for monitoring Erlang applications"
+output_dir: "monitoring/prometheus"
+file_extension: ".yml"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+  scrape_interval: "{{ scrape_interval | default('15s') }}"
+  evaluation_interval: "{{ evaluation_interval | default('15s') }}"
+  retention_time: "{{ retention_time | default('30d') }}"
+---
+{%- comment -%}
+Prometheus configuration for monitoring Erlang applications with comprehensive alerting
+{%- endcomment -%}
+
+global:
+  scrape_interval: {{ scrape_interval }}
+  evaluation_interval: {{ evaluation_interval }}
+  external_labels:
+    cluster: '{{ cluster_name | default("kubernetes") }}'
+    environment: '{{ environment | default("production") }}'
+    app: '{{ app_name }}'
+
+# Alert manager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Rule files
+rule_files:
+  - "alert_rules.yml"
+  - "recording_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter on each node
+  - job_name: 'node-exporter'
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+):(\d+)'
+        target_label: __address__
+        replacement: '${1}:9100'
+      - source_labels: [__meta_kubernetes_node_label_node_kubernetes_io_hostname]
+        target_label: nodename
+
+  # Kubelet metrics
+  - job_name: 'kubelet'
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+
+  # Application metrics
+  - job_name: '{{ app_name }}'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: container
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        action: replace
+        target_label: node
+
+  # Kubernetes API server
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+      - role: endpoints
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: kubernetes;https
+
+  # cAdvisor for container metrics
+  - job_name: 'cadvisor'
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+):(\d+)'
+        target_label: __address__
+        replacement: '${1}:4194'
+
+  # CoreDNS
+  - job_name: 'coredns'
+    kubernetes_sd_configs:
+      - role: endpoints
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: coredns;metrics
+
+  # Ingress controller
+  - job_name: 'nginx-ingress-controller'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_ingress_class]
+        action: keep
+        regex: nginx
+      - source_labels: [__meta_kubernetes_pod_annotation_ingress_kubernetes_io_ssl_redirect]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: keep
+        regex: nginx-ingress-controller
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __metrics_port
+        regex: (\d+)
+      - source_labels: [__address__, __metrics_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+  # Blackbox exporter for probing endpoints
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module:
+        - http_2xx
+        - http_4xx
+        - tcp_connect
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Alertmanager
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets:
+        - alertmanager:9093
+
+  # Grafana
+  - job_name: 'grafana'
+    static_configs:
+      - targets:
+        - grafana:3000
+
+# Remote write configuration for long-term storage
+remote_write:
+  - url: "http:// Thanos-receive:10999/api/v1/receive"
+    queue_config:
+      max_shards: 10
+      max_samples_per_send: 1000
+      batch_send_deadline: 1s
+
+# Remote read configuration for querying
+remote_read:
+  - url: "http:// Thanos-query:9090/api/v1/query"
+    read_recent: true
+
+# Storage configuration
+storage:
+  tsdb:
+    retention.time: {{ retention_time }}
+    retention.size: 10GB
+    no-lockfile: true
+
+# Alerting rules for Erlang applications
+rule_files:
+  - "alert_rules.yml"
+  - "recording_rules.yml"
+
+# Recording rules for common metrics
+recording_rules:
+  - expr: sum(rate({{ app_name }}_process_duration_seconds[5m]))
+    record: {{ app_name }}_process_duration_seconds:sum
+
+  - expr: sum(rate({{ app_name }}_http_requests_total[5m]))
+    record: {{ app_name }}_http_requests:rate5m
+
+  - expr: sum(rate({{ app_name }}_error_rate[5m]))
+    record: {{ app_name }}_error_rate:sum
+
+  - expr: sum(rate({{ app_name }}_memory_usage_bytes[5m]))
+    record: {{ app_name }}_memory_usage:rate5m
+
+  - expr: sum(rate({{ app_name }}_cpu_usage_total[5m]))
+    record: {{ app_name }}_cpu_usage:rate5m
+
+# Alert rules for Erlang applications
+alert_rules:
+  - alert: HighErrorRate
+    expr: sum(rate({{ app_name }}_http_requests_total{status=~"5.."}[5m])) / sum(rate({{ app_name }}_http_requests_total[5m])) > 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High error rate on {{ app_name }}"
+      description: "Error rate is {{ $value }} for 5 minutes"
+
+  - alert: HighLatency
+    expr: histogram_quantile(0.95, sum(rate({{ app_name }}_http_request_duration_seconds_bucket[5m])) by (le)) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High latency on {{ app_name }}"
+      description: "95th percentile latency is {{ $value }} seconds for 5 minutes"
+
+  - alert: HighCPUUsage
+    expr: sum(rate({{ app_name }}_cpu_usage_total[5m])) by (instance) > 0.8
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage on {{ app_name }}"
+      description: "CPU usage is {{ $value }} for 5 minutes"
+
+  - alert: HighMemoryUsage
+    expr: sum(rate({{ app_name }}_memory_usage_bytes[5m])) by (instance) > 0.9
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High memory usage on {{ app_name }}"
+      description: "Memory usage is {{ $value }} for 5 minutes"
+
+  - alert: PodCrashLooping
+    expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Pod is crash looping"
+      description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in 5 minutes"
+
+  - alert: DeploymentRolloutStuck
+    expr: kube_deployment_status_unavailable > 0
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Deployment rollout stuck"
+      description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has {{ $value }} unavailable replicas"
+
+  - alert: NodeDown
+    expr: up{job="node-exporter"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Node is down"
+      description: "Node {{ $labels.instance }} has been down for more than 1 minute"
+
+  - alert: HighDiskUsage
+    expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High disk usage"
+      description: "Disk usage on {{ $labels.instance }} is {{ $value }}%"
+
+  - alert: DatabaseConnectionFailure
+    expr: {{ app_name }}_database_connections_total == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Database connection failure"
+      description: "No database connections available for {{ app_name }}"
+
+  - alert: MessageQueueFull
+    expr: {{ app_name }}_message_queue_depth > 1000
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Message queue is filling up"
+      description: "Message queue depth is {{ $value }} for {{ app_name }}"
+
+  - alert: HotCIValidationFailure
+    expr: {{ app_name }}_hotci_validation_failed_total > 0
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "HotCI validation failed"
+      description: "HotCI validation failed {{ $value }} times in the last minute"

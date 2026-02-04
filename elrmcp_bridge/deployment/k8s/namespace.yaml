@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elrmcp-bridge
+  labels:
+    name: elrmcp-bridge
+    app: elrmcp-bridge

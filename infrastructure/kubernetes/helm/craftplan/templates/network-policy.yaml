@@ -1,0 +1,105 @@
+{{- if .Values.global.security.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "craftplan.fullname" . }}-network-policy
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: craftplan
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: craftplan
+      ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 4000
+        - protocol: TCP
+          port: 8090
+          targetPort: 8090
+        - protocol: TCP
+          port: 8080
+          targetPort: 8080
+        - protocol: TCP
+          port: 8081
+          targetPort: 8081
+        - protocol: TCP
+          port: 9090
+          targetPort: 9090
+        - protocol: TCP
+          port: 3000
+          targetPort: 3000
+        - protocol: TCP
+          port: 3100
+          targetPort: 3100
+        - protocol: TCP
+          port: 5432
+          targetPort: 5432
+        - protocol: TCP
+          port: 6379
+          targetPort: 6379
+        - protocol: TCP
+          port: 9000
+          targetPort: 9000
+        - protocol: TCP
+          port: 9001
+          targetPort: 9001
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        - podSelector:
+            matchLabels:
+              app: prometheus
+              app: grafana
+              app: loki
+              app: alertmanager
+      ports:
+        - protocol: TCP
+          port: 8090
+          targetPort: 8090
+        - protocol: TCP
+          port: 8080
+          targetPort: 8080
+        - protocol: TCP
+          port: 8081
+          targetPort: 8081
+        - protocol: TCP
+          port: 4000
+          targetPort: 4000
+        - protocol: TCP
+          port: 9090
+          targetPort: 9090
+        - protocol: TCP
+          port: 3000
+          targetPort: 3000
+        - protocol: TCP
+          port: 3100
+          targetPort: 3100
+        - protocol: TCP
+          port: 9093
+          targetPort: 9093
+  egress:
+    - to:
+        - namespaceSelector: {}
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+{{- end }}

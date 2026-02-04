@@ -1,0 +1,34 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX a2a: <https://a2a.com/schema/>
+
+# Extract Erlang record definitions
+CONSTRUCT {
+    ?record a a2a:record ;
+        a2a:record_name ?recordName ;
+        a2a:record_field ?fieldName ;
+        rdfs:comment ?comment .
+}
+WHERE {
+    # Find records
+    ?record a a2a:record .
+
+    # Get record name
+    OPTIONAL {
+        ?record rdfs:label ?recordName .
+        FILTER(BOUND(?recordName))
+    }
+    BIND(COALESCE(?recordName, REPLACE(STR(?record), ".*(#|/)", "")) AS ?recordName)
+
+    # Get comment
+    OPTIONAL {
+        ?record rdfs:comment ?comment .
+    }
+
+    # Get record fields
+    OPTIONAL {
+        ?record a2a:record_field ?field .
+        ?field rdfs:label ?fieldName .
+        FILTER(BOUND(?fieldName))
+    }
+}

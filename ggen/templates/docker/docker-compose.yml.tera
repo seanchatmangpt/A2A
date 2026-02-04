@@ -1,0 +1,197 @@
+---
+description: "Docker Compose configuration for development and production"
+output_dir: "docker-compose.yml"
+file_extension: ""
+variables:
+  app_name: "{{ module.name }}"
+  app_port: "{{ port | default(8080) }}"
+  app_image: "{{ module.name }}"
+  hotci_enabled: "{{ module.hotci_enabled | default(false) }}"
+  environment: "{{ environment | default('development') }}"
+  database_name: "{{ database_name | default('app_db') }}"
+  database_user: "{{ database_user | default('app_user') }}"
+  database_password: "{{ database_password | default('secure_password') }}"
+  redis_port: "{{ redis_port | default(6379) }}"
+---
+{%- comment -%}
+Docker Compose configuration with multi-service setup
+{%- endcomment -%}
+
+version: '3.8'
+
+services:
+  {{ app_name }}:
+    build:
+      context: .
+      dockerfile: Dockerfile.{{ environment }}
+      target: {% if environment == 'production' %}production{% else %}development{% endif %}
+    container_name: {{ app_name }}-{{ environment }}
+    ports:
+      - "{{ app_port }}:{{ app_port }}"
+    environment:
+      - NODE_ENV={{ environment }}
+      - PORT={{ app_port }}
+      {% if hotci_enabled %}
+      - HOTCI_ENABLED=true
+      - HOTCI_DATA_PATH=/app/hotci_data
+      {% endif %}
+      - DATABASE_URL=postgresql://{{ database_user }}:{{ database_password }}@postgres:5432/{{ database_name }}
+      - REDIS_URL=redis://redis:{{ redis_port }}
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - ERL_AFLAGS="+pc unicode +sbwt none +sbwtdcpu none +sbwtdio none"
+    volumes:
+      {% if environment == 'development' %}
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./rebar.config:/app/rebar.config
+      {% endif %}
+      - ./log:/app/log
+      {% if environment == 'development' %}
+      - ./hotci_data:/app/hotci_data
+      {% endif %}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:{{ app_port }}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: {{ app_name }}-postgres
+    environment:
+      - POSTGRES_DB={{ database_name }}
+      - POSTGRES_USER={{ database_user }}
+      - POSTGRES_PASSWORD={{ database_password }}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ database_user }} -d {{ database_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: {{ app_name }}-redis
+    command: redis-server --appendonly yes --requirepass {{ redis_password | default('redis_password') }}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "{{ redis_port }}:{{ redis_port }}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: {{ app_name }}-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER={{ rabbitmq_user | default('app_user') }}
+      - RABBITMQ_DEFAULT_PASS={{ rabbitmq_password | default('rabbitmq_password') }}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: {{ app_name }}-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - {{ app_name }}
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: {{ app_name }}-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: {{ app_name }}-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password | default('admin') }}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

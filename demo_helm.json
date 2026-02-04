@@ -1,0 +1,29 @@
+{
+  "chart_name": "a2a-erl",
+  "chart_version": "0.2.0",
+  "app_version": "0.2.0",
+  "description": "A2A Erlang Application",
+  "repository": "ghcr.io/a2a",
+  "image_tag": "v0.2.0",
+  "replica_count": 3,
+  "service": {
+    "type": "ClusterIP",
+    "port": 8080,
+    "target_port": 8080
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi"
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "128Mi"
+    }
+  },
+  "hotci": {
+    "enabled": true,
+    "check_interval": "30s",
+    "upgrade_validation": true
+  }
+}

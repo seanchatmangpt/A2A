@@ -1,0 +1,111 @@
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX a2a: <https://a2a.com/schema/>
+PREFIX k8s: <https://kubernetes.io/schema/>
+
+# Extract Kubernetes resource configurations
+CONSTRUCT {
+    ?resource a ?resourceType ;
+        a2a:app_label ?appLabel ;
+        a2a:component_label ?componentLabel ;
+        a2a:version_label ?versionLabel ;
+        a2a:namespace ?namespace ;
+        a2a:replicas ?replicas ;
+        a2a:resource_request_cpu ?cpuRequest ;
+        a2a:resource_request_memory ?memoryRequest ;
+        a2a:resource_limit_cpu ?cpuLimit ;
+        a2a:resource_limit_memory ?memoryLimit ;
+        a2a:service_type ?serviceType ;
+        a2a:liveness_probe_path ?livenessPath ;
+        a2a:readiness_probe_path ?readinessPath ;
+        a2a:health_check_port ?healthPort ;
+        a2a:service_account_name ?serviceAccount .
+}
+WHERE {
+    # Find all Kubernetes resources
+    ?resource a ?resourceType .
+    FILTER(?resourceType IN (a2a:deployment, a2a:service, a2a:configmap, a2a:secret, a2a:ingress))
+
+    # Get labels
+    OPTIONAL {
+        ?resource rdfs:label ?appLabel .
+        FILTER(STRSTARTS(STR(?appLabel), "app:"))
+    }
+    BIND(SUBSTR(COALESCE(?appLabel, ""), 5) AS ?appLabel)
+
+    OPTIONAL {
+        ?resource rdfs:label ?componentLabel .
+        FILTER(STRSTARTS(STR(?componentLabel), "component:"))
+    }
+    BIND(SUBSTR(COALESCE(?componentLabel, ""), 10) AS ?componentLabel)
+
+    OPTIONAL {
+        ?resource rdfs:label ?versionLabel .
+        FILTER(STRSTARTS(STR(?versionLabel), "version:"))
+    }
+    BIND(SUBSTR(COALESCE(?versionLabel, ""), 8) AS ?versionLabel)
+
+    # Get namespace
+    OPTIONAL {
+        ?resource a2a:namespace ?namespace .
+    }
+    BIND(COALESCE(?namespace, "a2a-system") AS ?namespace)
+
+    # Get replicas (for deployments)
+    OPTIONAL {
+        ?resource a a2a:deployment ;
+            a2a:replicas ?replicas .
+    }
+    BIND(COALESCE(?replicas, 2) AS ?replicas)
+
+    # Get resource requests/limits
+    OPTIONAL {
+        ?resource a2a:resource_request_cpu ?cpuRequest .
+    }
+    BIND(COALESCE(?cpuRequest, "100m") AS ?cpuRequest)
+
+    OPTIONAL {
+        ?resource a2a:resource_request_memory ?memoryRequest .
+    }
+    BIND(COALESCE(?memoryRequest, "128Mi") AS ?memoryRequest)
+
+    OPTIONAL {
+        ?resource a2a:resource_limit_cpu ?cpuLimit .
+    }
+    BIND(COALESCE(?cpuLimit, "500m") AS ?cpuLimit)
+
+    OPTIONAL {
+        ?resource a2a:resource_limit_memory ?memoryLimit .
+    }
+    BIND(COALESCE(?memoryLimit, "256Mi") AS ?memoryLimit)
+
+    # Get service type (for services)
+    OPTIONAL {
+        ?resource a a2a:service ;
+            a2a:service_type ?serviceType .
+    }
+    BIND(COALESCE(?serviceType, "ClusterIP") AS ?serviceType)
+
+    # Get health check paths
+    OPTIONAL {
+        ?resource a2a:liveness_probe_path ?livenessPath .
+    }
+    BIND(COALESCE(?livenessPath, "/health") AS ?livenessPath)
+
+    OPTIONAL {
+        ?resource a2a:readiness_probe_path ?readinessPath .
+    }
+    BIND(COALESCE(?readinessPath, "/ready") AS ?readinessPath)
+
+    # Get health check port
+    OPTIONAL {
+        ?resource a2a:health_check_port ?healthPort .
+    }
+    BIND(COALESCE(?healthPort, 8080) AS ?healthPort)
+
+    # Get service account
+    OPTIONAL {
+        ?resource a2a:service_account_name ?serviceAccount .
+    }
+    BIND(COALESCE(?serviceAccount, "a2a-service-account") AS ?serviceAccount)
+}

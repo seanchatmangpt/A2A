@@ -1,0 +1,52 @@
+{{- if .Values.elrmcp.enabled -}}
+{{- if .Values.elrmcp.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "craftplan.fullname" . }}-elrmcp
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "craftplan.labels" . | nindent 4 }}
+    app.kubernetes.io/name: elrmcp
+  annotations:
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.elrmcp.ingress.annotations }}
+    {{- toYaml .Values.elrmcp.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.global.ingress.className }}
+    kubernetes.io/ingress.class: {{ .Values.global.ingress.className }}
+    {{- end }}
+    {{- if .Values.global.ingress.tls }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+    {{- if .Values.global.ingress.ingressClassName }}
+    nginx.ingress.kubernetes.io/ingress.class: {{ .Values.global.ingress.ingressClassName }}
+    {{- end }}
+    {{- if .Values.global.ingress.annotations }}
+    {{- toYaml .Values.global.ingress.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.global.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.global.ingress.ingressClassName }}
+  {{- else if .Values.global.ingress.className }}
+  ingressClassName: {{ .Values.global.ingress.className }}
+  {{- end }}
+  {{- if .Values.global.ingress.tls }}
+  tls:
+    {{- toYaml .Values.global.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.elrmcp.ingress.host | default "elrmcp.example.com" }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "craftplan.fullname" . }}-elrmcp
+                port:
+                  number: {{ .Values.elrmcp.service.port }}
+{{- end }}
+{{- end }}

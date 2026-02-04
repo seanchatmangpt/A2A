@@ -1,0 +1,2 @@
+rdflib>=6.3.0
+rdflib-shacl>=0.7.0

@@ -1,0 +1,289 @@
+---
+description: "Grafana dashboard for Erlang application monitoring"
+output_dir: "monitoring/grafana/dashboards"
+file_extension: ".json"
+variables:
+  app_name: "{{ module.name }}"
+  namespace: "{{ namespace | default('default') }}"
+  metrics_port: "{{ metrics_port | default(8081) }}"
+  dashboard_title: "{{ dashboard_title | default('Erlang Application Dashboard') }}"
+---
+{%- comment -%}
+Grafana dashboard for Erlang application monitoring with comprehensive metrics
+{%- endcomment -%}
+
+{
+  "dashboard": {
+    "id": null,
+    "title": "{{ dashboard_title }}",
+    "tags": ["{{ app_name }}", "erlang", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Application Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"{{ app_name }}\"}",
+            "legendFormat": "{{ instance }}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DOWN"
+                  },
+                  "1": {
+                    "text": "UP"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            },
+            "unit": "none"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "HTTP Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate({{ app_name }}_http_requests_total[5m])) by (route, method)",
+            "legendFormat": "{{ method }} {{ route }}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate({{ app_name }}_http_requests_total{status=~\"5..\"}[5m])) by (status)",
+            "legendFormat": "HTTP 5xx errors"
+          },
+          {
+            "expr": "sum(rate({{ app_name }}_http_requests_total{status=~\"4..\"}[5m])) by (status)",
+            "legendFormat": "HTTP 4xx errors"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Response Time Percentiles",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate({{ app_name }}_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.90, sum(rate({{ app_name }}_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "90th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate({{ app_name }}_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate({{ app_name }}_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "99th percentile"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum({{ app_name }}_memory_usage_bytes) by (instance)",
+            "legendFormat": "Total Memory"
+          },
+          {
+            "expr": "sum({{ app_name }}_memory_usage_bytes{type=\"process\"}) by (instance)",
+            "legendFormat": "Process Memory"
+          },
+          {
+            "expr": "sum({{ app_name }}_memory_usage_bytes{type=\"ets\"}) by (instance)",
+            "legendFormat": "ETS Memory"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate({{ app_name }}_cpu_usage_total[5m])) by (instance)",
+            "legendFormat": "CPU Usage"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        }
+      },
+      {
+        "id": 7,
+        "title": "Process Count",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum({{ app_name }}_process_count) by (type)",
+            "legendFormat": "{{ type }}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        }
+      },
+      {
+        "id": 8,
+        "title": "Message Queue Length",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum({{ app_name }}_message_queue_length) by (queue)",
+            "legendFormat": "{{ queue }}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        }
+      },
+      {
+        "id": 9,
+        "title": "Database Connections",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum({{ app_name }}_database_connections)",
+            "legendFormat": "Total Connections"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 32
+        }
+      },
+      {
+        "id": 10,
+        "title": "HotCI Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "{{ app_name }}_hotci_validation_success",
+            "legendFormat": "Success"
+          },
+          {
+            "expr": "{{ app_name }}_hotci_validation_failed",
+            "legendFormat": "Failed"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 32
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "6h",
+        "12h",
+        "24h",
+        "2d",
+        "7d",
+        "30d"
+      ]
+    },
+    "timezone": "browser",
+    "version": 1,
+    "uid": "{{ app_name }}-dashboard-{{ version | default('1.0') }}",
+    "refresh": "30s",
+    "links": [
+      {
+        "title": "Documentation",
+        "url": "https://github.com/a2a/ggen",
+        "target": "_blank"
+      }
+    ]
+  }
+}

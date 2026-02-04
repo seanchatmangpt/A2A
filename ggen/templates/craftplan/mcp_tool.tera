@@ -1,0 +1,241 @@
+{#- Craftplan MCP Tool Template -#}
+-module({{ module_name }}_{{ tool_name }}_tool).
+-behaviour(gen_server).
+
+%% API
+-export([start_link/0, execute/2, get_status/0]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
+-include("{{ module_name }}.hrl").
+
+-define(SERVER, ?MODULE).
+
+-record(state, {
+    name :: binary(),
+    description :: binary(),
+    enabled :: boolean(),
+    execution_count :: non_neg_integer(),
+    last_execution :: integer() | undefined
+}).
+
+%%====================================================================
+%% API
+%%====================================================================
+
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+execute(Args, Options) ->
+    gen_server:call(?SERVER, {execute, Args, Options}, 30000).
+
+get_status() ->
+    gen_server:call(?SERVER, get_status).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+init([]) ->
+    State = #state{
+        name = <<"{{ tool_name }}">>,
+        description = <<"{{ tool_description }}">>,
+        enabled = true,
+        execution_count = 0,
+        last_execution = undefined
+    },
+    {ok, State}.
+
+handle_call({execute, Args, _Options}, _From, State) ->
+    case State#state.enabled of
+        false ->
+            {reply, {error, tool_disabled}, State};
+        true ->
+            Result = do_execute(Args, State),
+            NewState = State#state{
+                execution_count = State#state.execution_count + 1,
+                last_execution = os:system_time(millisecond)
+            },
+            {reply, Result, NewState}
+    end;
+
+handle_call(get_status, _From, State) ->
+    Status = #{
+        name => State#state.name,
+        description => State#state.description,
+        enabled => State#state.enabled,
+        execution_count => State#state.execution_count,
+        last_execution => State#state.last_execution
+    },
+    {reply, {ok, Status}, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_call}, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+{% if tool_name == "customer_management" -%}
+do_execute(#{<<"operation">> := <<"list">>} = Args, State) ->
+    Filters = maps:get(<<"filters">>, Args, #{}),
+    Limit = maps:get(<<"limit">>, Args, 50),
+    Offset = maps:get(<<"offset">>, Args, 0),
+    craftplan_api_client:request(
+        <<"customers">>,
+        <<"list">>,
+        #{filters => Filters, limit => Limit, offset => Offset}
+    );
+
+do_execute(#{<<"operation">> := <<"get">>, <<"customer_id">> := CustomerId}, _State) ->
+    craftplan_api_client:request(
+        <<"customers">>,
+        <<"get">>,
+        #{customer_id => CustomerId}
+    );
+
+do_execute(#{<<"operation">> := <<"create">>, <<"customer_data">> := Data}, _State) ->
+    craftplan_api_client:request(
+        <<"customers">>,
+        <<"create">>,
+        Data
+    );
+
+do_execute(#{<<"operation">> := <<"update">>, <<"customer_id">> := CustomerId, <<"customer_data">> := Data}, _State) ->
+    craftplan_api_client:request(
+        <<"customers">>,
+        <<"update">>,
+        Data#{customer_id => CustomerId}
+    );
+
+do_execute(#{<<"operation">> := <<"delete">>, <<"customer_id">> := CustomerId}, _State) ->
+    craftplan_api_client:request(
+        <<"customers">>,
+        <<"delete">>,
+        #{customer_id => CustomerId}
+    );
+
+{% elsif tool_name == "order_management" -%}
+do_execute(#{<<"operation">> := <<"create">>, <<"order_data">> := Data}, _State) ->
+    craftplan_api_client:request(
+        <<"orders">>,
+        <<"create">>,
+        Data
+    );
+
+do_execute(#{<<"operation">> := <<"get">>, <<"order_id">> := OrderId}, _State) ->
+    craftplan_api_client:request(
+        <<"orders">>,
+        <<"get">>,
+        #{order_id => OrderId}
+    );
+
+do_execute(#{<<"operation">> := <<"list">>} = Args, _State) ->
+    Filters = maps:get(<<"filters">>, Args, #{}),
+    Limit = maps:get(<<"limit">>, Args, 50),
+    craftplan_api_client:request(
+        <<"orders">>,
+        <<"list">>,
+        #{filters => Filters, limit => Limit}
+    );
+
+do_execute(#{<<"operation">> := <<"cancel">>, <<"order_id">> := OrderId}, _State) ->
+    craftplan_api_client:request(
+        <<"orders">>,
+        <<"cancel">>,
+        #{order_id => OrderId}
+    );
+
+do_execute(#{<<"operation">> := <<"fulfill">>, <<"order_id">> := OrderId}, _State) ->
+    craftplan_api_client:request(
+        <<"orders">>,
+        <<"fulfill">>,
+        #{order_id => OrderId}
+    );
+
+{% elsif tool_name == "inventory_management" -%}
+do_execute(#{<<"operation">> := <<"check_stock">>, <<"product_id">> := ProductId}, _State) ->
+    craftplan_api_client:request(
+        <<"inventory">>,
+        <<"check_stock">>,
+        #{product_id => ProductId}
+    );
+
+do_execute(#{<<"operation">> := <<"adjust_stock">>, <<"product_id">> := ProductId, <<"quantity">> := Qty}, _State) ->
+    craftplan_api_client:request(
+        <<"inventory">>,
+        <<"adjust_stock">>,
+        #{product_id => ProductId, quantity => Qty}
+    );
+
+do_execute(#{<<"operation">> := <<"list_products">>} = Args, _State) ->
+    Limit = maps:get(<<"limit">>, Args, 50),
+    craftplan_api_client:request(
+        <<"inventory">>,
+        <<"list">>,
+        #{limit => Limit}
+    );
+
+{% elsif tool_name == "production_planning" -%}
+do_execute(#{<<"operation">> := <<"create_order">>, <<"order_data">> := Data}, _State) ->
+    craftplan_api_client:request(
+        <<"production">>,
+        <<"create_order">>,
+        Data
+    );
+
+do_execute(#{<<"operation">> := <<"list_orders">>} = Args, _State) ->
+    Status = maps:get(<<"status">>, Args, undefined),
+    craftplan_api_client:request(
+        <<"production">>,
+        <<"list">>,
+        #{status => Status}
+    );
+
+do_execute(#{<<"operation">> := <<"update_status">>, <<"production_order_id">> := POId, <<"status">> := Status}, _State) ->
+    craftplan_api_client:request(
+        <<"production">>,
+        <<"update_status">>,
+        #{production_order_id => POId, status => Status}
+    );
+
+{% elsif tool_name == "analytics" -%}
+do_execute(#{<<"report_type">> := ReportType} = Args, _State) ->
+    DateRange = maps:get(<<"date_range">>, Args, #{}),
+    GroupBy = maps:get(<<"group_by">>, Args, undefined),
+    craftplan_api_client:request(
+        <<"analytics">>,
+        ReportType,
+        #{date_range => DateRange, group_by => GroupBy}
+    );
+
+{% elsif tool_name == "shipping" -%}
+do_execute(#{<<"operation">> := <<"track">>, <<"tracking_number">> := TrackingNum}, _State) ->
+    craftplan_api_client:request(
+        <<"shipping">>,
+        <<"track">>,
+        #{tracking_number => TrackingNum}
+    );
+
+do_execute(#{<<"operation">> := <<"create_shipment">>, <<"order_id">> := OrderId, <<"shipment_data">> := Data}, _State) ->
+    craftplan_api_client:request(
+        <<"shipping">>,
+        <<"create">>,
+        Data#{order_id => OrderId}
+    );
+
+{% endif -%}
+do_execute(Args, _State) ->
+    {error, {invalid_args, Args}}.

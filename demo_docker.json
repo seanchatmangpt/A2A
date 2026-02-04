@@ -1,0 +1,9 @@
+{
+  "base_image": "erlang:27-alpine",
+  "port": 8080,
+  "hotci_enabled": true,
+  "health_check_interval": "30s",
+  "health_check_timeout": "5s",
+  "health_check_start_period": "5s",
+  "health_check_retries": 3
+}

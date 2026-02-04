@@ -1,0 +1,18 @@
+FROM erlang:27-alpine AS builder
+
+RUN apk add --no-cache git make curl
+WORKDIR /app
+COPY rebar3 /usr/local/bin/
+COPY rebar.config.lock rebar.config config src include /app/
+RUN rebar3 compile
+
+FROM erlang:27-alpine
+RUN addgroup -g 1001 -S appuser &&     adduser -S appuser -u 1001
+WORKDIR /app
+COPY --from=builder --chown=appuser:appuser /app/_build/prod/rel/a2a_erl /app
+COPY --from=builder --chown=appuser:appuser /app/config /app/config
+RUN chown -R appuser:appuser /app && mkdir -p /app/log /app/data
+USER appuser
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3     CMD curl -f http://localhost:8080/health || exit 1
+CMD ["/app/bin/a2a_erl", "foreground"]
