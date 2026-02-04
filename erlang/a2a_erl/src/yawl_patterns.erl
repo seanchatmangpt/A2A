@@ -16,9 +16,8 @@
 
 -module(yawl_patterns).
 -author("A2A Team").
--behaviour(gen_pnet).
 
-%% gen_pnet behaviour callbacks
+%% Mock gen_pnet callbacks for YAWL pattern structure definition
 -export([
     place_lst/0,
     trsn_lst/0,
@@ -47,7 +46,7 @@
 place_lst() ->
     %% Common places used across YAWL patterns
     [start,
-     end,
+     'end',
      join,
      split,
      condition,
@@ -77,7 +76,7 @@ trsn_lst() ->
 init_marking(Place, _UsrInfo) ->
     case Place of
         start -> [workflow_token];
-        end -> [];
+        'end' -> [];
         _ -> []
     end.
 
@@ -168,7 +167,7 @@ is_enabled(Transition, Mode, _UsrInfo) ->
             end
     end.
 
-fire(Transition, Mode, _UsrInfo) ->
+fire(Transition, _Mode, _UsrInfo) ->
     case Transition of
         start_workflow ->
             {produce, #{
@@ -176,7 +175,7 @@ fire(Transition, Mode, _UsrInfo) ->
                 action => [execute_token]
             }};
         end_workflow ->
-            {produce, #{ end => [completion_token] }};
+            {produce, #{ 'end' => [completion_token] }};
         parallel_split ->
             {produce, #{
                 split => [token, token]  %% Produce 2 tokens for parallel execution
@@ -209,7 +208,7 @@ fire(Transition, Mode, _UsrInfo) ->
         cancel_workflow ->
             {produce, #{
                 cancel => [cancel_token],
-                end => [cancelled_token]
+                'end' => [cancelled_token]
             }};
         handle_error ->
             {produce, #{
@@ -279,80 +278,80 @@ get_pattern_info(PatternType) ->
     case PatternType of
         basic_sequential ->
             #{
-                name => "Basic Sequential",
-                description => "Simple sequential execution of two tasks",
-                places => [start, action1, action2, end],
-                transitions => [start, t1, t2, end],
+                name => <<"Basic Sequential">>,
+                description => <<"Simple sequential execution of two tasks">>,
+                places => [start, action1, action2, 'end'],
+                transitions => [start, t1, t2, 'end'],
                 complexity => low
             };
         parallel_split ->
             #{
-                name => "Parallel Split",
-                description => "Execute multiple tasks in parallel",
-                places => [start, split, action1, action2, end],
-                transitions => [start, split, t1, t2, join, end],
+                name => <<"Parallel Split">>,
+                description => <<"Execute multiple tasks in parallel">>,
+                places => [start, split, action1, action2, 'end'],
+                transitions => [start, split, t1, t2, join, 'end'],
                 complexity => medium
             };
         parallel_join ->
             #{
-                name => "Parallel Join",
-                description => "Wait for multiple parallel tasks to complete",
-                places => [start, action1, action2, join, end],
-                transitions => [start, t1, t2, join, end],
+                name => <<"Parallel Join">>,
+                description => <<"Wait for multiple parallel tasks to complete">>,
+                places => [start, action1, action2, join, 'end'],
+                transitions => [start, t1, t2, join, 'end'],
                 complexity => medium
             };
         exclusive_choice ->
             #{
-                name => "Exclusive Choice",
-                description => "Choose one path from multiple alternatives",
-                places => [start, choice, action1, action2, end],
-                transitions => [start, choice, t1, t2, end],
+                name => <<"Exclusive Choice">>,
+                description => <<"Choose one path from multiple alternatives">>,
+                places => [start, choice, action1, action2, 'end'],
+                transitions => [start, choice, t1, t2, 'end'],
                 complexity => medium
             };
         simple_merge ->
             #{
-                name => "Simple Merge",
-                description => "Merge multiple paths into one",
-                places => [start, action1, action2, merge, end],
-                transitions => [start, t1, t2, merge, end],
+                name => <<"Simple Merge">>,
+                description => <<"Merge multiple paths into one">>,
+                places => [start, action1, action2, merge, 'end'],
+                transitions => [start, t1, t2, merge, 'end'],
                 complexity => medium
             };
         iterative_loop ->
             #{
-                name => "Iterative Loop",
-                description => "Execute task repeatedly while condition is true",
-                places => [start, condition, action, loop, end],
-                transitions => [start, check, execute, continue, end],
+                name => <<"Iterative Loop">>,
+                description => <<"Execute task repeatedly while condition is true">>,
+                places => [start, condition, action, loop, 'end'],
+                transitions => [start, check, execute, continue, 'end'],
                 complexity => high
             };
         multi_instance ->
             #{
-                name => "Multi-Instance",
-                description => "Execute task multiple times with different data",
-                places => [start, create, execute, collect, end],
-                transitions => [start, create, execute, collect, end],
+                name => <<"Multi-Instance">>,
+                description => <<"Execute task multiple times with different data">>,
+                places => [start, create, execute, collect, 'end'],
+                transitions => [start, create, execute, collect, 'end'],
                 complexity => high
             };
         cancelation ->
             #{
-                name => "Cancelation",
-                description => "Cancel workflow execution",
-                places => [start, action1, action2, cancel, end],
-                transitions => [start, t1, t2, cancel, end],
+                name => <<"Cancellation">>,
+                description => <<"Cancel workflow execution">>,
+                places => [start, action1, action2, cancel, 'end'],
+                transitions => [start, t1, t2, cancel, 'end'],
                 complexity => medium
             };
         interleaved_parallelism ->
             #{
-                name => "Interleaved Parallelism",
-                description => "Execute multiple tasks in any order",
-                places => [start, action1, action2, merge, end],
-                transitions => [start, t1, t2, merge, end],
+                name => <<"Interleaved Parallelism">>,
+                description => <<"Execute multiple tasks in any order">>,
+                places => [start, action1, action2, merge, 'end'],
+                transitions => [start, t1, t2, merge, 'end'],
                 complexity => medium
             };
         _ ->
             #{
-                name => unknown,
-                description => "Pattern not found",
+                name => <<"unknown">>,
+                description => <<"Pattern not found">>,
                 places => [],
                 transitions => [],
                 complexity => undefined
@@ -409,100 +408,113 @@ list_patterns() ->
 %%====================================================================
 
 generate_pattern_definition(PatternType, Config) ->
-    %% Generate gen_pnet definition for a specific YAWL pattern
+    %% Generate YAWL pattern definition as a map
     case PatternType of
         basic_sequential ->
-            #net_state{
-                places = [start, action1, action2, end],
-                transitions = [start, t1, t2, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => basic_sequential,
+                places => [start, action1, action2, 'end'],
+                transitions => [start, t1, t2, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     t1 => [action1],
                     t2 => [action2],
-                    end => [end]
-                }
+                    'end' => ['end']
+                },
+                complexity => low
             };
         parallel_split ->
-            #net_state{
-                places = [start, split, action1, action2, end],
-                transitions = [start, split, t1, t2, join, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => parallel_split,
+                places => [start, split, action1, action2, 'end'],
+                transitions => [start, split, t1, t2, join, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     split => [split],
                     t1 => [action1],
                     t2 => [action2],
-                    join => [end],
-                    end => [end]
-                }
+                    join => ['end'],
+                    'end' => ['end']
+                },
+                complexity => medium
             };
         parallel_join ->
-            #net_state{
-                places = [start, action1, action2, join, end],
-                transitions = [start, t1, t2, join, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => parallel_join,
+                places => [start, action1, action2, join, 'end'],
+                transitions => [start, t1, t2, join, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     t1 => [action1],
                     t2 => [action2],
                     join => [join],
-                    end => [end]
-                }
+                    'end' => ['end']
+                },
+                complexity => medium
             };
         exclusive_choice ->
-            #net_state{
-                places = [start, choice, action1, action2, end],
-                transitions = [start, choice, t1, t2, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => exclusive_choice,
+                places => [start, choice, action1, action2, 'end'],
+                transitions => [start, choice, t1, t2, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     choice => [choice],
                     t1 => [action1],
                     t2 => [action2],
-                    end => [end]
-                }
+                    'end' => ['end']
+                },
+                complexity => medium
             };
         simple_merge ->
-            #net_state{
-                places = [start, action1, action2, merge, end],
-                transitions = [start, t1, t2, merge, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => simple_merge,
+                places => [start, action1, action2, merge, 'end'],
+                transitions => [start, t1, t2, merge, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     t1 => [action1],
                     t2 => [action2],
                     merge => [merge],
-                    end => [end]
-                }
+                    'end' => ['end']
+                },
+                complexity => medium
             };
         iterative_loop ->
-            #net_state{
-                places = [start, condition, action, loop, end],
-                transitions = [start, check, execute, continue, end],
-                marking = #{start => [workflow_token]},
-                preset = #{
+            #{
+                pattern_type => iterative_loop,
+                places => [start, condition, action, loop, 'end'],
+                transitions => [start, check, execute, continue, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => #{
                     start => [start],
                     check => [condition],
                     execute => [action],
                     continue => [loop],
-                    end => [end]
-                }
+                    'end' => ['end']
+                },
+                complexity => high
             };
         multi_instance ->
             %% Multi-instance pattern with configurable number of instances
             NumInstances = maps:get(num_instances, Config, 3),
             InstancePlaces = lists:map(fun(I) -> list_to_atom("instance_" ++ integer_to_list(I)) end,
                                      lists:seq(1, NumInstances)),
-
-            #net_state{
-                places = [start, create] ++ InstancePlaces ++ [collect, end],
-                transitions = [start, create] ++
+            #{
+                pattern_type => multi_instance,
+                places => [start, create] ++ InstancePlaces ++ [collect, 'end'],
+                transitions => [start, create] ++
                              lists:map(fun(I) -> list_to_atom("execute_" ++ integer_to_list(I)) end,
                                      lists:seq(1, NumInstances)) ++
-                             [collect, end],
-                marking = #{start => [workflow_token]},
-                preset = generate_multi_instance_preset(NumInstances)
+                             [collect, 'end'],
+                marking => #{start => [workflow_token]},
+                preset => generate_multi_instance_preset(NumInstances),
+                complexity => high
             };
         _ ->
             %% Default to basic sequential for unknown patterns
@@ -511,27 +523,27 @@ generate_pattern_definition(PatternType, Config) ->
 
 generate_multi_instance_preset(NumInstances) ->
     %% Generate preset for multi-instance pattern
-    Preset = #{},
+    Preset0 = #{},
 
     %% Start transition
-    Preset#{start => [start]},
+    Preset1 = Preset0#{start => [start]},
 
     %% Create transition
-    Preset#{create => [create]},
+    Preset2 = Preset1#{create => [create]},
 
     %% Execute transitions for each instance
     ExecutePresets = lists:foldl(fun(I, Acc) ->
         InstancePlace = list_to_atom("instance_" ++ integer_to_list(I)),
         Acc#{list_to_atom("execute_" ++ integer_to_list(I)) => [InstancePlace]}
-    end, Preset, lists:seq(1, NumInstances)),
+    end, Preset2, lists:seq(1, NumInstances)),
 
     %% Collect transition
     InstancePlaces = lists:map(fun(I) -> list_to_atom("instance_" ++ integer_to_list(I)) end,
                              lists:seq(1, NumInstances)),
-    ExecutePresets#{collect => InstancePlaces},
+    ExecutePresets2 = ExecutePresets#{collect => InstancePlaces},
 
     %% End transition
-    ExecutePresets#{end => [end]}.
+    ExecutePresets2#{'end' => ['end']}.
 
 validate_pattern_config(basic_sequential, _Config) ->
     %% Basic sequential pattern requires no special configuration

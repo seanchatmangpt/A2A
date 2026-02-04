@@ -1,4 +1,27 @@
-"""YAWL Workflow Pattern Integration
+"""
+===============================================================================
+DEPRECATION NOTICE
+===============================================================================
+
+This module is DEPRECATED and maintained only for legacy compatibility.
+
+The pure Erlang YAWL implementation should be used instead:
+    - Erlang modules: erlang/a2a_erl/src/yawl_*.erl
+    - Type definitions: erlang/a2a_erl/include/yawl_types.hrl
+    - Orchestrator: yawl_orchestrator
+    - Business Scenarios: yawl_business_scenarios
+    - Test Runner: yawl_test_runner
+
+Migration Guide:
+    1. Use yawl_orchestrator:create_workflow/2 instead of YAWLWorkflowOrchestrator
+    2. Use yawl_business_scenarios for business domain scenarios
+    3. Use yawl_test_runner for running YAWL tests
+
+This module will be removed in version 1.0.0.
+
+===============================================================================
+
+YAWL Workflow Pattern Integration
 
 This module integrates YAWL (Yet Another Workflow Language) patterns
 with the existing workflow orchestrator using gen_pnet as the underlying

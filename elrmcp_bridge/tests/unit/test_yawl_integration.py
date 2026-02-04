@@ -1,4 +1,24 @@
-"""Tests for YAWL Integration Module
+"""
+===============================================================================
+DEPRECATION NOTICE
+===============================================================================
+
+This test module is DEPRECATED.
+
+The pure Erlang YAWL implementation should be tested using:
+    - Test modules: erlang/a2a_erl/tests/yawl_*.erl
+    - Pattern tests: yawl_pattern_tests.erl
+    - Combinatoric tests: yawl_combinatoric_tests.erl
+    - Business domain tests: yawl_business_tests.erl
+
+Run Erlang tests with:
+    cd erlang/a2a_erl && rebar3 ct
+
+This module will be removed in version 1.0.0.
+
+===============================================================================
+
+Tests for YAWL Integration Module
 
 Tests the integration of YAWL workflow patterns with the existing
 workflow orchestrator using gen_pnet as the underlying engine.

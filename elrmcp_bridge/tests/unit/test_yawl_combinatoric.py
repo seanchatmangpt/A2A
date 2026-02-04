@@ -1,4 +1,23 @@
-"""YAWL Combinatoric Testing Module
+"""
+===============================================================================
+DEPRECATION NOTICE
+===============================================================================
+
+This test module is DEPRECATED.
+
+The pure Erlang YAWL implementation should be tested using:
+    - Test modules: erlang/a2a_erl/tests/yawl_*.erl
+    - Combinatoric tests: yawl_combinatoric_tests.erl
+    - Business domain tests: yawl_business_tests.erl
+
+Run Erlang tests with:
+    cd erlang/a2a_erl && rebar3 ct
+
+This module will be removed in version 1.0.0.
+
+===============================================================================
+
+YAWL Combinatoric Testing Module
 
 This module provides combinatoric testing for YAWL workflow patterns,
 enabling systematic testing of pattern combinations and business scenarios.
