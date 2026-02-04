@@ -193,8 +193,38 @@ terminate(_Reason, _State, #data{task = Task}) ->
     a2a_task_store:unregister_task(Task#task.id),
     ok.
 
-code_change(_OldVsn, State, Data, _Extra) ->
-    {ok, State, Data}.
+%% @doc Handle code changes for hot upgrade/downgrade
+%%
+%% Supports:
+%%   - downgrade: State format reversion for 0.2.0 -> 0.1.0
+%%   - upgrade: State format migration for 0.1.0 -> 0.2.0
+code_change(OldVsn, State, Data, Extra) ->
+    case {OldVsn, Extra} of
+        {_, downgrade} ->
+            %% Downgrade from 0.2.0 to 0.1.0
+            %% Remove push_configs field from data if present
+            OldData = case Data of
+                #data{push_configs = _} ->
+                    Data#data{push_configs = []};
+                _ ->
+                    Data
+            end,
+            {ok, State, OldData};
+        {_, upgrade} ->
+            %% Upgrade from 0.1.0 to 0.2.0
+            %% Add push_configs field if missing
+            NewData = case Data of
+                #data{push_configs = _} ->
+                    Data;
+                _ when is_record(Data, data) ->
+                    Data#data{push_configs = []};
+                _ ->
+                    Data
+            end,
+            {ok, State, NewData};
+        _ ->
+            {ok, State, Data}
+    end.
 
 %%% ============================================================================
 %%% State: submitted

@@ -1,0 +1,95 @@
+%% -*- erlang -*-
+%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% A2A Erlang/OTP Application Upgrade Instructions
+%%
+%% This file contains upgrade and downgrade instructions for the A2A protocol
+%% implementation. It follows the Erlang/OTP appup file format.
+%%
+%% Format: {TargetVsn, [{UpFromVsn, UpInstructions}], [{DownToVsn, DownInstructions}]}
+%%
+%% Available instructions:
+%%   {load_module, Module}              - Load/replace module code
+%%   {add_module, Module}               - Add new module
+%%   {delete_module, Module}            - Remove module (upgrade only)
+%%   {update, Module, {advanced, Extra}} - Advanced code change
+%%   {restart_application, Application} - Restart application
+%%   {load, Module, Deps}               - Load with dependencies
+%%
+%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Current version: 0.2.0
+%% Previous version: 0.1.0
+%%
+%% Upgrade from 0.1.0 to 0.2.0:
+%%   - Added a2a_health_handler module for health/metrics endpoints
+%%   - Added a2a_metrics module for metrics collection
+%%   - Enhanced a2a_http_handler with tenant support
+%%   - Enhanced a2a_sse_handler for better streaming
+%%   - Enhanced a2a_json with more robust encoding
+%%   - Enhanced a2a_task_statem with better state handling
+%%   - Enhanced a2a_task_store with push notification configs
+%%
+%% Downgrade from 0.2.0 to 0.1.0:
+%%   - Remove health/metrics handler functionality
+%%   - Revert task_store to simple ETS (no push configs)
+%%   - Revert task_statem to basic state handling
+
+{"0.2.0",
+ [
+  %% Upgrade from 0.1.0 to 0.2.0
+  {"0.1.0",
+   [
+    %% Add new modules first
+    {add_module, a2a_health_handler},
+    {add_module, a2a_metrics},
+
+    %% Update existing modules with code_change support
+    {load_module, a2a_json, brutal_purge, soft_purge, []},
+    {load_module, a2a_task_statem, brutal_purge, soft_purge, []},
+    {load_module, a2a_task_store, brutal_purge, soft_purge, []},
+    {load_module, a2a_http_handler, brutal_purge, soft_purge, []},
+    {load_module, a2a_sse_handler, brutal_purge, soft_purge, []},
+    {load_module, a2a_agent_card, brutal_purge, soft_purge, []},
+    {load_module, a2a_push_notifier, brutal_purge, soft_purge, []},
+
+    %% Update application module last
+    {load_module, a2a_erl_app, brutal_purge, soft_purge, []},
+    {load_module, a2a_erl_sup, brutal_purge, soft_purge, []},
+
+    %% Point of no return - after this, downgrade requires app restart
+    point_of_no_return,
+
+    %% Remove old modules if any (none in this case)
+    apply_transitions,
+    {sync_releases, []}
+   ]}
+ ],
+ [
+  %% Downgrade from 0.2.0 to 0.1.0
+  {"0.1.0",
+   [
+    %% Point of no return - reverse order for downgrade
+    point_of_no_return,
+
+    %% Revert application modules first
+    {load_module, a2a_erl_app, brutal_purge, soft_purge, []},
+    {load_module, a2a_erl_sup, brutal_purge, soft_purge, []},
+
+    %% Revert other modules
+    {load_module, a2a_push_notifier, brutal_purge, soft_purge, []},
+    {load_module, a2a_agent_card, brutal_purge, soft_purge, []},
+    {load_module, a2a_sse_handler, brutal_purge, soft_purge, []},
+    {load_module, a2a_http_handler, brutal_purge, soft_purge, []},
+    {load_module, a2a_task_store, brutal_purge, soft_purge, []},
+    {load_module, a2a_task_statem, brutal_purge, soft_purge, []},
+    {load_module, a2a_json, brutal_purge, soft_purge, []},
+
+    %% Delete new modules (must be done in downgrade)
+    {delete_module, a2a_metrics},
+    {delete_module, a2a_health_handler},
+
+    apply_transitions,
+    {sync_releases, []}
+   ]}
+ ]
+}.

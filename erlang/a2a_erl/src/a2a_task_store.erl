@@ -289,8 +289,41 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+%% @doc Handle code changes for hot upgrade/downgrade
+%%
+%% Supports:
+%%   - downgrade: State format reversion for 0.2.0 -> 0.1.0
+%%   - upgrade: State format migration for 0.1.0 -> 0.2.0
+code_change(OldVsn, State, Extra) ->
+    case {OldVsn, Extra} of
+        {_, downgrade} ->
+            %% Downgrade from 0.2.0 to 0.1.0
+            %% Remove push notification config table if it exists
+            case ets:info(?PUSH_TABLE) of
+                undefined -> ok;
+                _ -> ets:delete(?PUSH_TABLE)
+            end,
+            {ok, State};
+        {_, upgrade} ->
+            %% Upgrade from 0.1.0 to 0.2.0
+            %% Ensure push notification table exists
+            case ets:info(?PUSH_TABLE) of
+                undefined ->
+                    _ = ets:new(?PUSH_TABLE, [
+                        named_table,
+                        public,
+                        set,
+                        {keypos, 1},
+                        {write_concurrency, auto},
+                        {read_concurrency, true}
+                    ]);
+                _ ->
+                    ok
+            end,
+            {ok, State};
+        _ ->
+            {ok, State}
+    end.
 
 %%% ============================================================================
 %%% Internal Functions
