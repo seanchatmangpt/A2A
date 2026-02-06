@@ -26,7 +26,13 @@
     check_readiness/0,
     check_liveness/0,
     get_system_info/0,
-    get_metrics/0
+    get_metrics/0,
+    get_request_count/0,
+    %% Request counting API
+    init_metrics_table/0,
+    increment_request_count/0,
+    reset_request_count/0,
+    get_request_metrics/0
 ]).
 
 -record(health_state, {
@@ -344,7 +350,12 @@ check_agent_card_ready() ->
             undefined -> false;
             Pid when is_pid(Pid) ->
                 is_process_alive(Pid) andalso
-                (catch a2a_agent_card:get_card()) =/= {'EXIT', _}
+                begin
+                    case catch a2a_agent_card:get_card() of
+                        {'EXIT', _} -> false;
+                        _ -> true
+                    end
+                end
         end
     catch
         _:_ -> false
@@ -611,10 +622,48 @@ get_failed_tasks() ->
         _:_ -> 0
     end.
 
-%% @doc Get request count (placeholder for future metrics)
+%% @doc Get request count from metrics table
 get_request_count() ->
-    %% In production, this would query a metrics table
-    0.
+    init_metrics_table(),
+    try ets:lookup_element(a2a_request_metrics, total_requests, 2)
+    catch
+        error:badarg -> 0
+    end.
+
+%% @doc Initialize the metrics ETS table
+init_metrics_table() ->
+    case ets:whereis(a2a_request_metrics) of
+        undefined ->
+            ets:new(a2a_request_metrics, [named_table, public, set]),
+            ets:insert(a2a_request_metrics, {total_requests, 0}),
+            ok;
+        _ ->
+            ok
+    end.
+
+%% @doc Increment the request counter by 1
+increment_request_count() ->
+    init_metrics_table(),
+    try ets:update_counter(a2a_request_metrics, total_requests, 1)
+    catch
+        error:badarg ->
+            ets:insert(a2a_request_metrics, {total_requests, 1}),
+            1
+    end.
+
+%% @doc Reset the request counter to 0
+reset_request_count() ->
+    init_metrics_table(),
+    ets:insert(a2a_request_metrics, {total_requests, 0}),
+    ok.
+
+%% @doc Get detailed request metrics as a map
+get_request_metrics() ->
+    Count = get_request_count(),
+    #{
+        <<"total_requests">> => Count,
+        <<"timestamp">> => get_timestamp()
+    }.
 
 %% @doc Format metrics in Prometheus text format
 format_prometheus_metrics(Metrics) ->

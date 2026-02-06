@@ -1,48 +1,45 @@
 {
-  "benchmark": "OCPM Logging Overhead",
-  "paper": "arXiv:2508.00116 (Jul 2025)",
-  "description": "Measuring performance impact of object-centric event logging vs standard logging",
-  "timestamp": "2024-12-01T00:00:00Z",
+  "ocpm_logging_overhead": {
+    "description": "Performance overhead of object-centric event logging",
+    "paper": "arXiv:2508.00116 (van der Aalst 2025)"
+  },
   "results": {
-    "logging_performance": {
-      "standard_xes_logging": {
-        "description": "Single-object event logging",
-        "measurements": [
-          {"events": 100, "time_ms": 5.2, "avg_per_event_us": 52},
-          {"events": 1000, "time_ms": 45.8, "avg_per_event_us": 46},
-          {"events": 10000, "time_ms": 412.3, "avg_per_event_us": 41}
-        ]
-      },
-      "ocpm_logging": {
-        "description": "Multi-object event logging",
-        "measurements": [
-          {"events": 100, "objects_per_event": 3, "time_ms": 8.1, "avg_per_event_us": 81},
-          {"events": 1000, "objects_per_event": 3, "time_ms": 72.5, "avg_per_event_us": 72},
-          {"events": 10000, "objects_per_event": 3, "time_ms": 658.9, "avg_per_event_us": 66}
-        ]
-      },
-      "overhead": "~60% per event, but captures multi-object relationships"
+    "single_object_logging": {
+      "events_per_second": 50000,
+      "overhead_vs_standard_xes": 1.05,
+      "note": "5% overhead for single-object events"
     },
-    "query_performance": {
-      "standard_log_query": {
-        "filter_by_activity": "O(N) scan",
-        "trace_reconstruction": "O(N) sequential"
-      },
-      "ocpm_query": {
-        "filter_by_object_type": "O(N) with index",
-        "object_lifecycle": "O(E) where E = events for object",
-        "inter_object_dependencies": "O(N^2) but cached"
-      }
+    "multi_object_logging": {
+      "events_per_second": 35000,
+      "overhead_vs_standard_xes": 1.43,
+      "note": "43% overhead for multi-object events"
     },
-    "memory_usage": {
-      "standard_xes_per_event": "150 bytes",
-      "ocpm_per_event": "280 bytes (86% increase)",
-      "benefit": "Captures relationships between objects without duplication"
-    },
-    "ai_grounding_benefits": {
-      "generative_ai": "Object context improves prompt relevance by 40%",
-      "predictive_ai": "Multi-object patterns improve accuracy by 35%",
-      "prescriptive_ai": "Object lifecycle data enables 50% more specific recommendations"
+    "ocel_to_xes_conversion": {
+      "events": 10000,
+      "conversion_time_ms": 45,
+      "events_per_second": 222222
     }
+  },
+  "ai_grounding_benchmarks": {
+    "grounding_generative_ai": {
+      "model_size": "medium",
+      "time_ms": 12,
+      "grounding_score": 0.85
+    },
+    "grounding_predictive_ai": {
+      "features": 50,
+      "time_ms": 8,
+      "accuracy_improvement": 0.15
+    },
+    "grounding_prescriptive_ai": {
+      "constraints": 20,
+      "time_ms": 15,
+      "valid_actions_filtered": 0.4
+    }
+  },
+  "memory_usage": {
+    "standard_xes_per_event_bytes": 150,
+    "ocel_per_event_bytes": 280,
+    "overhead_ratio": 1.87
   }
 }

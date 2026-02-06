@@ -2,7 +2,7 @@
 %%% @doc
 %%% REST Handler for Research Module: Reachability Analysis
 %%%
-%%% Paper: arXiv:2602.02447 (Feb 2026)
+%%% Paper: arXiv:2602.02447 (Feb 2026) - Thomas M. Prinz
 %%% "Reachability Diagnostics with O(P²+T²) Algorithm"
 %%%
 %%% @end

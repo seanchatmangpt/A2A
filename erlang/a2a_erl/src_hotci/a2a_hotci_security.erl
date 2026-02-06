@@ -557,11 +557,22 @@ validate_package_integrity(PackagePath, Metadata) ->
     end.
 
 verify_digital_signature(PackagePath, Metadata) ->
-    %% In real implementation, this would verify cryptographic signatures
-    %% For now, return success with placeholder logic
+    %% Verify cryptographic signatures using Erlang/OTP crypto module
+    %% Supports: HMAC, Ed25519, RSA-PSS, ECDSA
     case maps:get(signature, Metadata, undefined) of
         undefined -> {error, missing_signature};
-        _ -> {ok, verified}
+        Signature when is_binary(Signature); Signature =/= undefined ->
+            SignatureType = maps:get(signature_type, Metadata, hmac),
+            case verify_signature_by_type(SignatureType, Signature, PackagePath, Metadata) of
+                {ok, _} = Ok ->
+                    %% Validate timestamp if present (replay attack prevention)
+                    case maps:get(timestamp, Metadata, undefined) of
+                        undefined -> Ok;
+                        Timestamp when is_integer(Timestamp) ->
+                            validate_signature_timestamp(Timestamp, Metadata)
+                    end;
+                Error -> Error
+            end
     end.
 
 validate_package_structure(PackagePath) ->
@@ -606,11 +617,194 @@ verify_authorization(OperatorID, Authorization) ->
     end.
 
 verify_mfa_token(OperatorID, Authorization) ->
-    %% Placeholder for MFA verification
+    %% Multi-factor authentication verification
     case maps:get(mfa_token, Authorization, undefined) of
         undefined -> false;
-        _ -> true %% Real implementation would validate against MFA system
+        Token ->
+            %% Validate token using HMAC or TOTP
+            case maps:get(mfa_type, Authorization, totp) of
+                totp ->
+                    verify_totp_token(OperatorID, Token);
+                hmac ->
+                    verify_hmac_token(OperatorID, Token, Authorization);
+                _ ->
+                    %% Fallback: check token length and format
+                    is_binary(Token) andalso byte_size(Token) >= 16
+            end
     end.
+
+verify_totp_token(OperatorID, Token) ->
+    %% Verify TOTP token (Time-based One-Time Password)
+    %% Generate expected token based on current time
+    TimeStep = 30,  % 30-second intervals
+    CurrentTime = erlang:system_time(second),
+    TimeCounter = CurrentTime div TimeStep,
+
+    %% Get shared secret for operator
+    Secret = case get_operator_mfa_secret(OperatorID) of
+        undefined -> crypto:strong_rand_bytes(20);
+        S -> S
+    end,
+
+    %% Generate expected TOTP
+    ExpectedToken = generate_hotp(Secret, TimeCounter),
+
+    %% Allow for clock skew (previous and next counter)
+    ExpectedToken =:= Token orelse
+    generate_hotp(Secret, TimeCounter - 1) =:= Token orelse
+    generate_hotp(Secret, TimeCounter + 1) =:= Token.
+
+verify_hmac_token(OperatorID, Token, Authorization) ->
+    %% Verify HMAC-based token
+    case maps:get(timestamp, Authorization, undefined) of
+        undefined -> false;
+        Timestamp ->
+            Secret = get_operator_mfa_secret(OperatorID),
+            ExpectedHMAC = crypto:hmac(sha256, Secret, term_to_binary(Timestamp)),
+            ExpectedHMAC =:= Token
+    end.
+
+generate_hotp(Secret, Counter) ->
+    %% Generate HMAC-based One-Time Password
+    CounterBytes = <<Counter:64/integer-unsigned-big>>,
+    HMAC = crypto:hmac(sha1, Secret, CounterBytes),
+    <<_:4/binary, Offset:8, _/binary>> = HMAC,
+    <<_:Offset/unit:8, Code:4/binary, _/binary>> = HMAC,
+    <<Truncated:31/integer-unsigned-big, _:1>> = Code,
+    Token = Truncated rem 1000000,
+    integer_to_binary(Token, 10).
+
+get_operator_mfa_secret(OperatorID) ->
+    %% Get MFA secret for operator from config or storage
+    case application:get_env(a2a_erl, {mfa_secret, OperatorID}) of
+        {ok, Secret} -> Secret;
+        undefined -> undefined
+    end.
+
+%% ============================================================================
+%% Digital Signature Verification Functions
+%% ============================================================================
+
+%% @doc Verify signature based on type (HMAC, Ed25519, RSA, ECDSA)
+verify_signature_by_type(hmac, Signature, _PackagePath, Metadata) ->
+    %% Verify HMAC signature
+    KeyId = maps:get(signing_key_id, Metadata, undefined),
+    Payload = maps:get(payload, Metadata, <<>>),
+    case get_signing_key(KeyId) of
+        undefined -> {error, {signing_key_not_found, KeyId}};
+        SecretKey ->
+            ExpectedSignature = crypto:mac(hmac, sha256, SecretKey, Payload),
+            case constant_time_compare(Signature, ExpectedSignature) of
+                0 -> {ok, #{algorithm => hmac_sha256, key_id => KeyId}};
+                _ -> {error, {signature_invalid, hmac_mismatch}}
+            end
+    end;
+
+verify_signature_by_type(ed25519, Signature, _PackagePath, Metadata) ->
+    %% Verify Ed25519 signature (available in OTP 26+)
+    PublicKey = maps:get(public_key, Metadata, undefined),
+    Payload = maps:get(payload, Metadata, <<>>),
+    case PublicKey of
+        undefined -> {error, missing_public_key};
+        _ ->
+            try
+                case crypto:verify(ed25519, none, Payload, Signature, PublicKey) of
+                    true -> {ok, #{algorithm => ed25519}};
+                    false -> {error, {signature_invalid, ed25519_verification_failed}}
+                end
+            catch
+                error:undef ->
+                    %% Fallback for older OTP versions
+                    {error, {unsupported_signature_type, ed25519_not_available}};
+                Error:Reason ->
+                    {error, {signature_verification_failed, {Error, Reason}}}
+            end
+    end;
+
+verify_signature_by_type(rsa_pss, Signature, _PackagePath, Metadata) ->
+    %% Verify RSA-PSS signature using public_key module
+    PublicKey = maps:get(public_key, Metadata, undefined),
+    Payload = maps:get(payload, Metadata, <<>>),
+    case PublicKey of
+        undefined -> {error, missing_public_key};
+        _ ->
+            try
+                %% Decode public key from DER format
+                DecodedKey = public_key:der_decode('RSAPublicKey', PublicKey),
+                case public_key:verify(Payload, sha256, Signature, DecodedKey) of
+                    true -> {ok, #{algorithm => rsa_pss}};
+                    false -> {error, {signature_invalid, rsa_verification_failed}}
+                end
+            catch
+                Error:Reason ->
+                    {error, {signature_verification_failed, {Error, Reason}}}
+            end
+    end;
+
+verify_signature_by_type(ecdsa, Signature, _PackagePath, Metadata) ->
+    %% Verify ECDSA signature
+    PublicKey = maps:get(public_key, Metadata, undefined),
+    Payload = maps:get(payload, Metadata, <<>>),
+    Curve = maps:get(curve, Metadata, secp256r1),
+    case PublicKey of
+        undefined -> {error, missing_public_key};
+        _ ->
+            try
+                %% ECDSA verification using public_key module
+                DecodedKey = decode_ecdsa_public_key(PublicKey, Curve),
+                case public_key:verify(Payload, sha256, Signature, DecodedKey) of
+                    true -> {ok, #{algorithm => ecdsa, curve => Curve}};
+                    false -> {error, {signature_invalid, ecdsa_verification_failed}}
+                end
+            catch
+                Error:Reason ->
+                    {error, {signature_verification_failed, {Error, Reason}}}
+            end
+    end;
+
+verify_signature_by_type(UnknownType, _Signature, _PackagePath, _Metadata) ->
+    {error, {unsupported_signature_type, UnknownType}}.
+
+%% @doc Get signing key from application environment
+get_signing_key(KeyId) when is_binary(KeyId) ->
+    KeyKey = {signing_key, KeyId},
+    case application:get_env(a2a_erl, KeyKey) of
+        {ok, Key} when is_binary(Key) -> Key;
+        _ -> undefined
+    end;
+get_signing_key(_) -> undefined.
+
+%% @doc Constant-time comparison to prevent timing attacks
+constant_time_compare(<<A:8, As/binary>>, <<B:8, Bs/binary>>) ->
+    (A bxor B) bor constant_time_compare(As, Bs);
+constant_time_compare(<<>>, <<>>) -> 0;
+constant_time_compare(_, _) -> 1.
+
+%% @doc Validate signature timestamp for replay attack prevention
+validate_signature_timestamp(Timestamp, _Metadata) ->
+    CurrentTime = erlang:system_time(millisecond),
+    %% Allow signatures within 24 hours
+    MaxAge = 24 * 60 * 60 * 1000,
+    Age = CurrentTime - Timestamp,
+    if
+        Age < 0 ->
+            {error, {signature_timestamp_future, Timestamp}};
+        Age > MaxAge ->
+            {error, {signature_expired, Age}};
+        true ->
+            {ok, #{timestamp_valid => true, age_ms => Age}}
+    end.
+
+%% @doc Decode ECDSA public key based on curve
+decode_ecdsa_public_key(KeyBin, secp256r1) ->
+    %% For P-256 curve, decode the EC point
+    try
+        public_key:der_decode('ECPoint', KeyBin)
+    catch
+        _:_ -> KeyBin
+    end;
+decode_ecdsa_public_key(KeyBin, _Curve) ->
+    KeyBin.
 
 check_operator_permissions(OperatorID, Operation) ->
     %% Check operator has required permissions for operation
@@ -620,9 +814,29 @@ check_operator_permissions(OperatorID, Operation) ->
     end.
 
 get_operator_permissions(OperatorID) ->
-    %% Placeholder for permission retrieval
-    %% In real implementation, this would query an authentication/authorization system
-    ["read", "write", "upgrade"].
+    %% Get operator permissions from role definitions
+    case application:get_env(a2a_erl, {operator_permissions, OperatorID}) of
+        {ok, Permissions} when is_list(Permissions) -> Permissions;
+        _ ->
+            %% Fallback: check role-based permissions
+            Role = get_operator_role(OperatorID),
+            permissions_for_role(Role)
+    end.
+
+get_operator_role(OperatorID) ->
+    case application:get_env(a2a_erl, {operator_role, OperatorID}) of
+        {ok, Role} -> Role;
+        undefined -> guest
+    end.
+
+permissions_for_role(admin) ->
+    ["read", "write", "upgrade", "rollback", "configure", "delete"];
+permissions_for_role(operator) ->
+    ["read", "write", "upgrade"];
+permissions_for_role(auditor) ->
+    ["read"];
+permissions_for_role(_) ->
+    [].
 
 %% Backup and Recovery Functions
 create_system_backup(State) ->
@@ -694,9 +908,62 @@ perform_comprehensive_health_check(State) ->
     }.
 
 perform_system_health_check() ->
-    %% Placeholder for actual system health checks
-    %% Would check CPU, memory, disk, network, etc.
-    healthy.
+    %% Perform actual system health checks
+    CPU = get_system_cpu(),
+    Memory = get_system_memory(),
+    Disk = get_system_disk(),
+    Processes = erlang:system_info(process_count),
+
+    Thresholds = #{
+        cpu_critical => 95.0,
+        cpu_warning => 80.0,
+        memory_critical => 95.0,
+        memory_warning => 80.0,
+        disk_warning => 90.0,
+        max_processes => 100000
+    },
+
+    CriticalChecks = [
+        CPU >= maps:get(cpu_critical, Thresholds),
+        Memory >= maps:get(memory_critical, Thresholds),
+        Processes >= maps:get(max_processes, Thresholds)
+    ],
+
+    WarningChecks = [
+        CPU >= maps:get(cpu_warning, Thresholds),
+        Memory >= maps:get(memory_warning, Thresholds),
+        Disk >= maps:get(disk_warning, Thresholds)
+    ],
+
+    case lists:any(fun(C) -> C end, CriticalChecks) of
+        true -> critical;
+        false ->
+            case lists:any(fun(W) -> W end, WarningChecks) of
+                true -> degraded;
+                false -> healthy
+            end
+    end.
+
+get_system_cpu() ->
+    case cpu_sup:util() of
+        {ok, CPU} when is_number(CPU) -> CPU * 100.0;
+        _ -> 0.0
+    end.
+
+get_system_memory() ->
+    MemoryData = erlang:memory(),
+    Total = maps:get(total, MemoryData, 1),
+    System = maps:get(system, MemoryData, 0),
+    case Total of
+        0 -> 0.0;
+        _ -> (System / Total) * 100.0
+    end.
+
+get_system_disk() ->
+    case disksup:get_disk_data() of
+        [{_Path, _Total, Percent} | _] -> Percent * 1.0;
+        _ -> 0.0
+    end.
 
 calculate_health_score(Indicators) ->
     %% Calculate weighted health score
@@ -778,8 +1045,18 @@ get_current_version() ->
     end.
 
 get_current_operator() ->
-    %% Placeholder for operator identification
-    "system".
+    %% Get current operator from process dictionary or environment
+    case get(operator_id) of
+        undefined ->
+            case get('$initial_call') of
+                {Module, _Func, _Arity} ->
+                    list_to_binary(atom_to_list(Module));
+                _ ->
+                    <<"system">>
+            end;
+        OperatorID ->
+            iolist_to_binary(OperatorID)
+    end.
 
 calculate_checksum(Data) when is_binary(Data) ->
     crypto:hash(sha256, Data);
@@ -900,5 +1177,40 @@ trigger_auto_rollback(TargetVersion, State) ->
     end.
 
 extract_package_files(PackagePath) ->
-    %% Placeholder for package file extraction
-    {ok, []}.
+    %% Extract package files based on format
+    Extension = filename:extension(PackagePath),
+    case Extension of
+        ".zip" ->
+            extract_zip_files(PackagePath);
+        ".tar.gz"; ".tgz" ->
+            extract_tar_files(PackagePath, gzip);
+        ".tar.bz2"; ".tbz" ->
+            extract_tar_files(PackagePath, bzip2);
+        _ ->
+            %% For unknown formats, list files in directory
+            case filelib:is_dir(PackagePath) of
+                true ->
+                    {ok, Files} = file:list_dir(PackagePath),
+                    {ok, [filename:join(PackagePath, F) || F <- Files]};
+                false ->
+                    {error, unknown_format}
+            end
+    end.
+
+extract_zip_files(PackagePath) ->
+    %% Extract zip file contents
+    case zip:table(PackagePath) of
+        {ok, FileList} ->
+            {ok, FileList};
+        {error, Reason} ->
+            {error, {zip_error, Reason}}
+    end.
+
+extract_tar_files(PackagePath, Compression) ->
+    %% Extract tar file contents
+    case erl_tar:table(PackagePath, [compressed]) of
+        {ok, FileList} ->
+            {ok, FileList};
+        {error, Reason} ->
+            {error, {tar_error, Reason}}
+    end.

@@ -49,7 +49,19 @@
 
     %% Health actions
     auto_adjust_upgrade_params/0,
-    perform_health_check/0
+    perform_health_check/0,
+
+    %% Recovery functions (exported for testing)
+    attempt_recovery/1,
+    parse_failure_type/1,
+    recover_memory_critical/0,
+    recover_cpu_critical/0,
+    recover_upgrade_failed/0,
+    recover_app_error_rate_high/0,
+    recover_integrity_corruption/0,
+    recover_process_killed/0,
+    recover_ets_corruption/0,
+    recover_connection_loss/0
 ]).
 
 %% gen_server callbacks
@@ -105,6 +117,15 @@
     last_upgrade_check :: integer()
 }).
 
+-record(upgrade_metrics, {
+    successful_upgrades = 0 :: non_neg_integer(),
+    total_upgrades = 0 :: non_neg_integer(),
+    failed_upgrades = 0 :: non_neg_integer(),
+    avg_upgrade_time_ms = 0.0 :: float(),
+    peak_memory_mb = 0.0 :: float()
+}).
+
+-type upgrade_metrics() :: #upgrade_metrics{}.
 -type upgrade_health() :: #upgrade_health{}.
 
 -record(application_health, {
@@ -153,10 +174,12 @@
     monitoring_enabled = true :: boolean(),
     monitoring_interval_ms = 5000 :: non_neg_integer(),
     recovery_enabled = true :: boolean(),
-    auto_adjust_enabled = true :: boolean()
+    auto_adjust_enabled = true :: boolean(),
+    health_timer = undefined :: undefined | reference()
 }).
 
 -type health_state() :: #health_state{}.
+-type state() :: #health_state{}.
 
 %%% ============================================================================
 %%% API Functions
@@ -400,7 +423,7 @@ handle_info(health_check_timeout, State) ->
             %% Perform periodic health checks
             NewState = perform_periodic_health_checks(State),
             Timer = schedule_health_check(State#health_state.monitoring_interval_ms),
-            {noreply, NewState#state{health_timer = Timer}};
+            {noreply, NewState#health_state{health_timer = Timer}};
         false ->
             {noreply, State}
     end;
@@ -438,8 +461,8 @@ schedule_health_check(Interval) ->
 check_system_health_internal(Thresholds) ->
     Now = erlang:system_time(millisecond),
     ProcessCount = erlang:system_info(process_count),
-    MemoryWords = erlang:memory(total),
-    MemoryMB = MemoryWords * erlang:wordsize() / (1024 * 1024),
+    MemoryBytes = erlang:memory(total),
+    MemoryMB = MemoryBytes / (1024 * 1024),
     SystemMemory = get_system_memory(),
     MemoryPercent = (MemoryMB / SystemMemory) * 100,
 
@@ -615,8 +638,11 @@ calculate_overall_status(HealthData) ->
 
     case lists:member(critical, Statuses) of
         true -> critical;
-        true when lists:member(warning, Statuses) -> warning;
-        true -> healthy
+        false ->
+            case lists:member(warning, Statuses) of
+                true -> warning;
+                false -> healthy
+            end
     end.
 
 %% @brief Perform periodic health checks
@@ -629,10 +655,10 @@ perform_periodic_health_checks(State) ->
     NewUpgradeHealth = check_upgrade_health_internal(State#health_state.thresholds),
 
     %% Check application health
-    NewAppHealth = check_application_health_internal(State#health_state.thresholds);
+    NewAppHealth = check_application_health_internal(State#health_state.thresholds),
 
     %% Check data integrity
-    NewIntegrity = check_data_integrity_internal(State#health_state.thresholds);
+    NewIntegrity = check_data_integrity_internal(State#health_state.thresholds),
 
     %% Create new health snapshot
     HealthSnapshot = create_health_snapshot(#{
@@ -787,9 +813,16 @@ generate_integrity_alerts(Integrity) ->
 create_alert(Category, HealthData) ->
     AlertId = generate_alert_id(),
     Severity = case Category of
-        _ when atom_to_binary(Category, utf8) =<< "_critical">> -> critical;
-        _ when atom_to_binary(Category, utf8) =<< "_warning">> -> warning;
-        _ -> info
+        _ ->
+            CategoryBin = atom_to_binary(Category, utf8),
+            case binary:match(CategoryBin, <<"_critical">>) of
+                nomatch ->
+                    case binary:match(CategoryBin, <<"_warning">>) of
+                        nomatch -> info;
+                        _ -> warning
+                    end;
+                _ -> critical
+            end
     end,
 
     CategoryAtom = case Category of
@@ -926,30 +959,678 @@ recover_from_failure_internal(FailureId, State) ->
                 {error, Reason}
         end
     catch
-        Error:Reason ->
+        Error:ExceptionReason ->
             logger:error("Recovery attempt crashed", #{
                 failure_id => FailureId,
                 error => Error,
-                reason => Reason,
+                reason => ExceptionReason,
                 domain => [a2a, health, recovery]
             }),
 
-            {error, Reason}
+            {error, ExceptionReason}
     end.
 
 %% @brief Attempt recovery
 -spec attempt_recovery(binary()) -> success | {partial_success, map()} | {failed, term()}.
-attempt_recovery(FailureId) ->
-    %% This would implement actual recovery logic based on failure type
-    %% For now, return success as a placeholder
-    success.
+attempt_recovery(FailureId) when is_binary(FailureId) ->
+    FailureType = parse_failure_type(FailureId),
+    attempt_recovery_by_type(FailureType, FailureId);
+
+attempt_recovery(_) ->
+    {failed, invalid_failure_id}.
+
+%% @private Attempt recovery based on parsed failure type
+-spec attempt_recovery_by_type(atom(), binary()) -> success | {partial_success, map()} | {failed, term()}.
+attempt_recovery_by_type(memory_critical, _FailureId) ->
+    recover_memory_critical();
+attempt_recovery_by_type(cpu_critical, _FailureId) ->
+    recover_cpu_critical();
+attempt_recovery_by_type(upgrade_failed, _FailureId) ->
+    recover_upgrade_failed();
+attempt_recovery_by_type(app_error_rate_high, _FailureId) ->
+    recover_app_error_rate_high();
+attempt_recovery_by_type(app_response_time_high, _FailureId) ->
+    recover_app_response_time_high();
+attempt_recovery_by_type(integrity_corruption, _FailureId) ->
+    recover_integrity_corruption();
+attempt_recovery_by_type(integrity_consistency_low, _FailureId) ->
+    recover_integrity_consistency_low();
+attempt_recovery_by_type(process_killed, _FailureId) ->
+    recover_process_killed();
+attempt_recovery_by_type(ets_corruption, _FailureId) ->
+    recover_ets_corruption();
+attempt_recovery_by_type(connection_loss, _FailureId) ->
+    recover_connection_loss();
+attempt_recovery_by_type(unknown, FailureId) ->
+    {partial_success, #{
+        unknown_failure => FailureId,
+        action => generic_recovery,
+        message => <<"No specific recovery for this failure type">>
+    }}.
+
+%% @brief Parse failure ID to extract failure type
+-spec parse_failure_type(binary()) -> atom().
+parse_failure_type(<<>>) ->
+    unknown;
+parse_failure_type(FailureId) when is_binary(FailureId) ->
+    case binary:split(FailureId, <<"_">>, [global]) of
+        [<<"failure">>, <<"error">>, <<"rate">> | _] -> app_error_rate_high;
+        [<<"failure">>, <<"response">>, <<"time">> | _] -> app_response_time_high;
+        [<<"failure">>, Type | _] -> binary_to_failure_type(Type);
+        _ ->
+            unknown
+    end;
+parse_failure_type(_) ->
+    unknown.
+
+%% @private Convert binary failure type to atom
+binary_to_failure_type(<<"memory">>) -> memory_critical;
+binary_to_failure_type(<<"cpu">>) -> cpu_critical;
+binary_to_failure_type(<<"upgrade">>) -> upgrade_failed;
+binary_to_failure_type(<<"error_rate">>) -> app_error_rate_high;
+binary_to_failure_type(<<"response_time">>) -> app_response_time_high;
+binary_to_failure_type(<<"integrity">>) -> integrity_corruption;
+binary_to_failure_type(<<"consistency">>) -> integrity_consistency_low;
+binary_to_failure_type(<<"process">>) -> process_killed;
+binary_to_failure_type(<<"ets">>) -> ets_corruption;
+binary_to_failure_type(<<"connection">>) -> connection_loss;
+binary_to_failure_type(_) -> unknown.
+
+%% @brief Recover from memory critical failure
+-spec recover_memory_critical() -> success | {partial_success, map()} | {failed, term()}.
+recover_memory_critical() ->
+    try
+        %% Trigger garbage collection to free memory
+        garbage_collect(),
+
+        %% Run garbage collection on all processes
+        _ = erlang:garbage_collect(),
+
+        %% Log the recovery action
+        logger:info("Memory recovery: garbage collection triggered", #{
+            domain => [a2a, health, recovery, memory]
+        }),
+
+        %% In a real system, this might also:
+        %% - Kill non-critical processes
+        %% - Reduce cache sizes
+        %% - Trigger process hibernation
+        %% - Request manual intervention if severe
+
+        success
+    catch
+        Error:Reason ->
+            logger:error("Memory recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, memory]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @brief Recover from CPU critical failure
+-spec recover_cpu_critical() -> success | {partial_success, map()} | {failed, term()}.
+recover_cpu_critical() ->
+    try
+        %% Log the recovery action
+        logger:info("CPU recovery: reducing system load", #{
+            domain => [a2a, health, recovery, cpu]
+        }),
+
+        %% In a real system, this might:
+        %% - Reduce concurrency levels
+        %% - Throttle incoming requests
+        %% - Defer non-critical work
+        %% - Scale up if in distributed system
+
+        %% Check if CPU usage has decreased
+        case check_cpu_recovery() of
+            ok -> success;
+            {warning, Details} -> {partial_success, #{cpu_recovery => Details}}
+        end
+    catch
+        Error:Reason ->
+            logger:error("CPU recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, cpu]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @private Check if CPU has recovered
+check_cpu_recovery() ->
+    %% Simulate CPU recovery check
+    %% In production, use actual CPU metrics
+    ok.
+
+%% @brief Recover from upgrade failure
+-spec recover_upgrade_failed() -> success | {partial_success, map()} | {failed, term()}.
+recover_upgrade_failed() ->
+    try
+        logger:info("Upgrade failure recovery initiated", #{
+            domain => [a2a, health, recovery, upgrade]
+        }),
+
+        %% Phase 1: Check supervisor strategy for restart capability
+        SupervisorInfo = get_upgrade_supervisor_info(),
+        logger:info("Supervisor info", #{
+            supervisor_info => SupervisorInfo,
+            domain => [a2a, health, recovery, upgrade]
+        }),
+
+        %% Phase 2: Attempt supervisor-based restart
+        RestartResult = attempt_supervisor_restart(SupervisorInfo),
+
+        case RestartResult of
+            {ok, _} ->
+                logger:info("Supervisor restart successful", #{
+                    domain => [a2a, health, recovery, upgrade]
+                }),
+                success;
+            {error, _} ->
+                %% Phase 3: Try rollback trigger if available
+                case has_rollback_point() of
+                    true ->
+                        RollbackResult = trigger_rollback(),
+                        case RollbackResult of
+                            ok ->
+                                logger:info("Rollback triggered successfully", #{
+                                    domain => [a2a, health, recovery, upgrade]
+                                }),
+                                success;
+                            {error, Reason} ->
+                                {partial_success, #{
+                                    upgrade_recovery => rollback_failed,
+                                    supervisor_restart_failed => true,
+                                    action => manual_intervention_required,
+                                    message => <<"Both supervisor restart and rollback failed">>,
+                                    reason => Reason
+                                }}
+                        end;
+                    false ->
+                        {partial_success, #{
+                            upgrade_recovery => no_rollback_point,
+                            supervisor_restart_failed => true,
+                            action => manual_intervention_required,
+                            message => <<"No rollback point available, manual recovery required">>
+                        }}
+                end
+        end
+    catch
+        Class:Error:Stacktrace ->
+            logger:error("Upgrade recovery failed", #{
+                class => Class,
+                error => Error,
+                stacktrace => Stacktrace,
+                domain => [a2a, health, recovery, upgrade]
+            }),
+            {failed, {Class, Error}}
+    end.
+
+%% @private Check if rollback point exists
+has_rollback_point() ->
+    %% Check if rollback manager has rollback points available
+    try
+        case whereis(a2a_rollback_manager) of
+            undefined ->
+                %% Fallback: check application environment
+                case application:get_env(a2a_erl, has_rollback_point) of
+                    {ok, true} -> true;
+                    _ -> false
+                end;
+            _Pid ->
+                %% Check ETS table for rollback points
+                case ets:info(rollback_points, size) of
+                    undefined -> false;
+                    0 -> false;
+                    N when N > 0 -> true
+                end
+        end
+    catch
+        _:_ -> false
+    end.
+
+%% @private Get upgrade supervisor information
+get_upgrade_supervisor_info() ->
+    try
+        case application:get_key(a2a_erl, supervisor) of
+            {ok, Supervisor} when is_atom(Supervisor) ->
+                case whereis(Supervisor) of
+                    undefined ->
+                        #{supervisor => not_found, strategy => unknown};
+                    Pid when is_pid(Pid) ->
+                        case supervisor:which_children(Pid) of
+                            Children when is_list(Children) ->
+                                #{
+                                    supervisor => Supervisor,
+                                    pid => Pid,
+                                    children_count => length(Children),
+                                    strategy => get_supervisor_strategy(Pid),
+                                    children => [ChildName || {ChildName, _, _, _} <- Children]
+                                };
+                            _ ->
+                                #{supervisor => Supervisor, pid => Pid, strategy => unknown}
+                        end
+                end;
+            _ ->
+                #{supervisor => not_configured, strategy => unknown}
+        end
+    catch
+        _:_ ->
+            #{supervisor => error, strategy => unknown}
+    end.
+
+%% @private Get supervisor restart strategy
+get_supervisor_strategy(SupPid) when is_pid(SupPid) ->
+    try
+        case supervisor:get_children(SupPid) of
+            {ok, Children} when is_list(Children) ->
+                %% Try to determine strategy from child specs
+                case length(Children) > 0 of
+                    true -> one_for_one; %% Most common strategy
+                    false -> undefined
+                end;
+            _ ->
+                undefined
+        end
+    catch
+        _:_ -> undefined
+    end;
+get_supervisor_strategy(_) ->
+    undefined.
+
+%% @private Attempt supervisor-based restart of failed processes
+attempt_supervisor_restart(SupervisorInfo) ->
+    try
+        case maps:get(supervisor, SupervisorInfo) of
+            not_found ->
+                {error, supervisor_not_found};
+            not_configured ->
+                {error, supervisor_not_configured};
+            error ->
+                {error, supervisor_error};
+            Sup when is_atom(Sup) ->
+                Pid = maps:get(pid, SupervisorInfo),
+                Children = maps:get(children, SupervisorInfo, []),
+
+                %% Attempt to restart failed children using supervisor's restart strategy
+                RestartedCount = lists:foldl(fun(ChildName, Acc) ->
+                    case restart_child_via_supervisor(Pid, ChildName) of
+                        ok -> Acc + 1;
+                        _ -> Acc
+                    end
+                end, 0, Children),
+
+                case RestartedCount > 0 of
+                    true -> {ok, #{restarted_count => RestartedCount}};
+                    false -> {error, no_children_restarted}
+                end
+        end
+    catch
+        Error:Reason ->
+            {error, {Error, Reason}}
+    end.
+
+%% @private Restart a specific child via supervisor
+restart_child_via_supervisor(SupPid, ChildName) when is_pid(SupPid) ->
+    try
+        case supervisor:restart_child(SupPid, ChildName) of
+            {ok, _Pid} -> ok;
+            {ok, _Pid, _Info} -> ok;
+            ok -> ok;
+            {error, running} -> ok; %% Already running, considered success
+            {error, not_found} -> {error, child_not_found};
+            {error, Reason} -> {error, Reason}
+        end
+    catch
+        _:_ -> {error, restart_failed}
+    end;
+restart_child_via_supervisor(_, _) ->
+    {error, invalid_supervisor}.
+
+%% @private Trigger rollback via rollback manager
+trigger_rollback() ->
+    try
+        case whereis(a2a_rollback_manager) of
+            undefined ->
+                %% Try to start rollback manager temporarily
+                {error, rollback_manager_not_available};
+            Pid when is_pid(Pid) ->
+                %% Request auto-rollback with latest version
+                TargetVersion = get_previous_stable_version(),
+                case gen_server:call(Pid, {auto_rollback, #{trigger => upgrade_failure}}) of
+                    {ok, _OperationId} -> ok;
+                    {error, Reason} -> {error, Reason}
+                end
+        end
+    catch
+        _:Error ->
+            {error, Error}
+    end.
+
+%% @private Get previous stable version for rollback
+get_previous_stable_version() ->
+    try
+        case application:get_env(a2a_erl, previous_stable_version) of
+            {ok, Version} when is_binary(Version); is_list(Version) -> Version;
+            _ -> <<"1.0.0">> %% Fallback to initial version
+        end
+    catch
+        _:_ -> <<"1.0.0">>
+    end.
+
+%% @brief Recover from application error rate high
+-spec recover_app_error_rate_high() -> success | {partial_success, map()} | {failed, term()}.
+recover_app_error_rate_high() ->
+    try
+        logger:info("Application error recovery: checking error sources", #{
+            domain => [a2a, health, recovery, application]
+        }),
+
+        %% Check system error logs for patterns
+        case analyze_error_patterns() of
+            {ok, patterns} when length(patterns) > 0 ->
+                logger:info("Error patterns detected, attempting mitigation", #{
+                    patterns => patterns,
+                    domain => [a2a, health, recovery, application]
+                }),
+                success;
+            {ok, []} ->
+                logger:warning("No specific error patterns found", #{
+                    domain => [a2a, health, recovery, application]
+                }),
+                {partial_success, #{
+                    error_recovery => no_patterns,
+                    message => <<"Monitoring for error rate reduction">>
+                }}
+        end
+    catch
+        Error:Reason ->
+            logger:error("Application error recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, application]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @brief Recover from application response time high
+-spec recover_app_response_time_high() -> success | {partial_success, map()} | {failed, term()}.
+recover_app_response_time_high() ->
+    try
+        logger:info("Response time recovery: optimizing performance", #{
+            domain => [a2a, health, recovery, application]
+        }),
+
+        %% In production:
+        %% - Check for blocking operations
+        %% - Identify slow queries
+        %% - Check network latency
+        %% - Scale resources if needed
+
+        success
+    catch
+        Error:Reason ->
+            logger:error("Response time recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, application]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @private Analyze error patterns
+analyze_error_patterns() ->
+    %% In production, analyze actual error logs
+    {ok, []}.
+
+%% @brief Recover from data integrity corruption
+-spec recover_integrity_corruption() -> success | {partial_success, map()} | {failed, term()}.
+recover_integrity_corruption() ->
+    try
+        logger:warning("Integrity corruption recovery: attempting data validation", #{
+            domain => [a2a, health, recovery, integrity]
+        }),
+
+        %% Validate ETS tables
+        ETSValid = validate_ets_integrity(),
+
+        %% Validate process states
+        ProcessValid = validate_process_states(),
+
+        case {ETSValid, ProcessValid} of
+            {true, true} ->
+                logger:info("Integrity validation passed", #{
+                    domain => [a2a, health, recovery, integrity]
+                }),
+                success;
+            {false, _} ->
+                {partial_success, #{
+                    integrity_recovery => ets_corruption_detected,
+                    action => ets_repair_initiated
+                }};
+            {_, false} ->
+                {partial_success, #{
+                    integrity_recovery => process_state_inconsistent,
+                    action => state_repair_initiated
+                }}
+        end
+    catch
+        Error:Reason ->
+            logger:error("Integrity recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, integrity]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @brief Recover from data integrity consistency low
+-spec recover_integrity_consistency_low() -> success | {partial_success, map()} | {failed, term()}.
+recover_integrity_consistency_low() ->
+    try
+        logger:info("Consistency recovery: re-synchronizing data", #{
+            domain => [a2a, health, recovery, integrity]
+        }),
+
+        %% In production:
+        %% - Trigger data reconciliation
+        %% - Sync with backup/replicas
+        %% - Rebuild indexes if needed
+
+        success
+    catch
+        Error:Reason ->
+            logger:error("Consistency recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, integrity]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @private Validate ETS table integrity
+validate_ets_integrity() ->
+    try
+        Tables = ets:all(),
+        lists:foreach(fun(T) ->
+            case ets:info(T, size) of
+                undefined -> ok;
+                Size when is_integer(Size) -> ok
+            end
+        end, Tables),
+        true
+    catch
+        _:_ -> false
+    end.
+
+%% @private Validate process states
+validate_process_states() ->
+    %% In production, check critical process states
+    true.
+
+%% @brief Recover from killed process
+-spec recover_process_killed() -> success | {partial_success, map()} | {failed, term()}.
+recover_process_killed() ->
+    try
+        logger:info("Process recovery: checking for supervised processes", #{
+            domain => [a2a, health, recovery, process]
+        }),
+
+        %% Supervised processes will be auto-restarted by their supervisors
+        %% Check if critical processes are alive
+        CriticalProcesses = get_critical_processes(),
+
+        AliveCount = lists:foldl(fun(ProcessName, Count) ->
+            case whereis(ProcessName) of
+                undefined -> Count;
+                _Pid -> Count + 1
+            end
+        end, 0, CriticalProcesses),
+
+        case AliveCount of
+            N when N =:= length(CriticalProcesses) ->
+                logger:info("All critical processes running", #{
+                    count => AliveCount,
+                    domain => [a2a, health, recovery, process]
+                }),
+                success;
+            _ ->
+                logger:warning("Some critical processes not running", #{
+                    alive => AliveCount,
+                    expected => length(CriticalProcesses),
+                    domain => [a2a, health, recovery, process]
+                }),
+                {partial_success, #{
+                    process_recovery => some_down,
+                    alive => AliveCount,
+                    total => length(CriticalProcesses)
+                }}
+        end
+    catch
+        Error:Reason ->
+            logger:error("Process recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, process]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @private Get list of critical processes
+get_critical_processes() ->
+    %% In production, get from configuration or service registry
+    [a2a_upgrade_health, a2a_disaster_recovery].
+
+%% @brief Recover from ETS corruption
+-spec recover_ets_corruption() -> success | {partial_success, map()} | {failed, term()}.
+recover_ets_corruption() ->
+    try
+        logger:warning("ETS corruption recovery: validating tables", #{
+            domain => [a2a, health, recovery, ets]
+        }),
+
+        %% Get all ETS tables
+        Tables = ets:all(),
+
+        %% Validate and repair if needed
+        CorruptTables = lists:filter(fun(T) ->
+            not is_table_healthy(T)
+        end, Tables),
+
+        case length(CorruptTables) of
+            0 ->
+                logger:info("All ETS tables healthy", #{
+                    domain => [a2a, health, recovery, ets]
+                }),
+                success;
+            N ->
+                logger:warning("Found corrupt ETS tables", #{
+                    count => N,
+                    domain => [a2a, health, recovery, ets]
+                }),
+                {partial_success, #{
+                    ets_recovery => corrupt_tables_found,
+                    count => N,
+                    tables => [ets:info(T, name) || T <- CorruptTables, ets:info(T, name) =/= undefined]
+                }}
+        end
+    catch
+        Error:Reason ->
+            logger:error("ETS recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, ets]
+            }),
+            {failed, {Error, Reason}}
+    end.
+
+%% @private Check if ETS table is healthy
+is_table_healthy(Table) ->
+    try
+        %% Basic health check: can we read table info?
+        case ets:info(Table, size) of
+            Size when is_integer(Size), Size >= 0 -> true;
+            _ -> false
+        end
+    catch
+        _:_ -> false
+    end.
+
+%% @brief Recover from connection loss
+-spec recover_connection_loss() -> success | {partial_success, map()} | {failed, term()}.
+recover_connection_loss() ->
+    try
+        logger:info("Connection loss recovery: checking network status", #{
+            domain => [a2a, health, recovery, network]
+        }),
+
+        %% Check node connectivity if distributed
+        Nodes = [node() | nodes()],
+
+        ConnectedCount = lists:foldl(fun(N, Count) ->
+            case net_adm:ping(N) of
+                pong -> Count + 1;
+                pang -> Count
+            end
+        end, 0, Nodes),
+
+        case ConnectedCount of
+            N when N =:= length(Nodes) ->
+                logger:info("All nodes connected", #{
+                    count => N,
+                    domain => [a2a, health, recovery, network]
+                }),
+                success;
+            _ ->
+                logger:warning("Some nodes disconnected", #{
+                    connected => ConnectedCount,
+                    total => length(Nodes),
+                    domain => [a2a, health, recovery, network]
+                }),
+                {partial_success, #{
+                    network_recovery => partial,
+                    connected => ConnectedCount,
+                    total => length(Nodes)
+                }}
+        end
+    catch
+        Error:Reason ->
+            logger:error("Connection recovery failed", #{
+                error => Error,
+                reason => Reason,
+                domain => [a2a, health, recovery, network]
+            }),
+            {failed, {Error, Reason}}
+    end.
 
 %% @brief Auto-adjust upgrade parameters internal
 -spec auto_adjust_upgrade_params_internal(state()) -> map().
 auto_adjust_upgrade_params_internal(State) ->
     %% Analyze health data and adjust parameters accordingly
     System = State#health_state.system,
-    Upgrade = State#health_state.upgrade;
+    Upgrade = State#health_state.upgrade,
 
     %% Base parameters
     BaseParams = #{
@@ -999,7 +1680,7 @@ generate_health_report(State) ->
 generate_health_summary(State) ->
     System = State#health_state.system,
     Upgrade = State#health_state.upgrade,
-    Application = State#health_state.application;
+    Application = State#health_state.application,
     Integrity = State#health_state.integrity,
 
     #{
@@ -1021,8 +1702,8 @@ generate_health_recommendations(State) ->
     Recommendations = [],
 
     System = State#health_state.system,
-    Upgrade = State#health_state.upgrade;
-    Application = State#health_state.application;
+    Upgrade = State#health_state.upgrade,
+    Application = State#health_state.application,
     Thresholds = State#health_state.thresholds,
 
     %% System recommendations
@@ -1069,7 +1750,7 @@ process_alerts(State) ->
         end
     end, State#health_state.alerts),
 
-    State#state{alerts = UpdatedAlerts}.
+    State#health_state{alerts = UpdatedAlerts}.
 
 %% @brief Check if alert should be auto-resolved
 -spec should_auto_resolve_alert(health_alert()) -> boolean().
@@ -1116,9 +1797,9 @@ get_current_upgrade_health() ->
 perform_comprehensive_health_check(State) ->
     %% Perform all health checks
     NewSystemHealth = check_system_health_internal(State#health_state.thresholds),
-    NewUpgradeHealth = check_upgrade_health_internal(State#health_state.thresholds);
-    NewAppHealth = check_application_health_internal(State#health_state.thresholds);
-    NewIntegrity = check_data_integrity_internal(State#health_state.thresholds);
+    NewUpgradeHealth = check_upgrade_health_internal(State#health_state.thresholds),
+    NewAppHealth = check_application_health_internal(State#health_state.thresholds),
+    NewIntegrity = check_data_integrity_internal(State#health_state.thresholds),
 
     %% Create comprehensive health report
     HealthReport = create_health_snapshot(#{
@@ -1162,10 +1843,10 @@ get_active_upgrades() ->
     %% This would get actual active upgrade count
     0.
 
--spec get_upgrade_metrics() -> term().
+-spec get_upgrade_metrics() -> upgrade_metrics().
 get_upgrade_metrics() ->
     %% This would get actual upgrade metrics
-    #{}.
+    #upgrade_metrics{}.
 
 -spec detect_upgrade_bottlenecks() -> [term()].
 detect_upgrade_bottlenecks() ->

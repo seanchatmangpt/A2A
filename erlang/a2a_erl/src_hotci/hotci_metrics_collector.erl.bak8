@@ -52,7 +52,7 @@
 
 %% State record
 -record(state, {
-    sessions = #{} :: map(),
+    sessions = #{} :: map(),         #{binary() => #metric_session{}},
     metrics = [] :: [#metric{}],
     upgrade_summaries = [] :: [#upgrade_summary{}],
     current_session :: binary() | undefined

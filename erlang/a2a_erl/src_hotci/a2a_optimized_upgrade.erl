@@ -55,7 +55,12 @@
     %% Health and performance
     get_upgrade_health/0,
     get_performance_metrics/0,
-    estimate_upgrade_resources/0
+    estimate_upgrade_resources/0,
+
+    %% Internal functions exported for testing
+    get_cpu_usage/0,
+    update_performance_metrics/1,
+    perform_monitoring_cycle/1
 ]).
 
 %% gen_server callbacks
@@ -80,7 +85,7 @@
     upgrade_strategy = gradual :: immediate | gradual | phased,
     memory_limit_mb = 1024 :: pos_integer(),
     max_process_time_ms = 30000 :: non_neg_integer(),
-    et_batch_size = 1000 :: pos_neg_integer(),
+    ets_batch_size = 1000 :: pos_integer(),
     enable_rollback = true :: boolean(),
     health_check_interval_ms = 5000 :: non_neg_integer()
 }).
@@ -97,7 +102,7 @@
     ets_upgraded = 0 :: non_neg_integer(),
     ets_total = 0 :: non_neg_integer(),
     failed_processes = [] :: [pid()],
-    failed_ets = [] :: [ets_table_name()],
+    failed_ets = [] :: [term()],
     bottlenecks = [] :: [term()],
     rollback_state :: undefined | rollback_state()
 }).
@@ -107,7 +112,7 @@
 -record(rollback_state, {
     checkpoint_time :: integer(),
     processes_state :: #{pid() => term()},
-    ets_state :: #{ets_table_name() => term()},
+    ets_state :: #{term() => term()},
     upgrade_config :: upgrade_config()
 }).
 
@@ -129,7 +134,7 @@
 -type process_upgrade_info() :: #process_upgrade_info{}.
 
 -record(ets_upgrade_info, {
-    table_name :: ets_table_name(),
+    table_name :: term(),
     record_count :: non_neg_integer(),
     upgrade_start_time :: integer(),
     upgrade_status :: pending | upgrading | completed | failed,
@@ -158,7 +163,7 @@
     config :: upgrade_config(),
     upgrade_state :: upgrade_state(),
     processes = #{} :: #{pid() => process_upgrade_info()},
-    ets_tables = #{} :: #{ets_table_name() => ets_upgrade_info()},
+    ets_tables = #{} :: #{term() => ets_upgrade_info()},
     performance :: performance_metrics(),
     active_upgrades = #{} :: #{binary() => term()},
     monitoring_timer :: reference() | undefined,
@@ -212,12 +217,12 @@ upgrade_processes(Pids, NewModule, Options) ->
     gen_server:call(?MODULE, {upgrade_processes, Pids, NewModule, Options}).
 
 %% @doc Upgrade specific ETS tables
--spec upgrade_ets_tables([ets_table_name()], module()) -> ok | {error, term()}.
+-spec upgrade_ets_tables([term()], module()) -> ok | {error, term()}.
 upgrade_ets_tables(TableNames, NewModule) ->
     upgrade_ets_tables(TableNames, NewModule, #{}).
 
 %% @doc Upgrade specific ETS tables with options
--spec upgrade_ets_tables([ets_table_name()], module(), map()) -> ok | {error, term()}.
+-spec upgrade_ets_tables([term()], module(), map()) -> ok | {error, term()}.
 upgrade_ets_tables(TableNames, NewModule, Options) ->
     gen_server:call(?MODULE, {upgrade_ets_tables, TableNames, NewModule, Options}).
 
@@ -287,7 +292,7 @@ init(Opts) ->
         upgrade_strategy = maps:get(strategy, Opts, gradual),
         memory_limit_mb = maps:get(memory_limit_mb, Opts, 1024),
         max_process_time_ms = maps:get(max_process_time_ms, Opts, 30000),
-        et_batch_size = maps:get(et_batch_size, Opts, 1000),
+        ets_batch_size = maps:get(ets_batch_size, Opts, 1000),
         enable_rollback = maps:get(enable_rollback, Opts, true),
         health_check_interval_ms = maps:get(health_check_interval_ms, Opts, 5000)
     },
@@ -476,7 +481,7 @@ handle_cast(resume_upgrade, State) ->
 
 handle_cast(cancel_upgrade, State) ->
     case State#state.upgrade_state#upgrade_state.status of
-        upgrading; pausing; preparing ->
+        Status when Status =:= upgrading; Status =:= pausing; Status =:= preparing ->
             cancel_upgrade_internal(State),
             {noreply, State};
         _ ->
@@ -536,7 +541,7 @@ apply_options(Config, Options) ->
         upgrade_strategy = maps:get(strategy, Options, Config#upgrade_config.upgrade_strategy),
         memory_limit_mb = maps:get(memory_limit_mb, Options, Config#upgrade_config.memory_limit_mb),
         max_process_time_ms = maps:get(max_process_time_ms, Options, Config#upgrade_config.max_process_time_ms),
-        et_batch_size = maps:get(et_batch_size, Options, Config#upgrade_config.et_batch_size),
+        ets_batch_size = maps:get(ets_batch_size, Options, Config#upgrade_config.ets_batch_size),
         enable_rollback = maps:get(enable_rollback, Options, Config#upgrade_config.enable_rollback),
         health_check_interval_ms = maps:get(health_check_interval_ms, Options, Config#upgrade_config.health_check_interval_ms)
     }.
@@ -609,7 +614,7 @@ start_phased_upgrade(UpgradeId, State) ->
     {ok, self()}.
 
 %% @doc Perform immediate upgrade
--spec perform_immediate_upgrade(binary(), [pid()], [ets_table_name()], state()) -> ok.
+-spec perform_immediate_upgrade(binary(), [pid()], [term()], state()) -> ok.
 perform_immediate_upgrade(UpgradeId, Processes, EtsTables, State) ->
     logger:info("Starting immediate upgrade", #{
         upgrade_id => UpgradeId,
@@ -619,7 +624,7 @@ perform_immediate_upgrade(UpgradeId, Processes, EtsTables, State) ->
     }),
 
     %% Upgrade all processes in parallel
-    UpgradedPids = upgrade_processes_parallel(Processes, State),
+    _UpgradedPids = upgrade_processes_parallel(Processes, State),
 
     %% Upgrade ETS tables
     upgrade_ets_tables_parallel(EtsTables, State),
@@ -748,7 +753,7 @@ upgrade_single_process(Pid, State) ->
 
 %% @doc Upgrade process code
 -spec upgrade_process_code(pid(), state()) -> ok | {error, term()}.
-upgrade_process_code(Pid, State) ->
+upgrade_process_code(_Pid, _State) ->
     %% This would implement the actual code_change logic
     %% For now, return success for demonstration
     ok.
@@ -762,13 +767,13 @@ get_process_memory(Pid) ->
     end.
 
 %% @doc Upgrade ETS tables in parallel
--spec upgrade_ets_tables_parallel([ets_table_name()], state()) -> ok.
+-spec upgrade_ets_tables_parallel([term()], state()) -> ok.
 upgrade_ets_tables_parallel(TableNames, State) ->
     Parent = self(),
     Ref = make_ref(),
 
     %% Spawn upgrade workers
-    Workers = lists:map fun(TableName) ->
+    Workers = lists:map(fun(TableName) ->
         spawn_link(fun() ->
             case upgrade_single_ets_table(TableName, State) of
                 success ->
@@ -783,7 +788,7 @@ upgrade_ets_tables_parallel(TableNames, State) ->
     collect_ets_upgrade_results(Ref, length(Workers), []).
 
 %% @doc Upgrade single ETS table
--spec upgrade_single_ets_table(ets_table_name(), state()) -> success | {error, term()}.
+-spec upgrade_single_ets_table(term(), state()) -> success | {error, term()}.
 upgrade_single_ets_table(TableName, State) ->
     try
         %% Get table info
@@ -828,14 +833,14 @@ upgrade_single_ets_table(TableName, State) ->
     end.
 
 %% @doc Upgrade ETS table
--spec upgrade_ets_table(ets_table_name(), state()) -> ok | {error, term()}.
-upgrade_ets_table(TableName, State) ->
+-spec upgrade_ets_table(term(), state()) -> ok | {error, term()}.
+upgrade_ets_table(_TableName, _State) ->
     %% This would implement the actual ETS upgrade logic
     %% For now, return success for demonstration
     ok.
 
 %% @doc Get table memory
--spec get_table_memory(ets_table_name()) -> non_neg_integer().
+-spec get_table_memory(term()) -> non_neg_integer().
 get_table_memory(TableName) ->
     case ets:info(TableName, memory) of
         undefined -> 0;
@@ -867,7 +872,7 @@ collect_upgrade_results(Ref, Expected, Results) ->
     end.
 
 %% @doc Collect ETS upgrade results
--spec collect_ets_upgrade_results(reference(), non_neg_integer(), [ets_table_name()]) -> [ets_table_name()].
+-spec collect_ets_upgrade_results(reference(), non_neg_integer(), [term()]) -> [term()].
 collect_ets_upgrade_results(Ref, Expected, Results) ->
     receive
         {ets_upgrade_success, Ref, TableName} ->
@@ -937,18 +942,17 @@ calculate_progress(State) ->
 %% @brief Check upgrade health
 -spec check_upgrade_health(state()) -> map().
 check_upgrade_health(State) ->
-    CurrentMemory = erlang:memory(total) * erlang:wordsize() / (1024 * 1024),
+    CurrentMemory = erlang:memory(total) / (1024 * 1024),
     MemoryPercent = (CurrentMemory / State#state.config#upgrade_config.memory_limit_mb) * 100,
 
     UpgradeState = State#state.upgrade_state,
     TotalFailures = length(UpgradeState#upgrade_state.failed_processes) +
                     length(UpgradeState#upgrade_state.failed_ets),
 
-    Status = case
-        MemoryPercent > 90 of
-            true -> critical;
-            true when MemoryPercent > 75 orelse TotalFailures > 5 -> warning;
-            true -> healthy
+    Status = if
+        MemoryPercent > 90 -> critical;
+        MemoryPercent > 75 orelse TotalFailures > 5 -> warning;
+        true -> healthy
     end,
 
     #{
@@ -963,8 +967,6 @@ check_upgrade_health(State) ->
 %% @brief Generate upgrade health recommendations
 -spec generate_upgrade_health_recommendations(atom(), float(), non_neg_integer()) -> [binary()].
 generate_upgrade_health_recommendations(Status, MemoryPercent, TotalFailures) ->
-    Recommendations = [],
-
     %% Memory recommendations
     Rec1 = case MemoryPercent > 85 of
         true -> <<"Consider reducing memory usage or increasing memory limit">>;
@@ -984,7 +986,8 @@ generate_upgrade_health_recommendations(Status, MemoryPercent, TotalFailures) ->
         healthy -> undefined
     end,
 
-    lists:compact([Rec1, Rec2, Rec3]).
+    %% Filter out undefined values manually for compatibility
+    [R || R <- [Rec1, Rec2, Rec3], R =/= undefined].
 
 %% @brief Estimate upgrade resources
 -spec estimate_resources_internal(state()) -> map().
@@ -1015,7 +1018,7 @@ perform_monitoring_cycle(State) ->
     NewPerformance = update_performance_metrics(State#state.performance),
 
     %% Check upgrade health
-    Health = check_upgrade_health(State),
+    _Health = check_upgrade_health(State),
 
     %% Log performance summary
     logger:debug("Upgrade monitoring cycle", #{
@@ -1035,19 +1038,59 @@ perform_monitoring_cycle(State) ->
 %% @brief Update performance metrics
 -spec update_performance_metrics(performance_metrics()) -> performance_metrics().
 update_performance_metrics(Perf) ->
-    CurrentMemory = erlang:memory(total) * erlang:wordsize() / (1024 * 1024),
+    CurrentMemory = erlang:memory(total) / (1024 * 1024),
 
     Perf#performance_metrics{
-        memory_usage => CurrentMemory,
-        cpu_usage => get_cpu_usage(),
-        peak_memory_mb => max(Perf#performance_metrics.peak_memory_mb, CurrentMemory)
+        memory_usage = CurrentMemory,
+        cpu_usage = get_cpu_usage(),
+        peak_memory_mb = max(Perf#performance_metrics.peak_memory_mb, CurrentMemory)
     }.
 
-%% @brief Get CPU usage
+%% @brief Get CPU usage using cpu_sup:util with fallback
+%% @doc Returns CPU usage as a percentage (0.0 to 100.0)
+%% Uses cpu_sup:util([detailed]) from the OS_Mon application
+%% Falls back to scheduler statistics if cpu_sup is unavailable
 -spec get_cpu_usage() -> float().
 get_cpu_usage() ->
-    %% This is a simplified version - in production, use OS-specific calls
-    0.0.
+    case cpu_sup:util([detailed]) of
+        {ok, CPUList} when is_list(CPUList), length(CPUList) > 0 ->
+            %% cpu_sup returns a list of CPU values, take the first one
+            [CPU | _] = CPUList,
+            CPU * 100.0;
+        {ok, CPU} when is_number(CPU) ->
+            %% Single CPU value returned
+            CPU * 100.0;
+        {error, Reason} ->
+            logger:warning("cpu_sup:util failed, using fallback: ~p", [Reason]),
+            fallback_cpu_usage();
+        _Other ->
+            %% Unknown response format, use fallback
+            fallback_cpu_usage()
+    end.
+
+%% @brief Fallback CPU usage calculation using scheduler statistics
+-spec fallback_cpu_usage() -> float().
+fallback_cpu_usage() ->
+    try
+        %% Use Erlang scheduler statistics as fallback
+        TotalRunQueue = erlang:statistics(run_queue),
+        Schedulers = erlang:system_info(schedulers_online),
+
+        %% Calculate a simple load indicator based on run queue
+        case Schedulers of
+            0 -> 0.0;
+            N when is_integer(N) andalso N > 0 ->
+                %% Run queue per scheduler, normalized to 0-100 range
+                LoadPerScheduler = TotalRunQueue / N,
+                min(LoadPerScheduler * 10.0, 100.0);
+            _ ->
+                0.0
+        end
+    catch
+        _:Error:Stack ->
+            logger:warning("Fallback CPU usage calculation failed: ~p~nStack: ~p", [Error, Stack]),
+            0.0
+    end.
 
 %% @brief Detect upgrade bottlenecks
 -spec detect_upgrade_bottlenecks(state()) -> [term()].
@@ -1055,7 +1098,7 @@ detect_upgrade_bottlenecks(State) ->
     Bottlenecks = [],
 
     %% Check slow processes
-    SlowProcesses = lists:filter(fun(Pid) ->
+    _SlowProcesses = lists:filter(fun(Pid) ->
         ProcessInfo = maps:get(Pid, State#state.processes, undefined),
         case ProcessInfo of
             undefined -> false;
@@ -1068,7 +1111,7 @@ detect_upgrade_bottlenecks(State) ->
     end, maps:keys(State#state.processes)),
 
     %% Check memory usage
-    CurrentMemory = erlang:memory(total) * erlang:wordsize() / (1024 * 1024),
+    CurrentMemory = erlang:memory(total) / (1024 * 1024),
     case CurrentMemory > State#state.config#upgrade_config.memory_limit_mb * 0.9 of
         true -> [memory_limit_exceeded | Bottlenecks];
         false -> Bottlenecks
@@ -1093,7 +1136,7 @@ get_all_processes() ->
     end, Processes).
 
 %% @brief Get all ETS tables
--spec get_all_ets_tables() -> [ets_table_name()].
+-spec get_all_ets_tables() -> [term()].
 get_all_ets_tables() ->
     %% Get ETS tables that should be upgraded
     Tables = ets:all(),
@@ -1116,13 +1159,13 @@ verify_phase_upgrade(PhaseNum) ->
 
 %% @brief Cancel upgrade internal
 -spec cancel_upgrade_internal(state()) -> ok.
-cancel_upgrade_internal(State) ->
+cancel_upgrade_internal(_State) ->
     logger:info("Cancelling upgrade", #{
         domain => [a2a, upgrade, system]
     }),
 
     %% Mark as failed and clean up
-    UpgradeState = State#state.upgrade_state#upgrade_state{
+    _UpgradeState = _State#state.upgrade_state#upgrade_state{
         status = failed,
         end_time = erlang:system_time(millisecond)
     },
@@ -1134,7 +1177,7 @@ cancel_upgrade_internal(State) ->
 
 %% @brief Rollback internal
 -spec rollback_internal(binary(), state()) -> {ok, pid()} | {error, term()}.
-rollback_internal(UpgradeId, State) ->
+rollback_internal(UpgradeId, _State) ->
     logger:info("Starting rollback", #{
         upgrade_id => UpgradeId,
         domain => [a2a, upgrade, system]
@@ -1146,7 +1189,7 @@ rollback_internal(UpgradeId, State) ->
 
 %% @brief Upgrade processes internal
 -spec upgrade_processes_internal([pid()], module(), state(), map()) -> {ok, [pid()]} | {error, term()}.
-upgrade_processes_internal(Pids, NewModule, State, Options) ->
+upgrade_processes_internal(Pids, NewModule, _State, _Options) ->
     %% This would implement the actual process upgrade logic
     logger:info("Upgrading processes", #{
         count => length(Pids),
@@ -1156,8 +1199,8 @@ upgrade_processes_internal(Pids, NewModule, State, Options) ->
     {ok, Pids}.
 
 %% @brief Upgrade ETS tables internal
--spec upgrade_ets_tables_internal([ets_table_name()], module(), state(), map()) -> ok | {error, term()}.
-upgrade_ets_tables_internal(TableNames, NewModule, State, Options) ->
+-spec upgrade_ets_tables_internal([term()], module(), state(), map()) -> ok | {error, term()}.
+upgrade_ets_tables_internal(TableNames, NewModule, _State, _Options) ->
     %% This would implement the actual ETS table upgrade logic
     logger:info("Upgrading ETS tables", #{
         count => length(TableNames),

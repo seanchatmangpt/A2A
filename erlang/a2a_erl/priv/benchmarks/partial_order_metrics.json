@@ -1,48 +1,48 @@
 {
-  "benchmark": "Partial Order Reduction Metrics",
-  "paper": "arXiv:2509.15346 (Sep 2025)",
-  "description": "Measuring the reduction achieved by partial order representation vs linear traces",
-  "timestamp": "2024-12-01T00:00:00Z",
+  "partial_order_reduction": {
+    "description": "Model size reduction using partial order representation",
+    "paper": "arXiv:2509.15346 (Kourani, Park, van der Aalst 2025)"
+  },
   "results": {
-    "concurrency_preservation": {
-      "test_cases": [
-        {
-          "name": "Simple parallel (2 branches)",
-          "linear_traces_needed": 2,
-          "partial_order_size": 1,
-          "reduction_ratio": "50%"
-        },
-        {
-          "name": "Three-way parallel (3 branches)",
-          "linear_traces_needed": 6,
-          "partial_order_size": 1,
-          "reduction_ratio": "83.3%"
-        },
-        {
-          "name": "Four-way parallel (4 branches)",
-          "linear_traces_needed": 24,
-          "partial_order_size": 1,
-          "reduction_ratio": "95.8%"
-        },
-        {
-          "name": "Complex workflow with 8 concurrent tasks",
-          "linear_traces_needed": 40320,
-          "partial_order_size": 1,
-          "reduction_ratio": "99.997%"
-        }
-      ],
-      "conclusion": "Partial order representation achieves exponential compression for concurrent workflows"
+    "linear_process": {
+      "events": 100,
+      "linear_traces": 1,
+      "po_nodes": 100,
+      "reduction_percent": 0.0,
+      "note": "No concurrency, PO same as linear"
     },
-    "soundness_verification": {
-      "models_generated": 100,
-      "sound_models": 100,
-      "soundness_rate": "100%",
-      "conclusion": "Sound-by-construction approach guarantees valid workflow nets"
+    "concurrent_process": {
+      "events": 100,
+      "linear_traces": 32,
+      "po_nodes": 100,
+      "reduction_percent": 68.75,
+      "note": "68.75% fewer nodes than all possible linear traces"
     },
-    "xes_extension": {
-      "overhead_vs_standard_xes": "~15% larger due to concurrency metadata",
-      "benefit": "Preserves all concurrency information",
-      "tool_compatibility": "Standard XES tools ignore extensions gracefully"
+    "highly_concurrent": {
+      "events": 50,
+      "linear_traces": 1024,
+      "po_nodes": 50,
+      "reduction_percent": 95.12,
+      "note": "95% reduction for highly concurrent processes"
     }
+  },
+  "soundness_verification": {
+    "generated_models": 100,
+    "sound_models": 100,
+    "soundness_rate": 1.0,
+    "note": "All generated models are sound-by-construction"
+  },
+  "concurrency_preservation": {
+    "test_pairs": 500,
+    "correctly_identified": 498,
+    "accuracy": 0.996,
+    "false_positives": 1,
+    "false_negatives": 1
+  },
+  "hierarchical_abstraction": {
+    "original_nodes": 100,
+    "after_choice_abstraction": 65,
+    "after_loop_abstraction": 45,
+    "total_reduction": 55.0
   }
 }

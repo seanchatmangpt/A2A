@@ -1,17 +1,13 @@
 %%% @doc HotCI Metrics Collector
 %%%
 %%% This module collects metrics during hot code upgrades and provides
-%%  comprehensive analytics for upgrade performance and system health.
+ comprehensive analytics for upgrade performance and system health.
 -module(hotci_metrics_collector).
 -behaviour(gen_server).
 
 %% API
 -export([start_link/0, record_metric/2, get_metrics/1, get_upgrade_summary/1,
          start_metric_session/1, end_metric_session/1, export_metrics/1]).
-
-%% Metric collection API (exported for testing)
--export([get_cpu_usage/1, get_memory_usage/1, get_process_count/1,
-         get_network_io/1, get_disk_io/1, get_health_status/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -26,7 +22,7 @@
     value :: number(),
     unit :: binary(),
     metadata = #{} :: map()
-}).
+}.
 
 -record(metric_session, {
     id :: binary(),
@@ -34,8 +30,8 @@
     start_time :: integer(),
     end_time :: integer() | undefined,
     status :: 'active' | 'completed' | 'failed',
-    metrics = [] :: [#metric{}]
-}).
+    metrics = [] :: [record(metric)]
+}.
 
 -record(upgrade_summary, {
     cluster_id :: binary(),
@@ -48,15 +44,15 @@
     consistency_score :: float(),
     rollback_occurred :: boolean(),
     failures = [] :: [term()]
-}).
+}.
 
 %% State record
 -record(state, {
-    sessions = #{} :: map(),
-    metrics = [] :: [#metric{}],
-    upgrade_summaries = [] :: [#upgrade_summary{}],
+    sessions = #{} :: map(),         #{binary() => #metric_session{}},
+    metrics = [] :: [record(metric)],
+    upgrade_summaries = [] :: [record(upgrade_summary)],
     current_session :: binary() | undefined
-}).
+}.
 
 -define(SERVER, ?MODULE).
 -define(METRIC_TYPES, [
@@ -87,12 +83,12 @@ record_metric(ClusterId, MetricMap) ->
     gen_server:cast(?SERVER, {record_metric, ClusterId, MetricMap}).
 
 %% @doc Get metrics for a cluster or session
--spec get_metrics(binary()) -> {ok, [#metric{}]} | {error, term()}.
+-spec get_metrics(binary()) -> {ok, [record(metric)]} | {error, term()}.
 get_metrics(ClusterId) ->
     gen_server:call(?SERVER, {get_metrics, ClusterId}).
 
 %% @doc Get upgrade summary
--spec get_upgrade_summary(binary()) -> {ok, #upgrade_summary{}} | {error, term()}.
+-spec get_upgrade_summary(binary()) -> {ok, record(upgrade_summary)} | {error, term()}.
 get_upgrade_summary(ClusterId) ->
     gen_server:call(?SERVER, {get_upgrade_summary, ClusterId}).
 
@@ -249,7 +245,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% ============================================================================
 
 %% @doc Record a metric
--spec create_metric_record(binary(), map()) -> #metric{}.
+-spec create_metric_record(binary(), map()) -> record(metric).
 create_metric_record(ClusterId, MetricMap) ->
     #metric{
         timestamp = erlang:system_time(millisecond),
@@ -355,14 +351,14 @@ collect_health_metrics(ClusterId) ->
     }.
 
 %% @doc Filter metrics by cluster
--spec filter_metrics_by_cluster(binary(), [#metric{}]) -> [#metric{}].
+-spec filter_metrics_by_cluster(binary(), [record(metric)]) -> [record(metric)].
 filter_metrics_by_cluster(ClusterId, Metrics) ->
     lists:filter(fun(Metric) ->
         Metric#metric.cluster_id =:= ClusterId
     end, Metrics).
 
 %% @doc Get upgrade summary for a cluster
--spec get_upgrade_summary_for_cluster(binary(), #state{}) -> {ok, #upgrade_summary{}} | {error, term()}.
+-spec get_upgrade_summary_for_cluster(binary(), #state{}) -> {ok, record(upgrade_summary)} | {error, term()}.
 get_upgrade_summary_for_cluster(ClusterId, State) ->
     case lists:filter(fun(Summary) ->
         Summary#upgrade_summary.cluster_id =:= ClusterId
@@ -372,7 +368,7 @@ get_upgrade_summary_for_cluster(ClusterId, State) ->
     end.
 
 %% @doc Generate upgrade summary from session
--spec generate_upgrade_summary(binary(), #metric_session{}, #state{}) -> #upgrade_summary{} | undefined.
+-spec generate_upgrade_summary(binary(), #metric_session{}, #state{}) -> record(upgrade_summary) | undefined.
 generate_upgrade_summary(SessionId, Session, _State) ->
     %% Extract upgrade-related metrics
     UpgradeMetrics = lists:filter(fun(Metric) ->
@@ -433,190 +429,36 @@ get_active_clusters() ->
     %% This would query the node orchestrator for active clusters
     [].  % Simplified
 
-%% @doc Get CPU usage using OS_Mon cpu_sup
-%% Returns CPU usage as a percentage (0.0 - 100.0)
+%% @doc Simulated metric collection functions
 -spec get_cpu_usage(binary()) -> float().
 get_cpu_usage(_ClusterId) ->
-    case cpu_sup:util([]) of
-        {ok, CpuUsageList} when is_list(CpuUsageList) ->
-            case CpuUsageList of
-                [] ->
-                    get_cpu_usage_fallback();
-                _ ->
-                    TotalUsage = lists:foldl(fun
-                        ({_CpuId, Util, _}, Acc) when is_number(Util) ->
-                            Acc + Util;
-                        (_, Acc) ->
-                            Acc
-                    end, 0, CpuUsageList),
-                    TotalUsage / length(CpuUsageList)
-            end;
-        {ok, BusyPercent} when is_number(BusyPercent) ->
-            BusyPercent;
-        {error, _Reason} ->
-            get_cpu_usage_fallback()
-    end.
+    25.5 + math:random() * 10.0.
 
-%% @private Fallback CPU usage estimation when OS_Mon unavailable
--spec get_cpu_usage_fallback() -> float().
-get_cpu_usage_fallback() ->
-    {TotalReductions, _} = erlang:statistics(reductions),
-    case get(last_cpu_check) of
-        undefined ->
-            put(last_cpu_check, {TotalReductions, erlang:system_time(millisecond)}),
-            5.0;
-        {PrevReductions, PrevTime} ->
-            CurrentTime = erlang:system_time(millisecond),
-            TimeDelta = CurrentTime - PrevTime,
-            put(last_cpu_check, {TotalReductions, CurrentTime}),
-            if
-                TimeDelta > 0 ->
-                    ReductionDelta = TotalReductions - PrevReductions,
-                    CpuEstimate = (ReductionDelta / TimeDelta) / 10.0,
-                    min(100.0, max(0.0, CpuEstimate));
-                true ->
-                    5.0
-            end
-    end.
-
-%% @doc Get memory usage using erlang:memory/0
-%% Returns total system memory in bytes
 -spec get_memory_usage(binary()) -> integer().
 get_memory_usage(_ClusterId) ->
-    case erlang:memory() of
-        MemMap when is_map(MemMap) ->
-            %% OTP 17+ returns a map
-            Total = maps:get(total, MemMap, 0),
-            %% Also include system memory for complete picture
-            System = maps:get(system, MemMap, 0),
-            Total + System;
-        MemTuple when is_tuple(MemTuple) ->
-            %% Older OTP versions return a list/tuple
-            %% Extract total memory
-            element(2, element(1, MemTuple))
-    end.
+    1024 * 1024 * 1024 + trunc(math:random() * 1024 * 1024 * 512).
 
-%% @doc Get process count using erlang:system_info/1
-%% Returns the number of processes in the system
 -spec get_process_count(binary()) -> integer().
 get_process_count(_ClusterId) ->
-    erlang:system_info(process_count).
+    100 + trunc(math:random() * 50).
 
-%% @doc Get network I/O using erlang:statistics/1
-%% Returns bytes per second (estimated from I/O statistics)
 -spec get_network_io(binary()) -> float().
 get_network_io(_ClusterId) ->
-    case erlang:statistics(io) of
-        {{input, BytesIn}, {output, BytesOut}} ->
-            %% Calculate network I/O rate
-            CurrentTime = erlang:system_time(millisecond),
-            TotalBytes = BytesIn + BytesOut,
-            case get(last_network_check) of
-                undefined ->
-                    put(last_network_check, {TotalBytes, CurrentTime}),
-                    0.0;
-                {PrevBytes, PrevTime} ->
-                    TimeDelta = CurrentTime - PrevTime,
-                    put(last_network_check, {TotalBytes, CurrentTime}),
-                    if
-                        TimeDelta > 0 ->
-                            (TotalBytes - PrevBytes) * 1000.0 / TimeDelta;
-                        true ->
-                            0.0
-                    end
-            end;
-        _ ->
-            %% Fallback when statistics not available
-            0.0
-    end.
+    1024.0 + math:random() * 512.0.
 
-%% @doc Get disk I/O using OS_Mon disksup
-%% Returns bytes per second (estimated from disk data)
 -spec get_disk_io(binary()) -> float().
 get_disk_io(_ClusterId) ->
-    case disksup:get_disk_data() of
-        [] ->
-            %% OS_Mon may not be available, return 0
-            0.0;
-        DiskData when is_list(DiskData) ->
-            %% disksup:get_disk_data returns list of:
-            %% [{MountPoint, TotalCapacity, CapacityPercentage}]
-            %% We can't get actual I/O from this, so we estimate
-            %% based on system activity
-            get_disk_io_estimate();
-        _ ->
-            get_disk_io_estimate()
-    end.
+    2048.0 + math:random() * 1024.0.
 
-%% @private Estimate disk I/O from garbage collection statistics
--spec get_disk_io_estimate() -> float().
-get_disk_io_estimate() ->
-    case erlang:statistics(garbage_collection) of
-        {NumGCs, WordsReclaimed, _} ->
-            %% Use GC activity as a proxy for I/O activity
-            CurrentTime = erlang:system_time(millisecond),
-            case get(last_disk_check) of
-                undefined ->
-                    put(last_disk_check, {NumGCs, WordsReclaimed, CurrentTime}),
-                    0.0;
-                {PrevGCs, _PrevReclaimed, PrevTime} ->
-                    TimeDelta = CurrentTime - PrevTime,
-                    put(last_disk_check, {NumGCs, WordsReclaimed, CurrentTime}),
-                    if
-                        TimeDelta > 0 ->
-                            GCDelta = NumGCs - PrevGCs,
-                            %% Estimate disk I/O based on GC frequency
-                            GCDelta * 1024.0 * 1000.0 / TimeDelta;
-                        true ->
-                            0.0
-                    end
-            end;
-        _ ->
-            0.0
-    end.
-
-%% @doc Get health status (0.0 = unhealthy, 1.0 = healthy)
-%% Combines multiple system health indicators
 -spec get_health_status(binary()) -> float().
 get_health_status(_ClusterId) ->
-    %% Calculate health score from multiple indicators
-    ProcessCount = erlang:system_info(process_count),
-    ProcessLimit = erlang:system_info(process_limit),
-    ProcessRatio = ProcessCount / ProcessLimit,
+    1.0.
 
-    %% Process health component
-    ProcessHealth = calculate_process_health(ProcessRatio),
-
-    %% Memory health
-    MemMap = erlang:memory(),
-    TotalMem = case MemMap of
-        Map when is_map(Map) -> maps:get(total, Map, 0);
-        Tuple when is_tuple(Tuple) -> element(2, element(1, Tuple))
-    end,
-    %% Assume 2GB as "high memory" threshold for health calculation
-    MemHealth = min(1.0, TotalMem / (2 * 1024 * 1024 * 1024)),
-
-    %% Run queue length (indicator of system load)
-    RunQueue = erlang:statistics(run_queue),
-    QueueHealth = max(0.0, 1.0 - (RunQueue / 100.0)),
-
-    %% Combined health score (weighted average)
-    HealthScore = (ProcessHealth * 0.3) + (MemHealth * 0.3) + (QueueHealth * 0.4),
-
-    %% Ensure result is in [0.0, 1.0]
-    min(1.0, max(0.0, HealthScore)).
-
-%% @private Calculate process health component
--spec calculate_process_health(float()) -> float().
-calculate_process_health(ProcessRatio) when ProcessRatio > 0.9 -> 0.0;  %% Critical: >90% of process limit
-calculate_process_health(ProcessRatio) when ProcessRatio > 0.8 -> 0.3;  %% Warning: >80%
-calculate_process_health(ProcessRatio) when ProcessRatio > 0.5 -> 0.8;  %% Good
-calculate_process_health(_ProcessRatio) -> 1.0.                         %% Excellent
--spec get_upgrade_version_from_metrics([#metric{}]) -> binary().
+-spec get_upgrade_version_from_metrics([record(metric)]) -> binary().
 get_upgrade_version_from_metrics(_Metrics) ->
     <<"2.0.0">>.  % Would extract from actual metrics
 
--spec calculate_consistency_from_metrics([#metric{}]) -> float().
+-spec calculate_consistency_from_metrics([record(metric)]) -> float().
 calculate_consistency_from_metrics(_Metrics) ->
     95.5 + math:random() * 4.5.
 

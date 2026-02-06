@@ -510,6 +510,247 @@ class CPNBridge:
             }
 
 
+def to_pm4py_petri_net(cpn_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert CPN JSON to PM4Py Petri net format.
+
+    This is a standalone function callable from Erlang via the Python bridge.
+    It performs the conversion from CPN (Colored Petri Net) JSON format to
+    PM4Py-compatible Petri net representation.
+
+    Reference: arXiv:2506.12238 - Berti, van der Aalst (Mar 2025)
+    "CPN-Py: Colored Petri Nets with Python/PM4Py Integration"
+
+    Args:
+        cpn_json: CPN in JSON format (dict with places, transitions, arcs)
+
+    Returns:
+        Dictionary containing:
+        - net: Petri net metadata (type, counts)
+        - places: List of place objects
+        - transitions: List of transition objects
+        - arcs: List of arc objects
+        - conversion_method: 'pm4py' if PM4Py available, 'native' otherwise
+    """
+    logger.info("Converting CPN to PM4Py Petri net format")
+
+    # Extract CPN components
+    places_data = cpn_json.get('places', [])
+    transitions_data = cpn_json.get('transitions', [])
+    arcs_data = cpn_json.get('arcs', [])
+
+    if PM4PY_AVAILABLE:
+        # Use PM4Py for full conversion
+        try:
+            return _convert_with_pm4py(places_data, transitions_data, arcs_data)
+        except Exception as e:
+            logger.warning(f"PM4Py conversion failed: {e}, falling back to native")
+            return _convert_native(places_data, transitions_data, arcs_data)
+    else:
+        # Use native conversion
+        logger.info("PM4Py not available, using native conversion")
+        return _convert_native(places_data, transitions_data, arcs_data)
+
+
+def _convert_with_pm4py(places_data, transitions_data, arcs_data) -> Dict[str, Any]:
+    """Convert using PM4Py library for full Petri net support."""
+    import pm4py.objects.petri_net.petri_net as pn
+
+    # Create PM4Py places
+    places = {}
+    for p_data in places_data:
+        place_id = p_data.get('id', '')
+        place_name = p_data.get('name', place_id)
+        pn_place = pn.Place(place_id, name=place_name)
+        places[place_id] = pn_place
+
+    # Create PM4Py transitions
+    transitions = {}
+    for t_data in transitions_data:
+        trans_id = t_data.get('id', '')
+        trans_name = t_data.get('name', trans_id)
+        pn_trans = pn.Transition(trans_id, name=trans_name)
+        transitions[trans_id] = pn_trans
+
+    # Create PM4Py arcs
+    arcs = []
+    for a_data in arcs_data:
+        source = a_data.get('source', '')
+        target = a_data.get('target', '')
+
+        if source in places and target in transitions:
+            # Place to transition arc
+            pn_arc = pn.PetriNet.Arc(places[source], transitions[target])
+            arcs.append(pn_arc)
+        elif source in transitions and target in places:
+            # Transition to place arc
+            pn_arc = pn.PetriNet.Arc(transitions[source], places[target])
+            arcs.append(pn_arc)
+
+    # Create the Petri net
+    net = pn.PetriNet(places.values(), transitions.values(), arcs)
+
+    # Return structured result
+    return {
+        'net': {
+            'type': 'pm4py_petri_net',
+            'place_count': len(places),
+            'transition_count': len(transitions),
+            'arc_count': len(arcs),
+            'pm4py_available': True
+        },
+        'places': [
+            {
+                'id': p.name,
+                'name': p.name,
+                'in_arcs': len(p.in_arcs),
+                'out_arcs': len(p.out_arcs)
+            }
+            for p in places.values()
+        ],
+        'transitions': [
+            {
+                'id': t.name,
+                'name': t.name,
+                'in_arcs': len(t.in_arcs),
+                'out_arcs': len(t.out_arcs)
+            }
+            for t in transitions.values()
+        ],
+        'arcs': [
+            {
+                'source': arc.source.name,
+                'target': arc.target.name,
+                'type': 'place_to_transition' if arc.source in places.values() else 'transition_to_place'
+            }
+            for arc in arcs
+        ],
+        'conversion_method': 'pm4py',
+        'timestamp': datetime.now().isoformat()
+    }
+
+
+def _convert_native(places_data, transitions_data, arcs_data) -> Dict[str, Any]:
+    """Convert using native Python (fallback when PM4Py unavailable)."""
+    # Convert places
+    places = []
+    for p_data in places_data:
+        places.append({
+            'id': p_data.get('id', ''),
+            'name': p_data.get('name', ''),
+            'initial_tokens': p_data.get('initialTokens', 0),
+            'color_set': p_data.get('colorSet', 'any')
+        })
+
+    # Convert transitions
+    transitions = []
+    for t_data in transitions_data:
+        transitions.append({
+            'id': t_data.get('id', ''),
+            'name': t_data.get('name', ''),
+            'guard': t_data.get('guard'),
+            'variables': t_data.get('variables', [])
+        })
+
+    # Convert arcs
+    arcs = []
+    for a_data in arcs_data:
+        arcs.append({
+            'source': a_data.get('source', ''),
+            'target': a_data.get('target', ''),
+            'expression': a_data.get('expression'),
+            'type': a_data.get('type', 'normal')
+        })
+
+    return {
+        'net': {
+            'type': 'native_petri_net',
+            'place_count': len(places),
+            'transition_count': len(transitions),
+            'arc_count': len(arcs),
+            'pm4py_available': PM4PY_AVAILABLE
+        },
+        'places': places,
+        'transitions': transitions,
+        'arcs': arcs,
+        'conversion_method': 'native',
+        'timestamp': datetime.now().isoformat()
+    }
+
+
+def erlang_port_main():
+    """
+    Main entry point for Erlang port communication.
+
+    Reads JSON commands from stdin and writes responses to stdout.
+    This allows Erlang to call Python functions via stdio.
+    """
+    import sys
+
+    logger.info("CPN Bridge: Erlang port mode started")
+
+    bridge = CPNBridge()
+
+    for line in sys.stdin:
+        try:
+            command = json.loads(line.strip())
+            result = process_erlang_command(bridge, command)
+            print(json.dumps(result))
+            sys.stdout.flush()
+        except json.JSONDecodeError as e:
+            error_result = {'status': 'error', 'message': f'Invalid JSON: {e}'}
+            print(json.dumps(error_result))
+            sys.stdout.flush()
+        except Exception as e:
+            error_result = {'status': 'error', 'message': str(e)}
+            print(json.dumps(error_result))
+            sys.stdout.flush()
+
+
+def process_erlang_command(bridge: CPNBridge, command: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process a command from Erlang.
+
+    Args:
+        bridge: CPNBridge instance
+        command: Command dictionary with 'type' and 'params'
+
+    Returns:
+        Result dictionary
+    """
+    cmd_type = command.get('type', '')
+    params = command.get('params', {})
+
+    if cmd_type == 'to_pm4py_petri_net':
+        cpn_json = params.get('cpn_json', {})
+        result = to_pm4py_petri_net(cpn_json)
+        return {'status': 'ok', 'result': result}
+
+    elif cmd_type == 'convert_yawl_to_cpn':
+        yawl_json = params.get('yawl_json', {})
+        cpn = bridge.convert_yawl_to_cpn(yawl_json)
+        return {'status': 'ok', 'cpn_json': json.loads(cpn.to_json())}
+
+    elif cmd_type == 'discover_process':
+        xes_path = params.get('xes_path')
+        result = bridge.discover_process_from_xes(xes_path)
+        return {'status': 'ok', 'result': result}
+
+    elif cmd_type == 'validate_cpn':
+        json_str = params.get('json_str', '{}')
+        result = bridge.validate_cpn_json(json_str)
+        return {'status': 'ok', 'result': result}
+
+    elif cmd_type == 'stochastic_replay':
+        xes_path = params.get('xes_path')
+        model_path = params.get('model_path', '')
+        result = bridge.stochastic_replay(xes_path, model_path)
+        return {'status': 'ok', 'result': result}
+
+    else:
+        return {'status': 'error', 'message': f'Unknown command type: {cmd_type}'}
+
+
 def main():
     """Main entry point for command-line usage."""
     import argparse
@@ -546,4 +787,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--erlang':
+        erlang_port_main()
+    else:
+        main()

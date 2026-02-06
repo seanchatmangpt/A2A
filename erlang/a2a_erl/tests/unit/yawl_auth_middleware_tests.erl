@@ -33,17 +33,17 @@ cleanup(_) ->
 create_token_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         UserId = <<"user-123">>,
-        Roles => [admin, user],
+        Roles = [admin, user],
         Token = yawl_auth_middleware:create_token(UserId, Roles),
         ?_assert(is_binary(Token)),
-        ?_assertEqual(3, length(binary:split(Token, <<$.">>)))  % Header.Payload.Signature
+        ?_assertEqual(3, length(binary:split(Token, <<$.>>)))  % Header.Payload.Signature
     end}.
 
 create_token_with_options_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         UserId = <<"user-456">>,
-        Roles => [viewer],
-        Options => #{ttl => 7200, issuer => <<"test-issuer">>},
+        Roles = [viewer],
+        Options = #{ttl => 7200, issuer => <<"test-issuer">>},
         Token = yawl_auth_middleware:create_token(UserId, Roles, Options),
         ?_assert(is_binary(Token)),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
@@ -54,7 +54,7 @@ create_token_with_options_test_() ->
 verify_token_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         UserId = <<"user-789">>,
-        Roles => [],
+        Roles = [],
         Token = yawl_auth_middleware:create_token(UserId, Roles),
         ?_assertMatch({ok, _}, yawl_auth_middleware:verify_token(Token)),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
@@ -63,14 +63,14 @@ verify_token_test_() ->
 
 verify_token_invalid_signature_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        InvalidToken => <<"invalid.token.here">>,
+        InvalidToken = <<"invalid.token.here">>,
         ?_assertMatch({error, _}, yawl_auth_middleware:verify_token(InvalidToken))
     end}.
 
 validate_token_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         UserId = <<"user-999">>,
-        Roles => [user],
+        Roles = [user],
         Token = yawl_auth_middleware:create_token(UserId, Roles),
         ?_assertMatch({ok, _}, yawl_auth_middleware:validate_token(Token))
     end}.
@@ -78,9 +78,9 @@ validate_token_test_() ->
 validate_token_expired_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         %% Create a token that's already expired
-        UserId => <<"user-expired">>,
-        Roles => [],
-        Options => #{ttl => -1},  %% Negative TTL means expired
+        UserId = <<"user-expired">>,
+        Roles = [],
+        Options = #{ttl => -1},  %% Negative TTL means expired
         Token = yawl_auth_middleware:create_token(UserId, Roles, Options),
         ?_assertEqual({error, token_expired}, yawl_auth_middleware:validate_token(Token))
     end}.
@@ -88,7 +88,7 @@ validate_token_expired_test_() ->
 get_user_id_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         UserId = <<"user-111">>,
-        Roles => [],
+        Roles = [],
         Token = yawl_auth_middleware:create_token(UserId, Roles),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
         ?_assertEqual(UserId, yawl_auth_middleware:get_user_id(Claims))
@@ -96,7 +96,7 @@ get_user_id_test_() ->
 
 get_roles_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        Roles => [admin, moderator, user],
+        Roles = [admin, moderator, user],
         Token = yawl_auth_middleware:create_token(<<"user-222">>, Roles),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
         RetrievedRoles = yawl_auth_middleware:get_roles(Claims),
@@ -106,7 +106,7 @@ get_roles_test_() ->
 
 check_permission_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        Permissions => [<<"workflow:read">>, <<"workflow:write">>],
+        Permissions = [<<"workflow:read">>, <<"workflow:write">>],
         Token = yawl_auth_middleware:create_token(<<"user-333">>, [], #{permissions => Permissions}),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
         ?_assertEqual(true, yawl_auth_middleware:check_permission(Claims, <<"workflow">>, <<"read">>)),
@@ -116,7 +116,7 @@ check_permission_test_() ->
 
 check_permission_wildcard_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        Permissions => [<<"*">>],
+        Permissions = [<<"*">>],
         Token = yawl_auth_middleware:create_token(<<"user-444">>, [], #{permissions => Permissions}),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
         ?_assertEqual(true, yawl_auth_middleware:check_permission(Claims, <<"anything">>, <<"any-action">>))
@@ -124,7 +124,7 @@ check_permission_wildcard_test_() ->
 
 check_permission_resource_wildcard_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        Permissions => [<<"workflow:*">>],
+        Permissions = [<<"workflow:*">>],
         Token = yawl_auth_middleware:create_token(<<"user-555">>, [], #{permissions => Permissions}),
         {ok, Claims} = yawl_auth_middleware:verify_token(Token),
         ?_assertEqual(true, yawl_auth_middleware:check_permission(Claims, <<"workflow">>, <<"any-action">>)),
@@ -150,8 +150,8 @@ token_not_expired_test_() ->
 
 refresh_token_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        UserId => <<"user-888">>,
-        Roles => [user],
+        UserId = <<"user-888">>,
+        Roles = [user],
         OldToken = yawl_auth_middleware:create_token(UserId, Roles, #{ttl => 3600}),
         ?_assertMatch({ok, _}, yawl_auth_middleware:refresh_token(OldToken)),
         {ok, NewToken} = yawl_auth_middleware:refresh_token(OldToken),
@@ -160,15 +160,15 @@ refresh_token_test_() ->
     end}.
 
 encode_base64url_test_() ->
-    Input => <<"test data">>,
+    Input = <<"test data">>,
     Encoded = yawl_auth_middleware:encode_base64url(Input),
-    ?_assert(is_binary(Encoded)),
-    ?_assertNotEqual(<<$+>>, (binary:match(Encoded, <<$+>>))),
-    ?_assertNotEqual(<<$/>>, (binary:match(Encoded, <<$/>>))),
-    ?_assertEqual(0, (byte_size(Encoded rem 4))).
+    [?_assert(is_binary(Encoded)),
+     ?_assertEqual(nomatch, binary:match(Encoded, <<$+>>)),
+     ?_assertEqual(nomatch, binary:match(Encoded, <<$/>>)),
+     ?_assertEqual(0, byte_size(Encoded) rem 4)].
 
 decode_base64url_test_() ->
-    Input => <<"test data">>,
+    Input = <<"test data">>,
     Encoded = yawl_auth_middleware:encode_base64url(Input),
     Decoded = yawl_auth_middleware:decode_base64url(Encoded),
-    ?_assertEqual(Input, Decoded).
+    [?_assertEqual(Input, Decoded)].

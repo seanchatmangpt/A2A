@@ -3,7 +3,7 @@
 %%% LLM Hallucination Detection for Process Models
 %%%
 %%% This module implements validation and hallucination detection for
-%%% LLM-generated process models, based on van der Aalst et al. (Sep 2025)
+%%% LLM-generated process models, based on Kourani, Antonov, van der Aalst (Sep 2025)
 %%% "Knowledge-Driven Hallucination in Process Modeling with LLMs".
 %%%
 %%% Key Concepts:
@@ -11,7 +11,7 @@
 %%% - Fidelity Assessment: Compare LLM models against XES traces
 %%% - Conflict Scenarios: Test with atypical vs standard process structures
 %%%
-%%% Reference: arXiv:2509.15336 (Sep 2025)
+%%% Reference: arXiv:2509.15336 (Sep 2025) - Kourani, Antonov, van der Aalst
 %%%
 %%% @end
 %%%-------------------------------------------------------------------

@@ -3,7 +3,7 @@
 %%% Advanced Reachability Analysis for YAWL Workflows
 %%%
 %%% This module implements O(P² + T²) reachability analysis for acyclic
-%%% free-choice nets, based on van der Aalst et al. (2026) "Reachability
+%%% free-choice nets, based on Thomas M. Prinz (2026) "Reachability
 %%% Diagnostics in Workflow Nets".
 %%%
 %%% Key Concepts:
@@ -12,7 +12,7 @@
 %%% - Diverging Transitions: Identify transitions that "produced" concurrent tokens
 %%% - Post-Dominance Frontiers: From compiler construction for efficient computation
 %%%
-%%% Reference: arXiv:2602.02447 (Feb 2026)
+%%% Reference: arXiv:2602.02447 (Feb 2026) - Thomas M. Prinz
 %%% @end
 %%%-------------------------------------------------------------------
 
@@ -42,7 +42,9 @@
     verify_acyclic_free_choice/1,
     structural_conflict_analysis/1,
     s_component_analysis/1,
-    compute_state_space_with_diagnostics/2
+    compute_state_space_with_diagnostics/2,
+    detect_cycles_in_net/1,
+    compute_all_reachable_markings/2
 ]).
 
 %% Include type definitions
@@ -60,6 +62,7 @@
 -type transition() :: atom().
 -type place_set() :: sets:set(place()).
 -type transition_set() :: sets:set(transition()).
+-type reason() :: atom() | string().
 -type net_info() :: #{
     places := [place()],
     transitions := [transition()],
@@ -175,7 +178,8 @@ handle_call({is_reachable, NetMod, TargetMarking}, _From, State) ->
         undefined ->
             Result = do_is_reachable(NetMod, TargetMarking),
             NewStats = maps:update_with(analyses, fun(V) -> V + 1 end, 1, State),
-            {reply, Result, State#{cache => maps:put(CacheKey, Result, State#state.cache),
+            CurrentCache = maps:get(cache, State, #{}),
+            {reply, Result, State#{cache => maps:put(CacheKey, Result, CurrentCache),
                                  statistics => NewStats}};
         CachedResult ->
             NewStats = maps:update_with(cache_hits, fun(V) -> V + 1 end, 1, State),
@@ -358,8 +362,8 @@ are_places_concurrent(NetInfo, Place1, Place2) ->
     %% For free-choice nets: places are concurrent if they're not in the same
     %% preset of any transition (no structural conflict)
 
-    Postset1 = maps:get(Place1, NetInfo#{}.postset, []),
-    Postset2 = maps:get(Place2, NetInfo#{}.postset, []),
+    Postset1 = maps:get(Place1, maps:get(postset, NetInfo, []), []),
+    Postset2 = maps:get(Place2, maps:get(postset, NetInfo, []), []),
 
     %% Check if there's a shared transition in postset (structural conflict)
     SharedTransitions = sets:to_list(
@@ -431,7 +435,7 @@ do_diverging_transitions(NetMod, Marking) ->
     lists:usort(
         lists:flatmap(
             fun(Place) ->
-                maps:get(Place, NetInfo#{}.postset, [])
+                maps:get(Place, maps:get(postset, NetInfo, []), [])
             end,
             TokenPlaces
         )
@@ -471,8 +475,8 @@ do_get_diagnostics(NetMod, TargetMarking) ->
 
     #{
         net_info => #{
-            place_count => length(NetInfo#{}.places),
-            transition_count => length(NetInfo#{}.transitions),
+            place_count => length(maps:get(places, NetInfo, [])),
+            transition_count => length(maps:get(transitions, NetInfo, [])),
             is_acyclic => is_acyclic(NetInfo)
         },
         target_marking => TargetMarking,
@@ -491,8 +495,8 @@ reachability_op2(NetInfo, TargetMarking) ->
     %% 2. Compute post-dominance frontiers
     %% 3. Verify structural constraints
 
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
+    Places = maps:get(places, NetInfo, []),
+    Transitions = maps:get(transitions, NetInfo, []),
 
     %% Step 1: Check admissibility of target marking
     AdmissibleResult = is_marking_admissible(NetInfo, TargetMarking),
@@ -533,9 +537,9 @@ do_compute_pdf(NetMod) ->
 
 compute_post_dominance_frontiers_impl(NetInfo) ->
     %% Build control flow graph and compute post-dominance
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo, []),
+    Transitions = maps:get(transitions, NetInfo, []),
+    Postset = maps:get(postset, NetInfo, []),
 
     %% Compute post-dominance using iterative algorithm
     %% PDF(n) = {m | n post-dominates a predecessor of m, but not m itself}
@@ -568,8 +572,8 @@ compute_pdf_step(_Places, _Transitions, _Postset, ExitNode, PDF) ->
 %% @private
 %% Find the exit (sink) node of the net
 find_exit_node(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo, []),
+    Postset = maps:get(postset, NetInfo, #{}),
 
     %% Exit place has no outgoing transitions
     ExitPlaces = lists:filter(
@@ -627,8 +631,8 @@ verify_afc_net(NetInfo) ->
 %% Check free-choice property: for any two places, if their postsets intersect,
 %% then they must have identical postsets
 check_free_choice_property(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo, []),
+    Postset = maps:get(postset, NetInfo, []),
 
     %% Check all pairs of places
     PlacePairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
@@ -649,8 +653,8 @@ check_free_choice_property(NetInfo) ->
 %% @private
 %% Find free-choice violations
 find_fc_violations(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo, []),
+    Postset = maps:get(postset, NetInfo, []),
 
     PlacePairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
 
@@ -681,7 +685,7 @@ do_structural_conflict_analysis(NetMod) ->
 
 find_structural_conflicts(NetInfo) ->
     %% Conflicts occur when multiple places share a transition in their postset
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo, []),
 
     %% Group places by their postsets
     PostsetGroups = maps:fold(
@@ -731,9 +735,9 @@ do_s_component_analysis(NetMod) ->
 %% Check if net is acyclic
 is_acyclic(NetInfo) ->
     %% Build adjacency and check for cycles using DFS
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
-    Preset = NetInfo#{}.preset,
+    Places = maps:get(places, NetInfo, []),
+    Transitions = maps:get(transitions, NetInfo, []),
+    Preset = maps:get(preset, NetInfo, #{}),
 
     %% Simplified acyclicity check - in full version would do proper DFS
     %% For now, assume acyclic if no self-loops
@@ -752,22 +756,123 @@ is_acyclic(NetInfo) ->
 %% Get the postset of a transition
 get_transition_postset(Transition, NetInfo) ->
     %% Find all places that have this transition in their postset
+    Postset = maps:get(postset, NetInfo, #{}),
     maps:fold(
-        fun(Place, Postset, Acc) ->
-            case lists:member(Transition, Postset) of
+        fun(Place, PostsetList, Acc) ->
+            case lists:member(Transition, PostsetList) of
                 true -> [Place | Acc];
                 false -> Acc
             end
         end,
         [],
-        NetInfo#{}.postset
+        Postset
     ).
 
 %% @private
 %% Find cycle violations
-find_cycle_violations(_NetInfo) ->
-    %% Placeholder - would implement cycle detection
-    [].
+find_cycle_violations(NetInfo) ->
+    detect_cycles_in_net(NetInfo).
+
+%% @doc Detect cycles in a workflow net using DFS
+%% Returns a list of cycles, where each cycle is a list of nodes (places and transitions)
+-spec detect_cycles_in_net(map()) -> [[atom()]].
+detect_cycles_in_net(NetInfo) ->
+    Places = maps:get(places, NetInfo, []),
+    Transitions = maps:get(transitions, NetInfo, []),
+    Preset = maps:get(preset, NetInfo, #{}),
+    Postset = maps:get(postset, NetInfo, #{}),
+
+    %% Build adjacency list for the directed graph
+    %% Edge from place p to transition t if p in preset(t)
+    %% Edge from transition t to place p if p in postset(t)
+    Graph = build_graph(Places, Transitions, Preset, Postset),
+
+    %% Find all cycles using DFS
+    AllNodes = Places ++ Transitions,
+    Visited = sets:new(),
+    RecStack = sets:new(),
+
+    Cycles = find_cycles_dfs(AllNodes, Graph, Visited, RecStack, []),
+    Cycles.
+
+%% @private Build adjacency list for the graph
+build_graph(Places, Transitions, Preset, Postset) ->
+    %% Add edges: place -> transition (place in preset of transition)
+    PlaceToTrans = lists:foldl(
+        fun(Place, Acc) ->
+            Outgoing = lists:filter(
+                fun(T) -> lists:member(Place, maps:get(T, Preset, [])) end,
+                Transitions
+            ),
+            Acc#{Place => Outgoing}
+        end,
+        #{},
+        Places
+    ),
+
+    %% Add edges: transition -> place (place in postset of transition)
+    TransToPlace = lists:foldl(
+        fun(Transition, Acc) ->
+            Outgoing = lists:filter(
+                fun(P) -> lists:member(Transition, maps:get(P, Postset, [])) end,
+                Places
+            ),
+            Acc#{Transition => Outgoing}
+        end,
+        PlaceToTrans,
+        Transitions
+    ),
+    TransToPlace.
+
+%% @private DFS-based cycle detection
+find_cycles_dfs([], _Graph, _Visited, _RecStack, Acc) ->
+    lists:usort(fun(A, B) -> A =< B end, Acc);
+find_cycles_dfs([Node | Rest], Graph, Visited, RecStack, Acc) ->
+    case sets:is_element(Node, Visited) of
+        true ->
+            find_cycles_dfs(Rest, Graph, Visited, RecStack, Acc);
+        false ->
+            {NewVisited, NewAcc} = dfs_visit(Node, Graph, Visited, RecStack, [Node], Acc),
+            find_cycles_dfs(Rest, Graph, NewVisited, RecStack, NewAcc)
+    end.
+
+%% @private Visit a node during DFS
+dfs_visit(Node, Graph, Visited, RecStack, Path, Acc) ->
+    NewVisited = sets:add_element(Node, Visited),
+    Neighbors = maps:get(Node, Graph, []),
+
+    lists:foldl(
+        fun(Neighbor, {V, A}) ->
+            case sets:is_element(Neighbor, RecStack) of
+                true ->
+                    %% Found a cycle - extract it from the current path
+                    Cycle = extract_cycle(Path ++ [Neighbor], Neighbor),
+                    {V, [Cycle | A]};
+                false ->
+                    case sets:is_element(Neighbor, V) of
+                        true ->
+                            {V, A};
+                        false ->
+                            NewRecStack = sets:add_element(Neighbor, RecStack),
+                            dfs_visit(Neighbor, Graph, V, NewRecStack, Path ++ [Neighbor], A)
+                    end
+            end
+        end,
+        {NewVisited, Acc},
+        Neighbors
+    ).
+
+%% @private Extract cycle from path when a back edge is found
+extract_cycle(Path, StartNode) ->
+    %% Find the start node in the path and return from there to end
+    case lists:reverse(Path) of
+        [] -> [];
+        RevPath ->
+            case lists:dropwhile(fun(N) -> N =/= StartNode end, RevPath) of
+                [] -> [];
+                Cycle -> lists:reverse(Cycle)
+            end
+    end.
 
 %% @private
 %% Compute state space with diagnostics
@@ -844,7 +949,7 @@ get_initial_marking(NetMod) ->
 
 %% @private
 get_initial_marking_from_net(NetInfo) ->
-    NetMod = NetInfo#{}.net_module,
+    NetMod = maps:get(net_module, NetInfo),
     lists:foldl(
         fun(P, Acc) ->
             case NetMod:init_marking(P, []) of
@@ -853,7 +958,7 @@ get_initial_marking_from_net(NetInfo) ->
             end
         end,
         #{},
-        NetInfo#{}.places
+        maps:get(places, NetInfo, [])
     ).
 
 %% @private
@@ -873,6 +978,97 @@ build_initial_marking(NetMod, UsrInfo) ->
 
 %% @private
 %% Compute all reachable markings (for small nets)
-compute_all_reachable_markings(_NetInfo, InitialMarking) ->
-    %% Placeholder - would implement full state space exploration
-    [InitialMarking].
+%% Uses BFS to explore the full state space
+compute_all_reachable_markings(NetInfo, InitialMarking) ->
+    do_compute_state_space_bfs([InitialMarking], NetInfo, [InitialMarking], sets:new()).
+
+%% @private BFS-based state space exploration
+do_compute_state_space_bfs([], _NetInfo, Acc, _Visited) ->
+    lists:reverse(Acc);
+do_compute_state_space_bfs([CurrentMarking | Rest], NetInfo, Acc, Visited) ->
+    %% Find all successor markings
+    Successors = compute_successors(CurrentMarking, NetInfo),
+
+    %% Filter unvisited markings
+    {NewMarkings, NewVisited} = lists:foldl(
+        fun(Successor, {M, V}) ->
+            MarkingKey = lists:sort(maps:to_list(Successor)),
+            case sets:is_element(MarkingKey, V) of
+                true ->
+                    {M, V};
+                false ->
+                    {[Successor | M], sets:add_element(MarkingKey, V)}
+            end
+        end,
+        {[], Visited},
+        Successors
+    ),
+
+    %% Continue BFS
+    do_compute_state_space_bfs(Rest ++ NewMarkings, NetInfo, NewMarkings ++ Acc, NewVisited).
+
+%% @private Compute all successor markings for a given marking
+compute_successors(Marking, NetInfo) ->
+    Transitions = maps:get(transitions, NetInfo, []),
+    Preset = maps:get(preset, NetInfo, #{}),
+    Postset = maps:get(postset, NetInfo, #{}),
+
+    %% Find all enabled transitions
+    EnabledTransitions = lists:filter(
+        fun(T) -> is_transition_enabled(T, Marking, Preset) end,
+        Transitions
+    ),
+
+    %% Fire each enabled transition to get successor markings
+    lists:foldl(
+        fun(T, Acc) ->
+            case fire_transition(T, Marking, Preset, Postset) of
+                {ok, SuccessorMarking} -> [SuccessorMarking | Acc];
+                {error, _} -> Acc
+            end
+        end,
+        [],
+        EnabledTransitions
+    ).
+
+%% @private Check if a transition is enabled in a marking
+is_transition_enabled(Transition, Marking, Preset) ->
+    case maps:get(Transition, Preset, []) of
+        [] -> false;
+        InputPlaces ->
+            lists:all(fun(P) ->
+                maps:get(P, Marking, []) =/= []
+            end, InputPlaces)
+    end.
+
+%% @private Fire a transition to produce a successor marking
+fire_transition(Transition, Marking, Preset, Postset) ->
+    %% Consume tokens from input places
+    InputPlaces = maps:get(Transition, Preset, []),
+    Consumed = lists:foldl(
+        fun(P, Acc) ->
+            Tokens = maps:get(P, Marking, []),
+            case Tokens of
+                [Token | Rest] -> Acc#{P => Rest};
+                _ -> Acc#{P => []}
+            end
+        end,
+        Marking,
+        InputPlaces
+    ),
+
+    %% Produce tokens to output places
+    OutputPlaces = lists:filter(
+        fun(P) -> lists:member(Transition, maps:get(P, Postset, [])) end,
+        maps:keys(Marking)
+    ),
+    Produced = lists:foldl(
+        fun(P, Acc) ->
+            CurrentTokens = maps:get(P, Acc, []),
+            Acc#{P => [token | CurrentTokens]}
+        end,
+        Consumed,
+        OutputPlaces
+    ),
+
+    {ok, Produced}.

@@ -26,7 +26,7 @@
     value :: number(),
     unit :: binary(),
     metadata = #{} :: map()
-}).
+});
 
 -record(metric_session, {
     id :: binary(),
@@ -34,8 +34,8 @@
     start_time :: integer(),
     end_time :: integer() | undefined,
     status :: 'active' | 'completed' | 'failed',
-    metrics = [] :: [#metric{}]
-}).
+    metrics = [] :: [record(metric)]
+});
 
 -record(upgrade_summary, {
     cluster_id :: binary(),
@@ -48,15 +48,15 @@
     consistency_score :: float(),
     rollback_occurred :: boolean(),
     failures = [] :: [term()]
-}).
+});
 
 %% State record
 -record(state, {
-    sessions = #{} :: map(),
-    metrics = [] :: [#metric{}],
-    upgrade_summaries = [] :: [#upgrade_summary{}],
+    sessions = #{} :: map(),         #{binary() => #metric_session{}},
+    metrics = [] :: [record(metric)],
+    upgrade_summaries = [] :: [record(upgrade_summary)],
     current_session :: binary() | undefined
-}).
+});
 
 -define(SERVER, ?MODULE).
 -define(METRIC_TYPES, [
@@ -87,7 +87,7 @@ record_metric(ClusterId, MetricMap) ->
     gen_server:cast(?SERVER, {record_metric, ClusterId, MetricMap}).
 
 %% @doc Get metrics for a cluster or session
--spec get_metrics(binary()) -> {ok, [#metric{}]} | {error, term()}.
+-spec get_metrics(binary()) -> {ok, [record(metric)]} | {error, term()}.
 get_metrics(ClusterId) ->
     gen_server:call(?SERVER, {get_metrics, ClusterId}).
 
@@ -249,7 +249,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% ============================================================================
 
 %% @doc Record a metric
--spec create_metric_record(binary(), map()) -> #metric{}.
+-spec create_metric_record(binary(), map()) -> record(metric).
 create_metric_record(ClusterId, MetricMap) ->
     #metric{
         timestamp = erlang:system_time(millisecond),
@@ -355,7 +355,7 @@ collect_health_metrics(ClusterId) ->
     }.
 
 %% @doc Filter metrics by cluster
--spec filter_metrics_by_cluster(binary(), [#metric{}]) -> [#metric{}].
+-spec filter_metrics_by_cluster(binary(), [record(metric)]) -> [record(metric)].
 filter_metrics_by_cluster(ClusterId, Metrics) ->
     lists:filter(fun(Metric) ->
         Metric#metric.cluster_id =:= ClusterId
@@ -612,11 +612,11 @@ calculate_process_health(ProcessRatio) when ProcessRatio > 0.9 -> 0.0;  %% Criti
 calculate_process_health(ProcessRatio) when ProcessRatio > 0.8 -> 0.3;  %% Warning: >80%
 calculate_process_health(ProcessRatio) when ProcessRatio > 0.5 -> 0.8;  %% Good
 calculate_process_health(_ProcessRatio) -> 1.0.                         %% Excellent
--spec get_upgrade_version_from_metrics([#metric{}]) -> binary().
+-spec get_upgrade_version_from_metrics([record(metric)]) -> binary().
 get_upgrade_version_from_metrics(_Metrics) ->
     <<"2.0.0">>.  % Would extract from actual metrics
 
--spec calculate_consistency_from_metrics([#metric{}]) -> float().
+-spec calculate_consistency_from_metrics([record(metric)]) -> float().
 calculate_consistency_from_metrics(_Metrics) ->
     95.5 + math:random() * 4.5.
 

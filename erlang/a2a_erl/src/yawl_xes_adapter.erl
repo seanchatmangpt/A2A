@@ -643,9 +643,14 @@ handle_call({export_trace, WorkflowId, Options}, _From, State) ->
     case yawl_event_bridge:export_trace(WorkflowId) of
         {ok, XES} when Format =:= xml ->
             {reply, {ok, XES}, update_stats(export, State)};
-        {ok, _XES} when Format =:= json ->
-            %% JSON conversion not yet implemented, return error
-            {reply, {error, json_format_not_supported}, State};
+        {ok, XES} when Format =:= json ->
+            %% Convert XES XML to JSON format
+            case xes_to_json(XES) of
+                {ok, JSON} ->
+                    {reply, {ok, JSON}, update_stats(export, State)};
+                {error, Reason} ->
+                    {reply, {error, Reason}, State}
+            end;
         {error, Reason} ->
             {reply, {error, Reason}, State}
     end;
@@ -663,9 +668,14 @@ handle_call({export_all_traces, Options}, _From, State) ->
     case yawl_event_bridge:export_all_traces() of
         {ok, XES} when Format =:= xml ->
             {reply, {ok, XES}, update_stats(export_all, State)};
-        {ok, _XES} when Format =:= json ->
-            %% JSON conversion not yet implemented, return error
-            {reply, {error, json_format_not_supported}, State};
+        {ok, XES} when Format =:= json ->
+            %% Convert XES XML to JSON format
+            case xes_to_json(XES) of
+                {ok, JSON} ->
+                    {reply, {ok, JSON}, update_stats(export_all, State)};
+                {error, Reason} ->
+                    {reply, {error, Reason}, State}
+            end;
         {error, Reason} ->
             {reply, {error, Reason}, State}
     end;
@@ -828,6 +838,192 @@ update_stats(_, State) ->
 %% @private
 xml_header() ->
     <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?>">>.
+
+%% @private
+%% @doc Convert XES XML to JSON format using jiffy encoder
+%% Parses the XES XML and converts it to a JSON-compatible map structure
+-spec xes_to_json(binary()) -> {ok, binary()} | {error, term()}.
+xes_to_json(XESXml) when is_binary(XESXml) ->
+    try
+        %% Parse XES XML and extract traces
+        JSONMap = parse_xes_to_json_map(XESXml),
+        %% Encode using jiffy
+        JSON = jiffy:encode(JSONMap),
+        {ok, JSON}
+    catch
+        Type:Reason ->
+            {error, {conversion_failed, {Type, Reason}}}
+    end.
+
+%% @private
+%% @doc Parse XES XML and convert to JSON-compatible map structure
+-spec parse_xes_to_json_map(binary()) -> map().
+parse_xes_to_json_map(XESXml) ->
+    %% Extract trace information from XES XML
+    %% Create a JSON structure that mirrors the XES standard
+    Traces = extract_traces_from_xes(XESXml),
+
+    #{
+        <<"xes.version">> => <<"1.0">>,
+        <<"xes.features">> => <<"nested-attributes">>,
+        <<"openxes.version">> => <<"1.0">>,
+        <<"xmlns">> => <<"http://www.xes-standard.org/">>,
+        <<"extensions">> => [
+            #{<<"name">> => <<"Lifecycle">>,
+              <<"prefix">> => <<"lifecycle">>,
+              <<"uri">> => <<"http://www.xes-standard.org/lifecycle.xesext">>},
+            #{<<"name">> => <<"Concept">>,
+              <<"prefix">> => <<"concept">>,
+              <<"uri">> => <<"http://www.xes-standard.org/concept.xesext">>},
+            #{<<"name">> => <<"Time">>,
+              <<"prefix">> => <<"time">>,
+              <<"uri">> => <<"http://www.xes-standard.org/time.xesext">>}
+        ],
+        <<"traces">> => Traces
+    }.
+
+%% @private
+%% @doc Extract trace information from XES XML binary
+-spec extract_traces_from_xes(binary()) -> [map()].
+extract_traces_from_xes(XESXml) ->
+    %% Parse XML to extract <trace> elements
+    case extract_trace_blocks(XESXml) of
+        [] ->
+            %% No traces found, return empty list
+            [];
+        TraceBlocks ->
+            [parse_trace_block(Block) || Block <- TraceBlocks]
+    end.
+
+%% @private
+%% @doc Extract individual trace blocks from XES XML
+-spec extract_trace_blocks(binary()) -> [binary()].
+extract_trace_blocks(XESXml) ->
+    %% Simple regex-based extraction of <trace>...</trace> blocks
+    %% This is a simplified approach - for production use consider a proper XML parser
+    TraceStart = <<"<trace>">>,
+    TraceEnd = <<"</trace>">>,
+    extract_blocks(XESXml, TraceStart, TraceEnd, []).
+
+%% @private
+%% @doc Parse a single trace block into a JSON map
+-spec parse_trace_block(binary()) -> map().
+parse_trace_block(TraceBlock) ->
+    %% Extract workflow ID from trace
+    WorkflowId = extract_attribute_value(TraceBlock, <<"concept:name">>),
+    TraceId = extract_attribute_value(TraceBlock, <<"workflow:id">>),
+
+    %% Extract events from trace
+    Events = extract_events_from_trace(TraceBlock),
+
+    #{
+        <<"trace_id">> => TraceId,
+        <<"workflow_id">> => WorkflowId,
+        <<"events">> => Events,
+        <<"event_count">> => length(Events)
+    }.
+
+%% @private
+%% @doc Extract events from a trace block
+-spec extract_events_from_trace(binary()) -> [map()].
+extract_events_from_trace(TraceBlock) ->
+    EventStart = <<"<event>">>,
+    EventEnd = <<"</event>">>,
+    case extract_blocks(TraceBlock, EventStart, EventEnd, []) of
+        [] -> [];
+        EventBlocks ->
+            [parse_event_block(Block) || Block <- EventBlocks]
+    end.
+
+%% @private
+%% @doc Parse a single event block into a JSON map
+-spec parse_event_block(binary()) -> map().
+parse_event_block(EventBlock) ->
+    %% Extract event attributes
+    ConceptName = extract_attribute_value(EventBlock, <<"concept:name">>),
+    Lifecycle = extract_attribute_value(EventBlock, <<"lifecycle:transition">>),
+    Timestamp = extract_attribute_value(EventBlock, <<"time:timestamp">>),
+    TimestampMs = extract_attribute_value(EventBlock, <<"time:timestamp_ms">>),
+    Resource = extract_attribute_value(EventBlock, <<"org:resource">>),
+
+    %% Build event map
+    EventMap = #{
+        <<"concept:name">> => ConceptName,
+        <<"lifecycle:transition">> => Lifecycle
+    },
+
+    %% Add optional fields
+    EventMap1 = case Timestamp of
+        <<>> -> EventMap;
+        _ -> EventMap#{<<"time:timestamp">> => Timestamp}
+    end,
+
+    EventMap2 = case TimestampMs of
+        <<>> -> EventMap1;
+        _ ->
+            %% Convert timestamp_ms to integer
+            try list_to_integer(binary_to_list(TimestampMs)) of
+                Int -> EventMap1#{<<"time:timestamp_ms">> => Int}
+            catch
+                _:_ -> EventMap1
+            end
+    end,
+
+    EventMap3 = case Resource of
+        <<>> -> EventMap2;
+        _ -> EventMap2#{<<"org:resource">> => Resource}
+    end,
+
+    EventMap3.
+
+%% @private
+%% @doc Extract attribute value from XML element
+%% Format: <string key="AttrName" value="AttrValue"/>
+-spec extract_attribute_value(binary(), binary()) -> binary().
+extract_attribute_value(Xml, AttributeKey) ->
+    KeyPattern = <<"key=\"", AttributeKey/binary, "\"">>,
+    case binary:match(Xml, KeyPattern) of
+        nomatch ->
+            <<>>;
+        {Start, _Len} ->
+            %% Find the value="..." after the key
+            ValuePattern = <<"value=\"">>,
+            SearchStart = Start + byte_size(KeyPattern),
+            case binary:match(Xml, ValuePattern, [{scope, {SearchStart, byte_size(Xml) - SearchStart}}]) of
+                nomatch ->
+                    <<>>;
+                {ValueStart, _} ->
+                    %% Find the closing quote
+                    ValueSearchStart = ValueStart + byte_size(ValuePattern),
+                    case binary:match(Xml, <<"\"">>, [{scope, {ValueSearchStart, byte_size(Xml) - ValueSearchStart}}]) of
+                        nomatch ->
+                            <<>>;
+                        {EndQuote, _} ->
+                            binary:part(Xml, ValueSearchStart, EndQuote)
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Extract blocks between start and end tags
+-spec extract_blocks(binary(), binary(), binary(), [binary()]) -> [binary()].
+extract_blocks(Xml, StartTag, EndTag, Acc) ->
+    case binary:match(Xml, StartTag) of
+        nomatch ->
+            lists:reverse(Acc);
+        {StartPos, _} ->
+            ContentStart = StartPos + byte_size(StartTag),
+            case binary:match(Xml, EndTag, [{scope, {ContentStart, byte_size(Xml) - ContentStart}}]) of
+                nomatch ->
+                    lists:reverse(Acc);
+                {EndPos, _} ->
+                    Block = binary:part(Xml, ContentStart, EndPos),
+                    %% Continue searching after this block
+                    NextSearchStart = EndPos + byte_size(EndTag),
+                    RemainingXml = binary:part(Xml, NextSearchStart, byte_size(Xml) - NextSearchStart),
+                    extract_blocks(RemainingXml, StartTag, EndTag, [Block | Acc])
+            end
+    end.
 
 %% @private
 maps_get(Key, Map, Default) ->

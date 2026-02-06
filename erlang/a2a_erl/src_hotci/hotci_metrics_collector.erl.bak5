@@ -26,7 +26,7 @@
     value :: number(),
     unit :: binary(),
     metadata = #{} :: map()
-}).
+}.
 
 -record(metric_session, {
     id :: binary(),
@@ -35,7 +35,7 @@
     end_time :: integer() | undefined,
     status :: 'active' | 'completed' | 'failed',
     metrics = [] :: [#metric{}]
-}).
+}.
 
 -record(upgrade_summary, {
     cluster_id :: binary(),
@@ -48,15 +48,15 @@
     consistency_score :: float(),
     rollback_occurred :: boolean(),
     failures = [] :: [term()]
-}).
+}.
 
 %% State record
 -record(state, {
-    sessions = #{} :: map(),
+    sessions = #{} :: map(),         #{binary() => #metric_session{}},
     metrics = [] :: [#metric{}],
     upgrade_summaries = [] :: [#upgrade_summary{}],
     current_session :: binary() | undefined
-}).
+}.
 
 -define(SERVER, ?MODULE).
 -define(METRIC_TYPES, [
@@ -249,7 +249,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% ============================================================================
 
 %% @doc Record a metric
--spec create_metric_record(binary(), map()) -> #metric{}.
+-spec create_metric_record(binary(), map()) -> record(metric).
 create_metric_record(ClusterId, MetricMap) ->
     #metric{
         timestamp = erlang:system_time(millisecond),

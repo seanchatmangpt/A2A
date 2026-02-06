@@ -3,7 +3,7 @@
 %%% Partial Order Process Discovery for YAWL Workflows
 %%%
 %%% This module implements partial order process discovery based on
-%%% van der Aalst et al. (Sep 2025) "Partial Order Process Discovery
+%%% Kourani, Park, van der Aalst (Sep 2025) "Partial Order Process Discovery
 %%% Preserving Concurrency".
 %%%
 %%% Key Concepts:
@@ -11,7 +11,7 @@
 %%% - Sound-by-Construction: Models guaranteed to be sound workflow nets
 %%% - Hierarchical Abstraction: Abstract exclusive choices and loops
 %%%
-%%% Reference: arXiv:2509.15346 (Sep 2025)
+%%% Reference: arXiv:2509.15346 (Sep 2025) - Kourani, Park, van der Aalst
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -58,6 +58,7 @@
 
 -include("yawl_types.hrl").
 -include("yawl_xes.hrl").
+-include_lib("xmerl/include/xmerl.hrl").
 
 -define(SERVER, ?MODULE).
 
@@ -73,15 +74,6 @@
     trace_id := binary(),
     attributes := map()
 }.
-
--type partial_order() :: #{
-    events := [event()],
-    order := #{event_id() => [event_id()]},  %% causal relations
-    concurrent := sets:set({event_id(), event_id()}),
-    trace_id := binary()
-}.
-
--type abstraction_level() :: 0..10.
 
 %%====================================================================
 %% API Functions - Partial Order Derivation
@@ -597,9 +589,288 @@ wrap_in_xes(PartialOrderXML, PO) ->
 
 %% @private
 %% Parse XES partial order
-parse_xes_partial_order(_XESBinary) ->
-    %% Placeholder - would implement full XML parsing
-    {error, not_implemented}.
+parse_xes_partial_order(XESBinary) when is_binary(XESBinary) ->
+    case XESBinary of
+        <<>> -> {error, empty_input};
+        _ ->
+            try
+                parse_xes_xml(XESBinary)
+            catch
+                _:Reason -> {error, {parse_error, Reason}}
+            end
+    end;
+parse_xes_partial_order(_InvalidInput) ->
+    {error, invalid_input}.
+
+%% @private
+%% Parse XES XML content
+parse_xes_xml(XESBinary) ->
+    %% Parse XML using xmerl
+    {XMLRoot, _} = xmerl_scan:string(binary_to_list(XESBinary)),
+    extract_partial_order_from_xml(XMLRoot).
+
+%% @private
+%% Extract partial order from parsed XML
+extract_partial_order_from_xml(XMLRoot) ->
+    %% Find all traces in the log
+    Traces = xmerl_xpath:string("//log/trace", XMLRoot),
+    case Traces of
+        [] ->
+            %% Empty log - return empty partial order
+            {ok, #{
+                events => [],
+                order => #{},
+                concurrent => sets:new(),
+                trace_id => <<"empty_log">>
+            }};
+        _ ->
+            %% Process the first trace (or merge all traces)
+            AllEvents = lists:flatmap(fun extract_events_from_trace/1, Traces),
+            case AllEvents of
+                [] ->
+                    {ok, #{
+                        events => [],
+                        order => #{},
+                        concurrent => sets:new(),
+                        trace_id => <<"empty_trace">>
+                    }};
+                _ ->
+                    %% Extract trace_id from first event or trace element
+                    TraceId = extract_trace_id(hd(Traces), hd(AllEvents)),
+                    %% Build order relations from po:order-after attributes
+                    Order = build_order_relations(AllEvents),
+                    %% Build concurrent relations from po:concurrent-with attributes
+                    Concurrent = build_concurrent_relations(AllEvents),
+                    {ok, #{
+                        events => AllEvents,
+                        order => Order,
+                        concurrent => Concurrent,
+                        trace_id => TraceId
+                    }}
+            end
+    end.
+
+%% @private
+%% Extract events from a trace element
+extract_events_from_trace(TraceElement) ->
+    EventNodes = xmerl_xpath:string("./event", TraceElement),
+    [parse_event_node(Node) || Node <- EventNodes].
+
+%% @private
+%% Parse a single event node
+parse_event_node(EventNode) ->
+    %% Get event id from xes:id attribute
+    Id = case xmerl_xpath:string("./@xes:id", EventNode) of
+        [#xmlAttribute{value = IdVal}] -> list_to_binary(IdVal);
+        [#xmlAttribute{value = IdVal, namespace = #xmlNamespace{nodes = [{_, "xes"}]}}] -> list_to_binary(IdVal);
+        _ -> <<"unknown_event">>
+    end,
+    %% Also check for id without namespace
+    IdFinal = case Id of
+        <<"unknown_event">> ->
+            case xmerl_xpath:string("./@id", EventNode) of
+                [#xmlAttribute{value = IdVal2}] -> list_to_binary(IdVal2);
+                _ -> generate_event_id()
+            end;
+        _ -> Id
+    end,
+    %% Extract concept:name (activity)
+    Activity = extract_string_attribute(EventNode, "concept:name"),
+    ActivityFinal = case Activity of
+        undefined -> <<"unknown_activity">>;
+        _ -> Activity
+    end,
+    %% Extract timestamp
+    Timestamp = extract_date_attribute(EventNode, "time:timestamp"),
+    TimestampFinal = case Timestamp of
+        undefined -> erlang:monotonic_time(millisecond);
+        _ -> Timestamp
+    end,
+    %% Extract all attributes as a map
+    Attributes = extract_all_attributes(EventNode),
+    %% Build event map
+    #{
+        id => IdFinal,
+        timestamp => TimestampFinal,
+        activity => ActivityFinal,
+        trace_id => <<"parsed_trace">>,
+        attributes => Attributes
+    }.
+
+%% @private
+%% Extract trace id from trace element
+extract_trace_id(TraceElement, FirstEvent) ->
+    case xmerl_xpath:string("./@xes:id", TraceElement) of
+        [#xmlAttribute{value = IdVal}] -> list_to_binary(IdVal);
+        _ ->
+            %% Try without namespace
+            case xmerl_xpath:string("./@id", TraceElement) of
+                [#xmlAttribute{value = IdVal2}] -> list_to_binary(IdVal2);
+                _ -> maps:get(trace_id, FirstEvent, <<"unknown_trace">>)
+            end
+    end.
+
+%% @private
+%% Build order relations from po:order-after attributes
+build_order_relations(Events) ->
+    lists:foldl(
+        fun(Event, AccOrder) ->
+            EventId = maps:get(id, Event),
+            Attributes = maps:get(attributes, Event, #{}),
+            OrderAfter = maps:get(<<"po:order-after">>, Attributes, []),
+            lists:foldl(
+                fun(Predecessor, Acc) ->
+                    Acc#{Predecessor => [EventId | maps:get(Predecessor, Acc, [])]}
+                end,
+                AccOrder,
+                OrderAfter
+            )
+        end,
+        #{},
+        Events
+    ).
+
+%% @private
+%% Build concurrent relations from po:concurrent-with attributes
+build_concurrent_relations(Events) ->
+    ConcurrentPairs = lists:flatmap(
+        fun(Event) ->
+            EventId = maps:get(id, Event),
+            Attributes = maps:get(attributes, Event, #{}),
+            ConcurrentWith = maps:get(<<"po:concurrent-with">>, Attributes, []),
+            %% Create both (a,b) and (b,a) for symmetry
+            lists:flatmap(
+                fun(OtherId) ->
+                    [{EventId, OtherId}, {OtherId, EventId}]
+                end,
+                ConcurrentWith
+            )
+        end,
+        Events
+    ),
+    sets:from_list(ConcurrentPairs).
+
+%% @private
+%% Extract string attribute from event node
+extract_string_attribute(Node, AttrName) ->
+    XPath = io_lib:format("./*[@key='~s']/@value", [AttrName]),
+    case xmerl_xpath:string(XPath, Node) of
+        [#xmlAttribute{value = Value}] -> list_to_binary(Value);
+        _ -> undefined
+    end.
+
+%% @private
+%% Extract date attribute from event node
+extract_date_attribute(Node, AttrName) ->
+    XPath = io_lib:format("./*[@key='~s']/@value", [AttrName]),
+    case xmerl_xpath:string(XPath, Node) of
+        [#xmlAttribute{value = Value}] -> parse_iso8601_timestamp(Value);
+        _ -> undefined
+    end.
+
+%% @private
+%% Extract all attributes from event node
+extract_all_attributes(EventNode) ->
+    StringAttrs = xmerl_xpath:string("./string[@key and @value]", EventNode),
+    IntAttrs = xmerl_xpath:string("./int[@key and @value]", EventNode),
+    DateAttrs = xmerl_xpath:string("./date[@key and @value]", EventNode),
+    ListAttrs = xmerl_xpath:string("./list[@key]", EventNode),
+
+    %% Process string attributes
+    Strings = lists:map(
+        fun(#xmlElement{name = string, attributes = Attrs}) ->
+            Key = get_xml_attribute_value(key, Attrs),
+            Value = get_xml_attribute_value(value, Attrs),
+            {list_to_binary(Key), list_to_binary(Value)}
+        end,
+        StringAttrs
+    ),
+
+    %% Process int attributes
+    Ints = lists:map(
+        fun(#xmlElement{name = int, attributes = Attrs}) ->
+            Key = get_xml_attribute_value(key, Attrs),
+            Value = get_xml_attribute_value(value, Attrs),
+            {list_to_binary(Key), list_to_integer(Value)}
+        end,
+        IntAttrs
+    ),
+
+    %% Process date attributes
+    Dates = lists:map(
+        fun(#xmlElement{name = date, attributes = Attrs}) ->
+            Key = get_xml_attribute_value(key, Attrs),
+            Value = get_xml_attribute_value(value, Attrs),
+            {list_to_binary(Key), parse_iso8601_timestamp(Value)}
+        end,
+        DateAttrs
+    ),
+
+    %% Process list attributes (for po:order-after, po:concurrent-with)
+    Lists = lists:map(
+        fun(#xmlElement{name = list, attributes = Attrs, content = Content}) ->
+            Key = get_xml_attribute_value(key, Attrs),
+            Values = extract_list_values(Content),
+            {list_to_binary(Key), Values}
+        end,
+        ListAttrs
+    ),
+
+    maps:from_list(Strings ++ Ints ++ Dates ++ Lists).
+
+%% @private
+%% Get XML attribute value by name
+get_xml_attribute_value(Name, Attrs) ->
+    case lists:keyfind(Name, #xmlAttribute.name, Attrs) of
+        #xmlAttribute{value = Value} -> Value;
+        false -> undefined
+    end.
+
+%% @private
+%% Extract values from list element content
+extract_list_values(Content) ->
+    StringValues = xmerl_xpath:string("./string/@value", #xmlElement{content = Content}),
+    [list_to_binary(Value) || #xmlAttribute{value = Value} <- StringValues].
+
+%% @private
+%% Parse ISO 8601 timestamp to milliseconds
+parse_iso8601_timestamp(DateTimeString) ->
+    %% Parse various ISO 8601 formats
+    %% Supports: 2025-01-01T10:00:00.000Z, 2025-01-01T10:00:00Z
+    try
+        %% Remove timezone indicator for simplicity (assume UTC)
+        CleanString = re:replace(DateTimeString, "Z$", "", [global, {return, list}]),
+        %% Parse: YYYY-MM-DDTHH:MM:SS.sss or YYYY-MM-DDTHH:MM:SS
+        case string:tokens(CleanString, "T:.") of
+            [Year, Month, Day, Hour, Min, Sec] ->
+                %% Format: YYYY-MM-DDTHH:MM:SS
+                To = calendar:datetime_to_gregorian_seconds(
+                    {{list_to_integer(Year), list_to_integer(Month), list_to_integer(Day)},
+                     {list_to_integer(Hour), list_to_integer(Min), list_to_integer(Sec)}}
+                ),
+                %% Unix epoch in gregorian seconds: 62167219200
+                Epoch = 62167219200,
+                (To - Epoch) * 1000;
+            [Year, Month, Day, Hour, Min, Sec, Milli] ->
+                %% Format: YYYY-MM-DDTHH:MM:SS.mmm
+                To = calendar:datetime_to_gregorian_seconds(
+                    {{list_to_integer(Year), list_to_integer(Month), list_to_integer(Day)},
+                     {list_to_integer(Hour), list_to_integer(Min), list_to_integer(Sec)}}
+                ),
+                Epoch = 62167219200,
+                (To - Epoch) * 1000 + list_to_integer(Milli);
+            _ ->
+                erlang:monotonic_time(millisecond)
+        end
+    catch
+        _:_ -> erlang:monotonic_time(millisecond)
+    end.
+
+%% @private
+%% Generate unique event ID
+generate_event_id() ->
+    UniqueInt = erlang:unique_integer(),
+    <<"event_", (integer_to_binary(UniqueInt))/binary>>.
 
 %% @private
 %% Inject partial order into XES

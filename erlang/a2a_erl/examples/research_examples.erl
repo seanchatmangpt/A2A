@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @doc
-%%% Research Modules Examples
+%%% Research Module Examples
 %%%
-%%% Practical examples demonstrating the use of research modules
-%%% integrated from van der Aalst's 2025-2026 papers.
+%%% This module contains working examples for all research modules.
+%%% Copy and modify these examples for your use cases.
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -12,496 +12,390 @@
 -author("A2A Team").
 -export([
     % Reachability examples
-    reachability_example/0,
-    admissibility_example/0,
-    concurrency_analysis_example/0,
+    reachability_basic/0,
+    reachability_diagnostics/0,
+    reachability_admissibility/0,
 
     % Partial order examples
-    partial_order_discovery_example/0,
-    partial_order_to_model_example/0,
+    partial_order_basic/0,
+    partial_order_to_model/0,
+    partial_order_xes/0,
 
-    % LLM validation examples
-    llm_validation_example/0,
-    hallucination_detection_example/0,
-    llm_generation_example/0,
+    % LLM validator examples
+    llm_validate_basic/0,
+    llm_fidelity_score/0,
+    llm_test_scenarios/0,
 
     % OCPM examples
-    ocpm_logging_example/0,
-    ocpm_query_example/0,
-    ocpm_ai_grounding_example/0,
+    ocpm_log_event/0,
+    ocpm_order_fulfillment/0,
+    ocpm_to_xes/0,
 
     % CPN examples
-    cpn_colored_tokens_example/0,
-    cpn_guards_example/0,
-    cpn_json_export_example/0
+    cpn_colored_tokens/0,
+    cpn_guard_evaluation/0,
+    cpn_json_export/0,
+
+    % Integration examples
+    end_to_end_validation/0
 ]).
 
--include("yawl_types.hrl").
-
 %%====================================================================
-%% Reachability Analysis Examples (Paper 2602.02447)
+%% Reachability Analysis Examples
 %%====================================================================
 
-%% @doc Basic reachability checking example.
-reachability_example() ->
-    io:format("~n=== Reachability Analysis Example ===~n"),
+%% @doc Basic reachability check
+reachability_basic() ->
+    {ok, _Pid} = yawl_reachability:start_link(),
 
-    % Start the reachability server
-    {ok, _} = yawl_reachability:start_link(),
-
-    % Define a target marking
-    TargetMarking = #{
-        p_order_created => [token],
-        p_payment_pending => [],
-        p_order_completed => []
-    },
+    % Define a simple workflow net
+    % p1 -> t1 -> p2 -> t2 -> p3
+    Workflow = ordering_workflow,
 
     % Check if marking is reachable
-    Result = yawl_reachability:is_reachable(ordering_workflow, TargetMarking),
+    Marking = #{p1 => [], p2 => [token], p3 => []},
+    IsReachable = yawl_reachability:is_reachable(Workflow, Marking),
 
-    case Result of
-        #{is_reachable := true} ->
-            io:format("✓ Target marking is REACHABLE~n");
-        #{is_reachable := false} ->
-            io:format("✗ Target marking is NOT reachable~n")
-    end,
+    io:format("Marking ~p is reachable: ~p~n", [Marking, IsReachable]),
+    IsReachable.
 
-    % Get detailed diagnostics
-    Diagnostics = yawl_reachability:reachability_diagnostics(
-        ordering_workflow,
-        TargetMarking
-    ),
-    io:format("Diagnostics: ~p~n", [Diagnostics]),
+%% @doc Full reachability diagnostics
+reachability_diagnostics() ->
+    {ok, _Pid} = yawl_reachability:start_link(),
 
-    ok.
+    Workflow = ordering_workflow,
+    Marking = #{p1 => [token], p2 => [token]},
 
-%% @doc Admissibility checking example.
-admissibility_example() ->
-    io:format("~n=== Admissibility Checking Example ===~n"),
+    Diagnostics = yawl_reachability:get_reachability_diagnostics(Workflow, Marking),
 
-    % A marking is admissible if all places are pairwise concurrent
-    AdmissibleMarking = #{
-        p_branch_a => [token],
-        p_branch_b => [token],
-        p_branch_c => [token]
-    },
+    io:format("=== Reachability Diagnostics ===~n"),
+    io:format("Reachable: ~p~n", [maps:get(reachable, Diagnostics)]),
+    io:format("Admissible: ~p~n", [maps:get(admissible, Diagnostics)]),
+    io:format("Diverging Transitions: ~p~n", [maps:get(diverging_transitions, Diagnostics, [])]),
+    io:format("Concurrent Places: ~p~n", [maps:get(concurrent_places, Diagnostics, [])),
 
-    IsAdmissible = yawl_reachability:is_admissible(AdmissibleMarking),
-    io:format("Marking is admissible: ~p~n", [IsAdmissible]),
+    Diagnostics.
+
+%% @doc Admissibility and maximum admissible marking
+reachability_admissibility() ->
+    {ok, _Pid} = yawl_reachability:start_link(),
+
+    Workflow = ordering_workflow,
+    Places = [p1, p2, p3, p4],
+
+    % Check if concurrent marking is admissible
+    ConcurrentMarking = #{p1 => [token], p2 => [token]},
+    IsAdmissible = yawl_reachability:is_admissible(Workflow, ConcurrentMarking),
 
     % Find maximum admissible marking
-    Places = [p_branch_a, p_branch_b, p_branch_c, p_branch_d],
-    MaxAdmissible = yawl_reachability:maximum_admissible(Places),
-    io:format("Maximum admissible marking: ~p~n", [MaxAdmissible]),
+    MaxAdmissible = yawl_reachability:maximum_admissible(Workflow, Places),
 
-    ok.
+    io:format("Is admissible: ~p~n", [IsAdmissible]),
+    io:format("Maximum admissible: ~p~n", [MaxAdmissible]),
 
-%% @doc Concurrency analysis example.
-concurrency_analysis_example() ->
-    io:format("~n=== Concurrency Analysis Example ===~n"),
-
-    % Check if two places are concurrent
-    AreConcurrent = yawl_reachability:are_concurrent(
-        ordering_workflow,
-        p_payment_pending,
-        p_shipment_ready
-    ),
-    io:format("Places are concurrent: ~p~n", [AreConcurrent]),
-
-    % Get all concurrent place pairs
-    Places = [p_start, p_validated, p_paid, p_shipped, p_completed],
-    ConcurrentPairs = yawl_reachability:concurrent_places(
-        ordering_workflow,
-        Places
-    ),
-    io:format("Concurrent pairs: ~p~n", [ConcurrentPairs]),
-
-    ok.
+    {IsAdmissible, MaxAdmissible}.
 
 %%====================================================================
-%% Partial Order Discovery Examples (Paper 2509.15346)
+%% Partial Order Examples
 %%====================================================================
 
-%% @doc Partial order discovery from event log.
-partial_order_discovery_example() ->
-    io:format("~n=== Partial Order Discovery Example ===~n"),
+%% @doc Convert event log to partial order
+partial_order_basic() ->
+    {ok, _Pid} = yawl_partial_order:start_link(),
 
     % Create sample event log with concurrent activities
-    EventLog = #{
-        traces => [
-            #{
-                trace_id => <<"trace1">>,
-                events => [
-                    #{id => <<"e1">>, activity => <<"A">>, timestamp => 1000},
-                    #{id => <<"e2">>, activity => <<"B">>, timestamp => 2000},
-                    #{id => <<"e3">>, activity => <<"C">>, timestamp => 3000}
-                ]
-            },
-            #{
-                trace_id => <<"trace2">>,
-                events => [
-                    #{id => <<"e4">>, activity => <<"A">>, timestamp => 1000},
-                    #{id => <<"e5">>, activity => <<"C">>, timestamp => 2000},
-                    #{id => <<"e6">>, activity => <<"B">>, timestamp => 3000}
-                ]
-            }
-        ]
-    },
+    EventLog = [
+        #{id => <<"e1">>, timestamp => 1000, activity => <<"Start">>},
+        #{id => <<"e2">>, timestamp => 2000, activity => <<"Check A">>},
+        #{id => <<"e3">>, timestamp => 2000, activity => <<"Check B">>},  % Concurrent with e2
+        #{id => <<"e4">>, timestamp => 3000, activity => <<"Complete">>}
+    ],
 
     % Convert to partial order
-    {ok, PartialOrder} = yawl_partial_order:event_log_to_partial_order(EventLog),
+    {ok, PO} = yawl_partial_order:event_log_to_partial_order(EventLog),
 
-    % Get concurrent events
-    ConcurrentEvents = yawl_partial_order:concurrent_events(
-        maps:get(traces, EventLog, [])
+    % Check concurrency
+    {ok, _} = yawl_partial_order:concurrent_events(
+        maps:get(e2, EventLog),
+        maps:get(e3, EventLog)
     ),
-    io:format("Concurrent events: ~p~n", [ConcurrentEvents]),
 
-    % Export partial order XES
-    XESBinary = yawl_partial_order:export_partial_order_xes(PartialOrder),
-    io:format("Partial order XES exported: ~p bytes~n", [byte_size(XESBinary)]),
+    io:format("Partial order: ~p~n", [PO]),
+    PO.
 
-    ok.
+%% @doc Convert partial order to workflow net
+partial_order_to_model() ->
+    {ok, _Pid} = yawl_partial_order:start_link(),
 
-%% @doc Partial order to workflow model conversion.
-partial_order_to_model_example() ->
-    io:format("~n=== Partial Order to Model Example ===~n"),
+    EventLog = [
+        #{id => <<"e1">>, timestamp => 1000, activity => <<"A">>},
+        #{id => <<"e2">>, timestamp => 2000, activity => <<"B">>},
+        #{id => <<"e3">>, timestamp => 3000, activity => <<"C">>}
+    ],
 
-    % Create partial order from event log
-    EventLog = #{
+    {ok, PO} = yawl_partial_order:event_log_to_partial_order(EventLog),
+    {ok, WFNet} = yawl_partial_order:partial_order_to_workflow_net(PO),
+
+    io:format("Generated workflow net: ~p~n", [WFNet]),
+    WFNet.
+
+%% @doc Export/import partial order XES
+partial_order_xes() ->
+    {ok, _Pid} = yawl_partial_order:start_link(),
+
+    PO = #{
         events => [
-            #{id => <<"e1">>, activity => <<"start">>},
-            #{id => <<"e2">>, activity => <<"process_a">>},
-            #{id => <<"e3">>, activity => <<"process_b">>},
-            #{id => <<"e4">>, activity => <<"end">>}
+            #{id => <<"e1">>, activity => <<"A">>},
+            #{id => <<"e2">>, activity => <<"B">>}
         ],
-        order => #{
-            <<"e1">> => [<<"e2">>, <<"e3">>],
-            <<"e2">> => [<<"e4">>],
-            <<"e3">> => [<<"e4">>]
-        },
-        concurrent => sets:from_list([{<<"e2">>, <<"e3">>}])
+        order => [{<<"e1">>, <<"e2">>}]
     },
 
-    % Convert to workflow model
-    Model = yawl_partial_order:partial_order_to_model(EventLog),
+    % Export to XES
+    {ok, XES} = yawl_partial_order:export_partial_order_xes(PO),
 
-    io:format("Model type: ~p~n", [maps:get(type, Model)]),
-    io:format("Activities: ~p~n", [maps:get(activities, Model)]),
-    io:format("Sound by construction: ~p~n", [maps:get(is_sound, Model)]),
+    % Import back
+    {ok, ImportedPO} = yawl_partial_order:import_partial_order_xes(XES),
 
-    ok.
+    io:format("Exported XES size: ~p bytes~n", [byte_size(XES)]),
+    io:format("Imported PO: ~p~n", [ImportedPO]),
+
+    XES.
 
 %%====================================================================
-%% LLM Validation Examples (Paper 2509.15336)
+%% LLM Validator Examples
 %%====================================================================
 
-%% @doc LLM model validation against XES log.
-llm_validation_example() ->
-    io:format("~n=== LLM Validation Example ===~n"),
+%% @doc Basic LLM model validation
+llm_validate_basic() ->
+    {ok, _Pid} = yawl_llm_validator:start_link(),
 
-    % Start LLM validator server
-    {ok, _} = yawl_llm_validator:start_link(),
+    % Sample LLM-generated model
+    LLMModel = #{
+        activities => [<<"Request">>, <<"Approve">>, <<"Reject">>, <<"Complete">>],
+        transitions => [
+            #{from => <<"Request">>, to => <<"Approve">>},
+            #{from => <<"Request">>, to => <<"Reject">>},
+            #{from => <<"Approve">>, to => <<"Complete">>}
+        ]
+    },
 
-    % Create a standard process model
-    StandardModel = yawl_llm_validator:create_standard_process(),
+    % Sample XES log
+    XESLog = #{
+        traces => [
+            #{events => [
+                #{activity => <<"Request">>},
+                #{activity => <<"Approve">>},
+                #{activity => <<"Complete">>}
+            ]}
+        ]
+    },
 
-    % Load XES log
-    {ok, XESLog} = file:read_file("priv/xes_samples/standard_process.xes"),
+    % Validate
+    Report = yawl_llm_validator:validate_against_xes(LLMModel, XESLog),
 
-    % Validate model against XES
-    ValidationResult = yawl_llm_validator:validate_against_xes(
-        StandardModel,
-        XESLog
-    ),
+    io:format("=== Validation Report ===~n"),
+    io:format("Valid: ~p~n", [maps:get(valid, Report, unknown)]),
+    io:format("Fidelity: ~p~n", [maps:get(fidelity_score, Report, 0.0)]),
 
-    % Print validation result
-    IsValid = maps:get(is_valid, ValidationResult),
-    Fidelity = maps:get(fidelity, ValidationResult),
+    Report.
 
-    io:format("Model valid: ~p~n", [IsValid]),
+%% @doc Calculate fidelity score
+llm_fidelity_score() ->
+    {ok, _Pid} = yawl_llm_validator:start_link(),
+
+    LLMModel = #{activities => [<<"A">>, <<"B">>, <<"C">>]},
+    XESLog = #{traces => [#{
+        events => [
+            #{activity => <<"A">>},
+            #{activity => <<"B">>},
+            #{activity => <<"C">>}
+        ]
+    }]},
+
+    Fidelity = yawl_llm_validator:fidelity_score(LLMModel, XESLog),
+
     io:format("Fidelity score: ~.2f~n", [Fidelity]),
+    Fidelity.
 
-    case IsValid of
-        true -> io:format("✓ Model is valid~n");
-        false ->
-            io:format("✗ Model has issues~n"),
-            Report = yawl_llm_validator:hallucination_report(ValidationResult),
-            io:format("Report: ~p~n", [Report])
-    end,
+%% @doc Test with standard and atypical scenarios
+llm_test_scenarios() ->
+    {ok, _Pid} = yawl_llm_validator:start_link(),
 
+    Standard = yawl_llm_validator:create_standard_process(),
+    Atypical = yawl_llm_validator:create_atypical_process(),
+
+    io:format("Standard process: ~p~n", [Standard]),
+    io:format("Atypical process: ~p~n", [Atypical]),
+
+    {Standard, Atypical}.
+
+%%====================================================================
+%% OCPM Examples
+%%====================================================================
+
+%% @doc Log a single object-centric event
+ocpm_log_event() ->
+    {ok, _Pid} = yawl_ocpm:start_link(),
+
+    Event = #{
+        id => <<"evt-001">>,
+        timestamp => erlang:system_time(millisecond),
+        objects => #{
+            order => <<"order-123">>,
+            item => <<"item-456">>,
+            customer => <<"customer-789">>
+        },
+        activity => <<"Place Order">>
+    },
+
+    ok = yawl_ocpm:log_oc_event(Event),
+
+    io:format("Logged event: ~p~n", [maps:get(id, Event))),
     ok.
 
-%% @doc Hallucination detection example.
-hallucination_detection_example() ->
-    io:format("~n=== Hallucination Detection Example ===~n"),
+%% @doc Complete order fulfillment OCPM example
+ocpm_order_fulfillment() ->
+    {ok, _Pid} = yawl_ocpm:start_link(),
 
-    % Create atypical process (designed to trigger hallucinations)
-    AtypicalModel = yawl_llm_validator:create_atypical_process(),
+    OrderId = <<"order-001">>,
+    ItemId = <<"item-001">>,
 
-    % Load standard XES log (mismatch should trigger detection)
-    {ok, StandardXES} = file:read_file("priv/xes_samples/standard_process.xes"),
+    % Log order lifecycle
+    Events = [
+        #{
+            id => <<"e1">>,
+            timestamp => 1000,
+            objects => #{order => OrderId, item => ItemId},
+            activity => <<"Order Created">>
+        },
+        #{
+            id => <<"e2">>,
+            timestamp => 2000,
+            objects => #{order => OrderId, payment => <<"pay-001">>},
+            activity => <<"Payment Received">>
+        },
+        #{
+            id => <<"e3">>,
+            timestamp => 3000,
+            objects => #{order => OrderId, shipment => <<"ship-001">>},
+            activity => <<"Order Shipped">>
+        },
+        #{
+            id => <<"e4">>,
+            timestamp => 4000,
+            objects => #{order => OrderId},
+            activity => <<"Order Delivered">>
+        }
+    ],
 
-    % Detect contradictions
-    Contradictions = yawl_llm_validator:detect_contradictions(
-        AtypicalModel,
-        StandardXES
+    lists:foreach(fun(E) -> yawl_ocpm:log_oc_event(E) end, Events),
+
+    io:format("Logged ~p events for order ~p~n", [length(Events), OrderId]),
+    ok.
+
+%% @doc Convert OCPM to standard XES
+ocpm_to_xes() ->
+    {ok, _Pid} = yawl_ocpm:start_link(),
+
+    % Create OCEL log
+    {ok, OCEL} = yawl_ocpm:create_ocel_log(),
+
+    % Flatten to XES
+    {ok, XES} = yawl_ocpm:ocpm_to_standard_xes(OCEL),
+
+    % Extract by object type
+    OrderEvents = yawl_ocpm:extract_object_type(<<"order">>, OCEL),
+
+    io:format("Converted to XES with ~p traces~n", [length(maps:get(traces, XES, []))]),
+    io:format("Order events: ~p~n", [OrderEvents]),
+
+    XES.
+
+%%====================================================================
+%% CPN Examples
+%%====================================================================
+
+%% @doc Create and use colored tokens
+cpn_colored_tokens() ->
+    {ok, _Pid} = yawl_cpn:start_link(),
+
+    % Define color set for order status
+    {ok, StatusColorSet} = yawl_cpn:create_color_set(
+        order_status,
+        [pending, confirmed, shipped, delivered]
     ),
 
-    io:format("Contradictions found: ~p~n", [length(Contradictions)]),
+    % Create colored tokens
+    Token1 = yawl_cpn:create_timed_token(#{status => confirmed}, 1000),
+    Token2 = yawl_cpn:create_timed_token(#{status => shipped}, 2000),
 
-    lists:foreach(fun(Contradiction) ->
-        Type = maps:get(type, Contradiction),
-        Desc = maps:get(description, Contradiction),
-        io:format("  - ~s: ~s~n", [Type, Desc])
-    end, Contradictions),
+    io:format("Color set: ~p~n", [StatusColorSet]),
+    io:format("Colored tokens: ~p, ~p~n", [Token1, Token2]),
 
-    % Get fidelity score
-    Fidelity = yawl_llm_validator:fidelity_score(AtypicalModel, StandardXES),
-    io:format("Fidelity score: ~.2f (low = likely hallucination)~n", [Fidelity]),
+    {Token1, Token2}.
 
-    ok.
+%% @doc Evaluate guard conditions
+cpn_guard_evaluation() ->
+    {ok, _Pid} = yawl_cpn:start_link(),
 
-%% @doc LLM workflow generation example.
-llm_generation_example() ->
-    io:format("~n=== LLM Generation Example ===~n"),
+    Token = #{status => confirmed, amount => 100},
+    Guard = #{status => confirmed, amount => {'>', 50}},
 
-    % Generate workflow from description
-    Description = <<
-        "Order fulfillment workflow: "
-        "1. Validate order details"
-        "2. Process payment"
-        "3. Prepare shipment"
-        "4. Complete order"
-    >>,
+    {ok, Result} = yawl_cpn:evaluate_guard(Token, Guard),
 
-    case yawl_llm_validator:llm_generate_model(Description) of
-        {ok, GeneratedModel} ->
-            io:format("✓ Model generated successfully~n"),
-            io:format("Activities: ~p~n", [
-                maps:get(activities, GeneratedModel, [])
-            ]);
-        {error, Reason} ->
-            io:format("✗ Generation failed: ~p~n", [Reason])
-    end,
+    io:format("Guard evaluation result: ~p~n", [Result]),
+    Result.
 
-    ok.
+%% @doc Export workflow to CPN-JSON
+cpn_json_export() ->
+    {ok, _Pid} = yawl_cpn:start_link(),
+
+    WorkflowId = ordering_workflow,
+
+    % Export to CPN-JSON
+    {ok, CPNJSON} = yawl_cpn:workflow_to_cpn_json(WorkflowId),
+
+    % Export to LLM format
+    {ok, LLMJSON} = yawl_cpn:llm_format_workflow(WorkflowId),
+
+    io:format("CPN-JSON size: ~p bytes~n", [byte_size(CPNJSON)]),
+    io:format("LLM-JSON size: ~p bytes~n", [byte_size(LLMJSON)]),
+
+    {CPNJSON, LLMJSON}.
 
 %%====================================================================
-%% OCPM Examples (Paper 2508.00116)
+%% Integration Examples
 %%====================================================================
 
-%% @doc Object-centric event logging example.
-ocpm_logging_example() ->
-    io:format("~n=== OCPM Logging Example ===~n"),
-
-    % Start OCPM server
+%% @doc End-to-end validation: LLM -> Reachability -> OCPM
+end_to_end_validation() ->
+    % Start all modules
+    {ok, _} = yawl_llm_validator:start_link(),
+    {ok, _} = yawl_reachability:start_link(),
     {ok, _} = yawl_ocpm:start_link(),
 
-    % Log multi-object event
-    Event = #{
-        event_id => <<"evt001">>,
-        timestamp => erlang:monotonic_time(millisecond),
-        activity => <<"order_created">>,
-        objects => #{
-            <<"order">> => [<<"order123">>],
-            <<"customer">> => [<<"cust456">>],
-            <<"item">> => [<<"item789">>, <<"item790">>]
-        }
-    },
+    % Step 1: Generate model via LLM
+    Description = <<"Order processing workflow with approval">>,
+    {ok, LLMModel} = yawl_llm_validator:llm_generate_model(Description),
 
-    yawl_ocpm:log_multi_object_event(
-        [<<"order">>, <<"customer">>, <<"item">>],
-        Event
-    ),
-    io:format("✓ Multi-object event logged~n"),
+    % Step 2: Validate against XES evidence
+    XESLog = #{traces => []},  % Load from file
+    ValidationReport = yawl_llm_validator:validate_against_xes(LLMModel, XESLog),
 
-    % Log payment event
-    PaymentEvent = #{
-        event_id => <<"evt002">>,
-        timestamp => erlang:monotonic_time(millisecond) + 100,
-        activity => <<"payment_processed">>,
-        objects => #{
-            <<"order">> => [<<"order123">>],
-            <<"payment">> => [<<"pay101">>]
-        }
-    },
-
-    yawl_ocpm:log_multi_object_event([<<"order">>, <<"payment">>], PaymentEvent),
-    io:format("✓ Payment event logged~n"),
-
-    ok.
-
-%% @doc OCPM query example.
-ocpm_query_example() ->
-    io:format("~n=== OCPM Query Example ===~n"),
-
-    % Query object lifecycle
-    Lifecycle = yawl_ocpm:pi_object_lifecycle(<<"order123">>),
-    io:format("Order lifecycle: ~p~n", [Lifecycle]),
-
-    % Query inter-object dependencies
-    Deps = yawl_ocpm:pi_inter_object_dependencies(),
-    io:format("Object dependencies: ~p~n", [Deps]),
-
-    % Extract events for specific object type
-    CurrentLog = yawl_ocpm:get_current_log(),
-    OrderEvents = yawl_ocpm:extract_object_type(<<"order">>, CurrentLog),
-    io:format("Order events: ~p~n", [length(OrderEvents)]),
-
-    ok.
-
-%% @doc OCPM AI grounding example.
-ocpm_ai_grounding_example() ->
-    io:format("~n=== OCPM AI Grounding Example ===~n"),
-
-    % Get current OCPM log
-    OCLog = yawl_ocpm:get_current_log(),
-
-    % Ground generative AI
-    GroundedModel = yawl_ocpm:ground_generative_ai(OCLog),
-    io:format("Grounded model: ~p~n", [GroundedModel]),
-
-    % Ground predictive AI
-    Predictions = yawl_ocpm:ground_predictive_ai(OCLog),
-    io:format("Predictions: ~p~n", [Predictions]),
-
-    % Ground prescriptive AI
-    Recommendations = yawl_ocpm:ground_prescriptive_ai(OCLog),
-    io:format("Recommendations: ~p~n", [Recommendations]),
-
-    ok.
-
-%%====================================================================
-%% CPN Examples (Paper 2506.12238)
-%%====================================================================
-
-%% @doc Colored tokens example.
-cpn_colored_tokens_example() ->
-    io:format("~n=== CPN Colored Tokens Example ===~n"),
-
-    % Start CPN server
-    {ok, _} = yawl_cpn:start_link(),
-
-    % Create color sets
-    OrderColorSet = yawl_cpn:create_color_set(order, record),
-    ItemColorSet = yawl_cpn:create_color_set(item, product),
-
-    io:format("✓ Color sets created~n"),
-
-    % Create timed tokens
-    OrderToken = yawl_cpn:create_timed_token(
-        #{
-            order_id => 123,
-            customer_id => <<"cust456">>,
-            total => 99.99
-        },
-        erlang:monotonic_time(millisecond)
-    ),
-
-    io:format("Order token: ~p~n", [OrderToken]),
-
-    % Create marking with colored tokens
-    Marking = #{
-        p_orders => [OrderToken],
-        p_payments => [],
-        p_completed => []
-    },
-
-    io:format("Marking: ~p~n", [Marking]),
-
-    ok.
-
-%% @doc CPN guards example.
-cpn_guards_example() ->
-    io:format("~n=== CPN Guards Example ===~n"),
-
-    % Create marking with test data
-    Marking = #{
-        p_input => [
-            yawl_cpn:create_timed_token(#{amount => 100}, 0),
-            yawl_cpn:create_timed_token(#{amount => 0}, 0),
-            yawl_cpn:create_timed_token(#{amount => -50}, 0)
-        ]
-    },
-
-    % Define guard expression
-    Guard = {amount, '>', 0},
-
-    % Evaluate guard against marking
-    Result = yawl_cpn:evaluate_guard(Guard, Marking),
-    io:format("Guard evaluation result: ~p~n", [Result]),
-
-    % Test fire transition with guard
-    case yawl_cpn:fire_transition_with_color(
-        t_process,
-        #{guard => Guard},
-        Marking
-    ) of
-        {ok, NewMarking} ->
-            io:format("✓ Transition fired, new marking: ~p~n", [NewMarking]);
-        {error, Reason} ->
-            io:format("✗ Transition failed: ~p~n", [Reason])
-    end,
-
-    ok.
-
-%% @doc CPN JSON export example.
-cpn_json_export_example() ->
-    io:format("~n=== CPN JSON Export Example ===~n"),
-
-    % Export workflow to CPN JSON
-    CPNJSON = yawl_cpn:workflow_to_cpn_json(ordering_workflow),
-    io:format("CPN JSON exported: ~p bytes~n", [byte_size(CPNJSON)]),
-
-    % Save to file
-    file:write_file("priv/benchmarks/ordering_workflow_cpn.json", CPNJSON),
-    io:format("✓ Saved to priv/benchmarks/ordering_workflow_cpn.json~n"),
-
-    % Format for LLM
-    LLMJSON = yawl_cpn:llm_format_workflow(ordering_workflow),
-    io:format("LLM JSON: ~p bytes~n", [byte_size(LLMJSON)]),
-
-    % Parse LLM response (simulated)
-    LLMResponse = <<"
-    {
-        \"places\": [
-            {\"id\": \"p1\", \"name\": \"Start\"},
-            {\"id\": \"p2\", \"name\": \"End\"}
-        ],
-        \"transitions\": [
-            {\"id\": \"t1\", \"name\": \"Process\", \"guard\": \"true\"}
-        ]
-    }
-    ">>,
-
-    case yawl_cpn:parse_llm_workflow(LLMResponse) of
-        {ok, ParsedModel} ->
-            io:format("✓ LLM workflow parsed successfully~n"),
-            io:format("Parsed: ~p~n", [ParsedModel]);
-        {error, Reason} ->
-            io:format("✗ Parse failed: ~p~n", [Reason])
-    end,
-
-    ok.
-
-%%====================================================================
-%% Helper Functions
-%%====================================================================
-
-%% @private
-%% Print example header.
-print_header(Title) ->
-    io:format("~n~s~n", [lists:duplicate(60, "=")]),
-    io:format("~s~n", [Title]),
-    io:format("~s~n", [lists:duplicate(60, "=")]).
-
-%% @private
-%% Print success message.
-print_success(Message) ->
-    io:format("✓ ~s~n", [Message]).
-
-%% @private
-%% Print error message.
-print_error(Message) ->
-    io:format("✗ ~s~n", [Message]).
+    % Step 3: Check reachability
+    case maps:get(valid, ValidationReport, true) of
+        true ->
+            % Step 4: Log to OCPM for grounding
+            lists:foreach(fun(Act) ->
+                yawl_ocpm:log_oc_event(#{
+                    id => list_to_binary("evt-" ++ integer_to_list(erlang:unique_integer([positive]))),
+                    timestamp => erlang:system_time(millisecond),
+                    objects => #{workflow => <<"main">>},
+                    activity => Act
+                })
+            end, maps:get(activities, LLMModel, [])),
+            {ok, validated_and_logged};
+        false ->
+            {error, validation_failed}
+    end.

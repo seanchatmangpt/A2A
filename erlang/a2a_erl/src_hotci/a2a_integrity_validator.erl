@@ -845,13 +845,96 @@ safe_file_format(PackagePath) ->
     lists:member(FileExt, SafeExtensions).
 
 extract_package_contents(PackagePath) ->
-    %% Placeholder for package extraction
-    %% In real implementation, this would extract the package and list contents
-    #{
-        directories => ["/ebin", "/include", "/priv"],
-        files => ["/ebin/app.beam", "/include/hrl.hrl", "/priv/config.json"],
-        permissions => [read, write, execute]
-    }.
+    %% Extract package and list contents
+    Extension = filename:extension(PackagePath),
+    case Extension of
+        ".zip" ->
+            extract_zip_contents(PackagePath);
+        ".tar.gz"; ".tgz"; ".tar.bz2"; ".tbz" ->
+            extract_tar_contents(PackagePath);
+        _ ->
+            %% For directories or unknown formats
+            case filelib:is_dir(PackagePath) of
+                true ->
+                    list_directory_contents(PackagePath);
+                false ->
+                    {error, unsupported_format}
+            end
+    end.
+
+extract_zip_contents(PackagePath) ->
+    %% Extract and list ZIP file contents
+    case zip:table(PackagePath) of
+        {ok, FileList} ->
+            Directories = lists:filter(fun(F) ->
+                filename:basename(F) =:= ""
+            end, FileList),
+            Files = lists:filter(fun(F) ->
+                filename:basename(F) =/= "" andalso
+                not lists:prefix("__MACOSX", F)
+            end, FileList),
+            #{
+                directories => [filename:dirname(D) || D <- Directories],
+                files => Files,
+                permissions => extract_permissions_from_zip(FileList)
+            };
+        {error, Reason} ->
+            {error, {zip_extraction_failed, Reason}}
+    end.
+
+extract_tar_contents(PackagePath) ->
+    %% Extract and list tar file contents
+    case erl_tar:table(PackagePath, [compressed]) of
+        {ok, FileList} ->
+            Directories = lists:filter(fun({Name, _}) ->
+                lists:prefix(Name, "/") andalso filename:basename(Name) =:= ""
+            end, FileList),
+            Files = [Name || {Name, _} <- FileList, filename:basename(Name) =/= ""],
+            #{
+                directories => [Dir || {Dir, _} <- Directories],
+                files => Files,
+                permissions => [read, write]
+            };
+        {error, Reason} ->
+            {error, {tar_extraction_failed, Reason}}
+    end.
+
+list_directory_contents(DirPath) ->
+    %% List contents of a directory
+    case file:list_dir(DirPath, #{}) of
+        {ok, Files} ->
+            FullPaths = [filename:join(DirPath, F) || F <- Files],
+            Directories = [F || F <- FullPaths, filelib:is_dir(F)],
+            FilesOnly = [F || F <- FullPaths, not filelib:is_dir(F)],
+            #{
+                directories => Directories,
+                files => FilesOnly,
+                permissions => [read, write]
+            };
+        {error, Reason} ->
+            {error, {directory_read_failed, Reason}}
+    end.
+
+extract_permissions_from_zip(FileList) ->
+    %% Extract permissions from ZIP file entries
+    lists:usort(lists:flatmap(fun(FilePath) ->
+        case file:read_file_info(FilePath) of
+            {ok, FileInfo} ->
+                Perms = FileInfo#file_info.mode,
+                convert_unix_permissions(Perms);
+            _ ->
+                [read]
+        end
+    end, FileList)).
+
+convert_unix_permissions(Mode) ->
+    %% Convert Unix permission bits to atoms
+    case Mode band 8#777 of
+        N when N >= 8#444 -> [read, write, execute];
+        N when N >= 8#222 -> [read, write];
+        N when N >= 8#111 -> [read];
+        _ -> []
+    end.
 
 validate_directories(Contents, Required) ->
     FoundDirs = maps:get(directories, Contents, []),
@@ -892,10 +975,39 @@ get_current_system_info() ->
     }.
 
 check_dependency_availability(Dep, System) ->
-    %% Placeholder for dependency checking
-    case maps:get(Dep, System, undefined) of
-        undefined -> missing;
-        _ -> available
+    %% Check if a dependency is available in the current system
+    case Dep of
+        AppName when is_atom(AppName) orelse is_binary(AppName) ->
+            AppNameStr = case AppName of
+                A when is_atom(A) -> atom_to_list(A);
+                B when is_binary(B) -> binary_to_list(B)
+            end,
+            %% Check if application is loaded or can be loaded
+            case application:which_applications() of
+                Apps ->
+                    case lists:keyfind(AppNameStr, 1, Apps) of
+                        false ->
+                            %% Check if app file exists
+                            case code:where_is_file(filename:join(AppNameStr, AppNameStr ++ ".app")) of
+                                non_existing -> missing;
+                                _ -> available
+                            end;
+                        _ -> available
+                    end
+            end;
+        {AppName, MinVersion} ->
+            AppNameStr = atom_to_list(AppName),
+            case application:get_key(AppName, vsn) of
+                {ok, CurrentVsn} ->
+                    case version_compare(CurrentVsn, MinVersion) of
+                        compatible -> available;
+                        _ -> missing
+                    end;
+                undefined ->
+                    missing
+            end;
+        _ ->
+            missing
     end.
 
 get_current_version() ->
@@ -906,9 +1018,27 @@ get_current_version() ->
     end.
 
 get_current_operator() ->
-    %% Placeholder for operator identification
-    "system".
+    %% Get current operator from process dictionary or environment
+    case get(operator_id) of
+        undefined ->
+            case get('$initial_call') of
+                {Module, _Func, _Arity} ->
+                    list_to_binary(atom_to_list(Module));
+                _ ->
+                    <<"system">>
+            end;
+        OperatorID ->
+            iolist_to_binary(OperatorID)
+    end.
 
 generate_placeholder_signatures() ->
-    %% Placeholder for signature generation
-    #{admin => "placeholder_signature"}.
+    %% Generate placeholder signatures for testing
+    %% In production, this would use actual cryptographic signing
+    Timestamp = erlang:system_time(millisecond),
+    SignatureData = <<Timestamp:64/integer-unsigned-big>>,
+    Signature = crypto:hash(sha256, SignatureData),
+    #{
+        admin => base64:encode(Signature),
+        system => base64:encode(crypto:hash(sha256, <<Signature/binary, 1>>)),
+        automated => base64:encode(crypto:hash(sha256, <<Signature/binary, 2>>))
+    }.

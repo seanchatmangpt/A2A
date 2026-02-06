@@ -171,7 +171,7 @@ test_validate_empty_config() ->
     end.
 
 %%====================================================================
- Workflow Status Tests
+%% Workflow Status Tests
 %%====================================================================
 
 get_status_test_() ->
@@ -437,7 +437,7 @@ test_get_unknown_pattern_info() ->
     end.
 
 %%====================================================================
- Workflow Result Tests
+%% Workflow Result Tests
 %%====================================================================
 
 get_workflow_result_test_() ->
@@ -653,7 +653,7 @@ test_init_default() ->
         ?assert(is_map(State#state.pattern_cache)),
         ?assert(is_map(State#state.subscribers)),
         ?assert(is_map(State#state.config)),
-        ?assert(is_map(State#state.statistics))
+        ?assert(is_map(State#state.statistics)),
 
         %% Verify initial values
         ?assertEqual(0, maps:size(State#state.workflows)),
@@ -675,7 +675,7 @@ error_handling_test_() ->
       fun test_handle_unknown_call/0},
      {"Handle malformed workflow IDs",
       fun test_handle_malformed_workflow_ids/0},
-     "Handle invalid config parameters",
+     {"Handle invalid config parameters",
       fun test_handle_invalid_config/0}].
 
 test_handle_unknown_call() ->
@@ -727,9 +727,9 @@ test_handle_invalid_config() ->
 integration_test_() ->
     [{"Full workflow lifecycle",
       fun test_full_workflow_lifecycle/0},
-     "Multiple concurrent workflows",
+     {"Multiple concurrent workflows",
       fun test_concurrent_workflows/0},
-     "Subscription notifications",
+     {"Subscription notifications",
       fun test_subscription_notifications/0}].
 
 test_full_workflow_lifecycle() ->
@@ -815,9 +815,9 @@ test_subscription_notifications() ->
 performance_test_() ->
     [{"Create and list many workflows",
       fun test_create_many_workflows/0},
-     "Pattern lookup performance",
+     {"Pattern lookup performance",
       fun test_pattern_lookup_performance/0},
-     "Concurrent access performance",
+     {"Concurrent access performance",
       fun test_concurrent_access_performance/0}].
 
 test_create_many_workflows() ->
@@ -910,7 +910,7 @@ test_concurrent_access_performance() ->
 stress_test_() ->
     [{"Stress test with many operations",
       fun test_stress_many_operations/0},
-     "Stress test with workflow churn",
+     {"Stress test with workflow churn",
       fun test_stress_workflow_churn/0}].
 
 test_stress_many_operations() ->

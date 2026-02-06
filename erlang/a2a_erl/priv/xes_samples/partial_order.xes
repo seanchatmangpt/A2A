@@ -1,97 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<log xes.version="1.0" xmlns="http://www.xes-standard.org/"
-     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-     xsi:schemaLocation="http://www.xes-standard.org/ xes.xsd"
-     id="partial_order_log">
-  <extension name="Concept" prefix="concept" uri="http://www.xes-standard.org/concept.xesext"/>
+<log xmlns="http://www.xes-standard.org/" xes.version="1.0">
+  <extension name="PartialOrder" prefix="po" uri="http://www.xes-standard.org/po.xesext"/>
   <extension name="Time" prefix="time" uri="http://www.xes-standard.org/time.xesext"/>
-  <extension name="Lifecycle" prefix="lifecycle" uri="http://www.xes-standard.org/lifecycle.xesext"/>
-  <!-- Partial Order Extension (Paper 2509.15346) -->
-  <extension name="Partial-Order" prefix="po" uri="http://www.yawlfoundation.org/yawlpoxes"/>
-
-  <global scope="trace">
-    <string key="concept:name" value="Partial Order Trace"/>
-  </global>
-  <global scope="event">
-    <string key="concept:name" value=""/>
-    <date key="time:timestamp" value="1970-01-01T00:00:00.000+00:00"/>
-    <string key="lifecycle:transition" value="complete"/>
-  </global>
-
-  <!-- Trace with partial order information -->
+  <extension name="Concept" prefix="concept" uri="http://www.xes-standard.org/concept.xesext"/>
+  
   <trace>
-    <string key="concept:name" value="trace_with_concurrency"/>
+    <string key="concept:name" value="po-trace-1"/>
+    <string key="po:format" value="partial-order"/>
+    
+    <!-- Define partial order relations -->
+    <list key="po:relations">
+      <string key="e1->e2" value="e1-precedes-e2"/>
+      <string key="e1->e3" value="e1-precedes-e3"/>
+      <string key="e2->e4" value="e2-precedes-e4"/>
+      <string key="e3->e4" value="e3-precedes-e4"/>
+      <string key="e2||e3" value="e2-concurrent-e3"/>
+    </list>
+    
     <event>
       <string key="concept:name" value="A"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:00.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <!-- B and C are concurrent with each other -->
-      <string key="po:concurrent-with" value="B,C"/>
-      <string key="po:causal-predecessors" value=""/>
+      <string key="po:id" value="e1"/>
+      <date key="time:timestamp" value="2025-01-01T10:00:00.000Z"/>
     </event>
     <event>
       <string key="concept:name" value="B"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <!-- C is concurrent with B -->
-      <string key="po:concurrent-with" value="C"/>
-      <string key="po:causal-predecessors" value="A"/>
+      <string key="po:id" value="e2"/>
+      <date key="time:timestamp" value="2025-01-01T10:02:00.000Z"/>
     </event>
     <event>
       <string key="concept:name" value="C"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <!-- B is concurrent with C -->
-      <string key="po:concurrent-with" value="B"/>
-      <string key="po:causal-predecessors" value="A"/>
+      <string key="po:id" value="e3"/>
+      <date key="time:timestamp" value="2025-01-01T10:02:00.000Z"/>
     </event>
     <event>
       <string key="concept:name" value="D"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:10.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <string key="po:causal-predecessors" value="B,C"/>
-      <string key="po:synchronization-point" value="true"/>
-    </event>
-  </trace>
-
-  <!-- Second trace showing different concurrency -->
-  <trace>
-    <string key="concept:name" value="trace_with_three_way_parallel"/>
-    <event>
-      <string key="concept:name" value="start"/>
-      <date key="time:timestamp" value="2024-01-02T10:00:00.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <string key="po:concurrent-with" value=""/>
-      <string key="po:causal-predecessors" value=""/>
-    </event>
-    <event>
-      <string key="concept:name" value="task1"/>
-      <date key="time:timestamp" value="2024-01-02T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <!-- All three tasks are concurrent -->
-      <string key="po:concurrent-with" value="task2,task3"/>
-      <string key="po:causal-predecessors" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="task2"/>
-      <date key="time:timestamp" value="2024-01-02T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <string key="po:concurrent-with" value="task1,task3"/>
-      <string key="po:causal-predecessors" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="task3"/>
-      <date key="time:timestamp" value="2024-01-02T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <string key="po:concurrent-with" value="task1,task2"/>
-      <string key="po:causal-predecessors" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="end"/>
-      <date key="time:timestamp" value="2024-01-02T10:00:10.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-      <string key="po:causal-predecessors" value="task1,task2,task3"/>
-      <string key="po:synchronization-point" value="true"/>
+      <string key="po:id" value="e4"/>
+      <date key="time:timestamp" value="2025-01-01T10:05:00.000Z"/>
     </event>
   </trace>
 </log>

@@ -1,166 +1,55 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<log xes.version="1.0" xmlns="http://www.xes-standard.org/"
-     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-     xsi:schemaLocation="http://www.xes-standard.org/ xes.xsd"
-     id="standard_process_log">
-  <extension name="Concept" prefix="concept" uri="http://www.xes-standard.org/concept.xesext"/>
-  <extension name="Time" prefix="time" uri="http://www.xes-standard.org/time.xesext"/>
-  <extension name="Organizational" prefix="org" uri="http://www.xes-standard.org/org.xesext"/>
+<log xmlns="http://www.xes-standard.org/" xes.version="1.0" xes.features="nested-attributes">
   <extension name="Lifecycle" prefix="lifecycle" uri="http://www.xes-standard.org/lifecycle.xesext"/>
-
+  <extension name="Time" prefix="time" uri="http://www.xes-standard.org/time.xesext"/>
+  <extension name="Concept" prefix="concept" uri="http://www.xes-standard.org/concept.xesext"/>
   <global scope="trace">
-    <string key="concept:name" value="Order Process"/>
+    <string key="concept:name" value="case_id"/>
   </global>
   <global scope="event">
-    <string key="concept:name" value=""/>
-    <date key="time:timestamp" value="1970-01-01T00:00:00.000+00:00"/>
+    <string key="concept:name" value="activity"/>
+    <date key="time:timestamp" value="timestamp"/>
     <string key="lifecycle:transition" value="complete"/>
   </global>
-
-  <classifier name="Activity" keys="concept:name"/>
-
-  <!-- Trace 1: Standard happy path -->
   <trace>
-    <string key="concept:name" value="trace_001"/>
+    <string key="concept:name" value="case-1"/>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:00.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
+      <string key="concept:name" value="Request"/>
+      <date key="time:timestamp" value="2025-01-01T10:00:00.000Z"/>
     </event>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
+      <string key="concept:name" value="Approve"/>
+      <date key="time:timestamp" value="2025-01-01T10:05:00.000Z"/>
     </event>
     <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:10.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:15.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:20.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:30.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:35.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-01T10:00:40.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
+      <string key="concept:name" value="Complete"/>
+      <date key="time:timestamp" value="2025-01-01T10:10:00.000Z"/>
     </event>
   </trace>
-
-  <!-- Trace 2: Standard with validation step -->
   <trace>
-    <string key="concept:name" value="trace_002"/>
+    <string key="concept:name" value="case-2"/>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:00.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
+      <string key="concept:name" value="Request"/>
+      <date key="time:timestamp" value="2025-01-01T11:00:00.000Z"/>
     </event>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_validated"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:10.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_validated"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:12.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:20.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:25.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:30.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:45.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:50.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-02T14:00:55.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
+      <string key="concept:name" value="Reject"/>
+      <date key="time:timestamp" value="2025-01-01T11:03:00.000Z"/>
     </event>
   </trace>
-
-  <!-- Trace 3: Standard without explicit validation -->
   <trace>
-    <string key="concept:name" value="trace_003"/>
+    <string key="concept:name" value="case-3"/>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:00.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
+      <string key="concept:name" value="Request"/>
+      <date key="time:timestamp" value="2025-01-01T12:00:00.000Z"/>
     </event>
     <event>
-      <string key="concept:name" value="order_created"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:05.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
+      <string key="concept:name" value="Approve"/>
+      <date key="time:timestamp" value="2025-01-01T12:06:00.000Z"/>
     </event>
     <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:15.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="payment_processed"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:20.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:25.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_shipped"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:40.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:45.000Z"/>
-      <string key="lifecycle:transition" value="start"/>
-    </event>
-    <event>
-      <string key="concept:name" value="order_completed"/>
-      <date key="time:timestamp" value="2024-01-03T09:00:50.000Z"/>
-      <string key="lifecycle:transition" value="complete"/>
+      <string key="concept:name" value="Complete"/>
+      <date key="time:timestamp" value="2025-01-01T12:12:00.000Z"/>
     </event>
   </trace>
 </log>

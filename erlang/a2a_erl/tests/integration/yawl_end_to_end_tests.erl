@@ -1901,14 +1901,13 @@ cleanup_test_data(_Config) ->
 -spec cleanup_mnesia_table(atom()) -> ok.
 cleanup_mnesia_table(TableName) ->
     Trans = fun() ->
-        mnesia:match_object(#TableName{_ = '_'})
+        mnesia:all_keys(TableName)
     end,
     case mnesia:transaction(Trans) of
-        {atomic, Records} ->
-            lists:foreach(fun(Record) ->
-                Key = element(1, Record),
+        {atomic, Keys} ->
+            lists:foreach(fun(Key) ->
                 mnesia:delete(TableName, Key, write)
-            end, Records);
+            end, Keys);
         _ ->
             ok
     end,
