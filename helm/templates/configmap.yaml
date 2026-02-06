@@ -1,0 +1,361 @@
+{{- if .Values.configMap.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id": "{{ .Values.marketplace.partnerId }}", "solution_id": "{{ .Values.marketplace.solutionId }}"}'
+data:
+  app.config.json: |
+    {
+      "server": {
+        "host": "{{ .Values.app.host }}",
+        "port": {{ .Values.app.port }},
+        "scheme": "{{ .Values.app.scheme }}",
+        "bind_address": "{{ .Values.app.host }}:{{ .Values.app.port }}"
+      },
+      "environment": "{{ .Values.global.environment | default "production" }}",
+      "deployment": {
+        "platform": "gcp",
+        "marketplace": true,
+        "namespace": "{{ .Release.Namespace }}",
+        "release": "{{ .Release.Name }}",
+        "version": "{{ .Chart.AppVersion }}"
+      },
+      "protocol": {
+        "name": "A2A",
+        "version": "1.0.0",
+        "enabled": true,
+        "max_message_size": {{ .Values.protocol.maxMessageSize | default 1048576 }},
+        "timeout": {{ .Values.protocol.timeout | default 30 }},
+        "retry_attempts": {{ .Values.protocol.retryAttempts | default 3 }},
+        "retry_delay": {{ .Values.protocol.retryDelay | default 1000 }}
+      },
+      "agents": {
+        "discovery": {
+          "enabled": {{ .Values.agents.discovery.enabled | default true }},
+          "interval": {{ .Values.agents.discovery.interval | default 60 }},
+          "timeout": {{ .Values.agents.discovery.timeout | default 10 }}
+        },
+        "registry": {
+          "enabled": {{ .Values.agents.registry.enabled | default true }},
+          "endpoint": "{{ .Values.agents.registry.endpoint | default "/api/v1/agents" }}"
+        }
+      },
+      "communication": {
+        "transport": "{{ .Values.communication.transport | default "http" }}",
+        "compression": {{ .Values.communication.compression | default true }},
+        "encryption": {{ .Values.communication.encryption | default false }},
+        "max_connections": {{ .Values.communication.maxConnections | default 1000 }},
+        "keepalive": {{ .Values.communication.keepalive | default true }}
+      },
+      "security": {
+        "enabled": {{ .Values.security.enabled | default true }},
+        "authentication": {
+          "enabled": {{ .Values.security.authentication.enabled | default false }},
+          "method": "{{ .Values.security.authentication.method | default "jwt" }}"
+        },
+        "authorization": {
+          "enabled": {{ .Values.security.authorization.enabled | default false }},
+          "method": "{{ .Values.security.authorization.method | default "rbac" }}"
+        },
+        "tls": {
+          "enabled": {{ .Values.security.tls.enabled | default false }},
+          "verify": {{ .Values.security.tls.verify | default true }}
+        }
+      },
+      "features": {
+        "metrics": {{ .Values.monitoring.enabled | default true }},
+        "tracing": {{ .Values.tracing.enabled | default false }},
+        "logging": true,
+        "health_check": true,
+        "ready_check": true
+      },
+      "gcp": {
+        "project_id": "{{ .Values.gcp.projectId | default "" }}",
+        "region": "{{ .Values.gcp.region | default "us-central1" }}",
+        "zone": "{{ .Values.gcp.zone | default "" }}",
+        "service_account": "{{ .Values.serviceAccount.annotations.iam.gke.io/gcp-service-account | default "" }}"
+      },
+      "storage": {
+        "type": "{{ .Values.storage.type | default "persistent" }}",
+        "path": "{{ .Values.persistence.mountPath }}",
+        "size": "{{ .Values.persistence.size }}",
+        "class": "{{ .Values.persistence.storageClass }}"
+      },
+      "monitoring": {
+        "enabled": {{ .Values.monitoring.enabled | default true }},
+        "prometheus": {
+          "enabled": {{ .Values.monitoring.serviceMonitor.enabled | default false }},
+          "path": "{{ .Values.monitoring.serviceMonitor.path | default "/metrics" }}",
+          "interval": "{{ .Values.monitoring.serviceMonitor.interval | default "30s" }}"
+        },
+        "health": {
+          "liveness_path": "{{ .Values.livenessProbe.httpGet.path }}",
+          "readiness_path": "{{ .Values.readinessProbe.httpGet.path }}"
+        }
+      },
+      "scaling": {
+        "enabled": {{ .Values.autoscaling.enabled | default false }},
+        "min_replicas": {{ .Values.autoscaling.minReplicas | default 2 }},
+        "max_replicas": {{ .Values.autoscaling.maxReplicas | default 10 }},
+        "target_cpu": {{ .Values.autoscaling.targetCPUUtilizationPercentage | default 70 }},
+        "target_memory": {{ .Values.autoscaling.targetMemoryUtilizationPercentage | default 80 }}
+      },
+      "resources": {
+        "limits": {
+          "cpu": "{{ .Values.resources.limits.cpu }}",
+          "memory": "{{ .Values.resources.limits.memory }}"
+        },
+        "requests": {
+          "cpu": "{{ .Values.resources.requests.cpu }}",
+          "memory": "{{ .Values.resources.requests.memory }}"
+        }
+      }
+    }
+
+  logging.json: |
+    {
+      "version": "1.0",
+      "level": "{{ .Values.logging.level | default "info" }}",
+      "format": "{{ .Values.logging.format | default "json" }}",
+      "output": "{{ .Values.logging.output | default "stdout" }}",
+      "handlers": {
+        "console": {
+          "type": "stream",
+          "stream": "stdout",
+          "level": "{{ .Values.logging.level | default "info" }}",
+          "formatter": "json"
+        },
+        "file": {
+          "type": "file",
+          "filename": "/var/log/a2a/app.log",
+          "level": "{{ .Values.logging.level | default "info" }}",
+          "formatter": "json",
+          "rotation": {
+            "enabled": true,
+            "max_bytes": 10485760,
+            "backup_count": 5
+          }
+        }
+      },
+      "loggers": {
+        "a2a": {
+          "level": "{{ .Values.logging.level | default "info" }}",
+          "handlers": ["console"],
+          "propagate": false
+        },
+        "protocol": {
+          "level": "{{ .Values.logging.level | default "info" }}",
+          "handlers": ["console"],
+          "propagate": false
+        },
+        "agents": {
+          "level": "{{ .Values.logging.level | default "info" }}",
+          "handlers": ["console"],
+          "propagate": false
+        }
+      },
+      "root": {
+        "level": "{{ .Values.logging.level | default "info" }}",
+        "handlers": ["console"]
+      },
+      "formatters": {
+        "json": {
+          "format": "%(timestamp)s %(level)s %(name)s %(message)s",
+          "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "text": {
+          "format": "%(timestamp)s - %(name)s - %(level)s - %(message)s"
+        }
+      }
+    }
+
+  monitoring.yaml: |
+    version: 1.0
+    enabled: {{ .Values.monitoring.enabled | default true }}
+
+    metrics:
+      enabled: true
+      port: {{ .Values.app.port }}
+      path: {{ .Values.monitoring.serviceMonitor.path | default "/metrics" }}
+      interval: {{ .Values.monitoring.serviceMonitor.interval | default "30s" }}
+      format: prometheus
+
+    health_checks:
+      liveness:
+        enabled: true
+        path: {{ .Values.livenessProbe.httpGet.path }}
+        port: {{ .Values.livenessProbe.httpGet.port }}
+        initial_delay: {{ .Values.livenessProbe.initialDelaySeconds }}s
+        period: {{ .Values.livenessProbe.periodSeconds }}s
+        timeout: {{ .Values.livenessProbe.timeoutSeconds }}s
+        failure_threshold: {{ .Values.livenessProbe.failureThreshold }}
+
+      readiness:
+        enabled: true
+        path: {{ .Values.readinessProbe.httpGet.path }}
+        port: {{ .Values.readinessProbe.httpGet.port }}
+        initial_delay: {{ .Values.readinessProbe.initialDelaySeconds }}s
+        period: {{ .Values.readinessProbe.periodSeconds }}s
+        timeout: {{ .Values.readinessProbe.timeoutSeconds }}s
+        failure_threshold: {{ .Values.readinessProbe.failureThreshold }}
+
+    tracing:
+      enabled: {{ .Values.tracing.enabled | default false }}
+      {{- if .Values.tracing.enabled }}
+      provider: {{ .Values.tracing.provider | default "stackdriver" }}
+      sampling_rate: {{ .Values.tracing.samplingRate | default 0.1 }}
+      {{- end }}
+
+    logging:
+      level: {{ .Values.logging.level | default "info" }}
+      format: {{ .Values.logging.format | default "json" }}
+      output: {{ .Values.logging.output | default "stdout" }}
+
+  protocol.yaml: |
+    version: 1.0
+    protocol:
+      name: A2A
+      version: 1.0.0
+      description: Agent2Agent Protocol
+
+    endpoints:
+      base_url: http://{{ .Values.app.host }}:{{ .Values.app.port }}
+      api_version: v1
+
+      routes:
+        health: /health
+        ready: /ready
+        metrics: /metrics
+        agents: /api/v1/agents
+        messages: /api/v1/messages
+        discovery: /api/v1/discovery
+
+    message_format:
+      content_type: application/json
+      encoding: utf-8
+      max_size: {{ .Values.protocol.maxMessageSize | default 1048576 }}
+      compression: {{ .Values.communication.compression | default true }}
+
+    communication:
+      transport: {{ .Values.communication.transport | default "http" }}
+      timeout: {{ .Values.protocol.timeout | default 30 }}s
+      retry_attempts: {{ .Values.protocol.retryAttempts | default 3 }}
+      retry_delay: {{ .Values.protocol.retryDelay | default 1000 }}ms
+      keepalive: {{ .Values.communication.keepalive | default true }}
+      max_connections: {{ .Values.communication.maxConnections | default 1000 }}
+
+    security:
+      enabled: {{ .Values.security.enabled | default true }}
+      {{- if .Values.security.authentication.enabled }}
+      authentication:
+        enabled: true
+        method: {{ .Values.security.authentication.method | default "jwt" }}
+      {{- end }}
+      {{- if .Values.security.authorization.enabled }}
+      authorization:
+        enabled: true
+        method: {{ .Values.security.authorization.method | default "rbac" }}
+      {{- end }}
+      {{- if .Values.security.tls.enabled }}
+      tls:
+        enabled: true
+        verify: {{ .Values.security.tls.verify | default true }}
+      {{- end }}
+
+  agents.yaml: |
+    version: 1.0
+
+    discovery:
+      enabled: {{ .Values.agents.discovery.enabled | default true }}
+      interval: {{ .Values.agents.discovery.interval | default 60 }}s
+      timeout: {{ .Values.agents.discovery.timeout | default 10 }}s
+      methods:
+        - dns
+        - kubernetes
+        - registry
+
+    registry:
+      enabled: {{ .Values.agents.registry.enabled | default true }}
+      endpoint: {{ .Values.agents.registry.endpoint | default "/api/v1/agents" }}
+      ttl: {{ .Values.agents.registry.ttl | default 300 }}s
+      heartbeat: {{ .Values.agents.registry.heartbeat | default 30 }}s
+
+    capabilities:
+      advertise: {{ .Values.agents.capabilities.advertise | default true }}
+      discovery: {{ .Values.agents.capabilities.discovery | default true }}
+      negotiation: {{ .Values.agents.capabilities.negotiation | default true }}
+
+  gcp.yaml: |
+    version: 1.0
+
+    gcp:
+      project_id: "{{ .Values.gcp.projectId | default "" }}"
+      region: "{{ .Values.gcp.region | default "us-central1" }}"
+      {{- if .Values.gcp.zone }}
+      zone: "{{ .Values.gcp.zone }}"
+      {{- end }}
+
+    marketplace:
+      enabled: true
+      partner_id: "{{ .Values.marketplace.partnerId }}"
+      solution_id: "{{ .Values.marketplace.solutionId }}"
+      deployer_service_account: "{{ .Values.marketplace.deployerServiceAccount }}"
+
+    kubernetes:
+      namespace: "{{ .Release.Namespace }}"
+      release_name: "{{ .Release.Name }}"
+      chart_version: "{{ .Chart.Version }}"
+      app_version: "{{ .Chart.AppVersion }}"
+
+    service_account:
+      {{- if .Values.serviceAccount.annotations }}
+      {{- if index .Values.serviceAccount.annotations "iam.gke.io/gcp-service-account" }}
+      gcp_service_account: "{{ index .Values.serviceAccount.annotations "iam.gke.io/gcp-service-account" }}"
+      {{- end }}
+      {{- end }}
+      workload_identity: {{ .Values.gcp.workloadIdentity | default false }}
+
+    storage:
+      {{- if .Values.persistence.enabled }}
+      enabled: true
+      class: "{{ .Values.persistence.storageClass }}"
+      size: "{{ .Values.persistence.size }}"
+      access_mode: "{{ .Values.persistence.accessMode }}"
+      mount_path: "{{ .Values.persistence.mountPath }}"
+      {{- else }}
+      enabled: false
+      {{- end }}
+
+    networking:
+      service_type: "{{ .Values.service.type }}"
+      {{- if eq .Values.service.type "LoadBalancer" }}
+      load_balancer:
+        type: "{{ index .Values.service.annotations "cloud.google.com/load-balancer-type" | default "External" }}"
+      {{- end }}
+      {{- if .Values.ingress.enabled }}
+      ingress:
+        enabled: true
+        class: "{{ .Values.ingress.className }}"
+        {{- if .Values.ingress.annotations }}
+        {{- if index .Values.ingress.annotations "kubernetes.io/ingress.global-static-ip-name" }}
+        static_ip: "{{ index .Values.ingress.annotations "kubernetes.io/ingress.global-static-ip-name" }}"
+        {{- end }}
+        {{- end }}
+      {{- end }}
+
+    monitoring:
+      enabled: {{ .Values.monitoring.enabled | default true }}
+      stackdriver: {{ .Values.gcp.stackdriver | default true }}
+      cloud_logging: {{ .Values.gcp.cloudLogging | default true }}
+      cloud_monitoring: {{ .Values.gcp.cloudMonitoring | default true }}
+
+{{- if .Values.configMap.data }}
+{{ toYaml .Values.configMap.data | indent 2 }}
+{{- end }}
+{{- end }}

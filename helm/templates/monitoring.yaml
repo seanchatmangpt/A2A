@@ -1,0 +1,127 @@
+{{- if .Values.monitoring.enabled }}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "a2a.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app: a2a
+    {{- with .Values.marketplace }}
+    marketplace.cloud.google.com/solution-id: {{ .solutionId | quote }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.monitoring.serviceMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "a2a.selectorLabels" . | nindent 6 }}
+      app: a2a
+  endpoints:
+  - port: http
+    {{- with .Values.monitoring.serviceMonitor.interval }}
+    interval: {{ . }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ . }}
+    {{- end }}
+    path: {{ .Values.monitoring.serviceMonitor.path | default "/metrics" }}
+    scheme: {{ .Values.monitoring.serviceMonitor.scheme | default "http" }}
+    {{- with .Values.monitoring.serviceMonitor.tlsConfig }}
+    tlsConfig:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.bearerTokenFile }}
+    bearerTokenFile: {{ . }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.relabelings }}
+    relabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.metricRelabelings }}
+    metricRelabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with .Values.monitoring.serviceMonitor.namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.monitoring.serviceMonitor.targetLabels }}
+  targetLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{- if .Values.monitoring.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "a2a.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app: a2a
+    {{- with .Values.marketplace }}
+    marketplace.cloud.google.com/solution-id: {{ .solutionId | quote }}
+    {{- end }}
+    {{- with .Values.monitoring.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.monitoring.podMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "a2a.selectorLabels" . | nindent 6 }}
+      app: a2a
+  podMetricsEndpoints:
+  - port: http
+    {{- with .Values.monitoring.podMonitor.interval }}
+    interval: {{ . }}
+    {{- end }}
+    {{- with .Values.monitoring.podMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ . }}
+    {{- end }}
+    path: {{ .Values.monitoring.podMonitor.path | default "/metrics" }}
+    scheme: {{ .Values.monitoring.podMonitor.scheme | default "http" }}
+    {{- with .Values.monitoring.podMonitor.tlsConfig }}
+    tlsConfig:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.monitoring.podMonitor.bearerTokenFile }}
+    bearerTokenFile: {{ . }}
+    {{- end }}
+    {{- with .Values.monitoring.podMonitor.relabelings }}
+    relabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.monitoring.podMonitor.metricRelabelings }}
+    metricRelabelings:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with .Values.monitoring.podMonitor.namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.monitoring.podMonitor.podTargetLabels }}
+  podTargetLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.monitoring.podMonitor.sampleLimit }}
+  sampleLimit: {{ . }}
+  {{- end }}
+  {{- with .Values.monitoring.podMonitor.targetLimit }}
+  targetLimit: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end }}

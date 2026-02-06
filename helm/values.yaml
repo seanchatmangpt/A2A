@@ -1,0 +1,358 @@
+# GCP Marketplace Configuration for A2A
+# Application values for Helm deployment
+
+# Image configuration
+image:
+  registry: gcr.io
+  repository: YOUR_PROJECT_ID/a2a
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Replica configuration
+replicaCount: 3
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# Service configuration
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080
+  protocol: TCP
+  annotations:
+    cloud.google.com/load-balancer-type: "External"
+
+# Application configuration
+app:
+  port: 8080
+  host: "0.0.0.0"
+  scheme: http
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "gce"
+  annotations: {}
+  hosts:
+    - host: a2a.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          servicePort: 80
+  tls: []
+  ssl:
+    enabled: true
+    staticIpName: "a2a-static-ip"
+  backendConfig:
+    enabled: true
+    healthCheck:
+      checkIntervalSec: 30
+      timeoutSec: 5
+      healthyThreshold: 2
+      unhealthyThreshold: 2
+      type: HTTP
+      requestPath: /health
+      port: 8080
+    connectionDraining:
+      drainingTimeoutSec: 60
+    timeoutSec: 30
+    sessionAffinity:
+      affinityType: CLIENT_IP
+      affinityCookieTtlSec: 3600
+    cdn:
+      enabled: false
+      cachePolicy:
+        includeHost: true
+        includeProtocol: true
+        includeQueryString: false
+      negativeCaching: false
+    iap:
+      enabled: false
+      oauthclientCredentials:
+        secretName: oauth-client-secret
+    securityPolicy: {}
+    customRequestHeaders: {}
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: ""
+  name: ""
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - a2a
+          topologyKey: kubernetes.io/hostname
+
+# Persistent storage
+persistence:
+  enabled: true
+  storageClass: "standard-rwo"
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  mountPath: /opt/a2a_erl/data
+
+# ConfigMap data
+configMap:
+  enabled: true
+  data: {}
+
+# Secrets
+secrets:
+  enabled: false
+  data: {}
+  stringData: {}
+
+  # GCP Secret Manager with Workload Identity
+  gcpSecretManager:
+    enabled: false
+    projectID: ""
+    serviceAccount: ""
+    clusterLocation: "us-central1"
+    clusterName: ""
+    refreshInterval: "1h"
+    deletionPolicy: "Retain"
+    templateData: {}
+    # Example secrets to sync from GCP Secret Manager
+    secrets: []
+      # - secretKey: "api-key"
+      #   remoteKey: "a2a-api-key"
+      #   version: "latest"
+      # - secretKey: "db-password"
+      #   remoteKey: "a2a-db-password"
+      #   version: "1"
+    dataFrom: []
+      # - key: "a2a-all-secrets"
+      #   version: "latest"
+
+  # TLS certificates
+  tls:
+    enabled: false
+    cert: ""
+    key: ""
+    ca: ""
+    existingSecret: ""
+
+  # Image pull secret for private registries
+  imagePullSecret:
+    enabled: false
+    registry: "gcr.io"
+    username: ""
+    password: ""
+    email: ""
+    dockerconfigjson: ""
+
+  # GCP Service Account Key (Legacy - prefer Workload Identity)
+  serviceAccountKey:
+    enabled: false
+    keyJson: ""
+    projectId: ""
+
+  # Database credentials
+  database:
+    enabled: false
+    host: ""
+    port: 5432
+    name: ""
+    username: ""
+    password: ""
+    connectionString: ""
+    sslMode: "require"
+
+  # API keys and tokens
+  api:
+    enabled: false
+    key: ""
+    secret: ""
+    token: ""
+    jwtSecret: ""
+    encryptionKey: ""
+    customKeys: {}
+
+# GCP Marketplace specific
+marketplace:
+  deployerServiceAccount: "deployer@YOUR_PROJECT.iam.gserviceaccount.com"
+  solutionId: "a2a"
+  partnerId: "YOUR_PARTNER_ID"
+
+# Monitoring and logging
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    labels: {}
+    annotations: {}
+    relabelings: []
+    metricRelabelings: []
+    targetLabels: []
+    namespaceSelector: {}
+    tlsConfig: {}
+  podMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    labels: {}
+    annotations: {}
+    relabelings: []
+    metricRelabelings: []
+    podTargetLabels: []
+    namespaceSelector: {}
+    tlsConfig: {}
+    sampleLimit: 0
+    targetLimit: 0
+
+# Network policy
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
+
+# Global settings
+global:
+  environment: "production"
+
+# A2A Protocol configuration
+protocol:
+  maxMessageSize: 1048576
+  timeout: 30
+  retryAttempts: 3
+  retryDelay: 1000
+
+# Agent configuration
+agents:
+  discovery:
+    enabled: true
+    interval: 60
+    timeout: 10
+  registry:
+    enabled: true
+    endpoint: "/api/v1/agents"
+    ttl: 300
+    heartbeat: 30
+  capabilities:
+    advertise: true
+    discovery: true
+    negotiation: true
+
+# Communication settings
+communication:
+  transport: "http"
+  compression: true
+  encryption: false
+  maxConnections: 1000
+  keepalive: true
+
+# Security configuration
+security:
+  enabled: true
+  authentication:
+    enabled: false
+    method: "jwt"
+  authorization:
+    enabled: false
+    method: "rbac"
+  tls:
+    enabled: false
+    verify: true
+
+# GCP specific configuration
+gcp:
+  projectId: ""
+  region: "us-central1"
+  zone: ""
+  workloadIdentity: false
+  stackdriver: true
+  cloudLogging: true
+  cloudMonitoring: true
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+# Tracing configuration
+tracing:
+  enabled: false
+  provider: "stackdriver"
+  samplingRate: 0.1
+
+# Storage configuration
+storage:
+  type: "persistent"

@@ -1,0 +1,132 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "a2a.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "a2a.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    {{- range .Values.networkPolicy.policyTypes }}
+    - {{ . }}
+    {{- end }}
+
+  {{- if has "Ingress" .Values.networkPolicy.policyTypes }}
+  ingress:
+    # Allow traffic from load balancer / ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: TCP
+          port: {{ .Values.app.port }}
+
+    # Allow traffic from same namespace pods
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "a2a.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.app.port }}
+
+    # Allow health check probes from GKE control plane
+    - from:
+        - namespaceSelector: {}
+          podSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.app.port }}
+
+    {{- if .Values.monitoring.enabled }}
+    # Allow Prometheus scraping if monitoring is enabled
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ .Values.monitoring.serviceMonitor.path | default 9090 }}
+    {{- end }}
+
+    {{- with .Values.networkPolicy.ingress }}
+    # Custom ingress rules from values
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+
+  {{- if has "Egress" .Values.networkPolicy.policyTypes }}
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow traffic to same namespace pods
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "a2a.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.app.port }}
+
+    # Allow HTTPS egress for external APIs and services
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+
+    # Allow HTTP egress for external APIs
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 80
+
+    # Allow GCP metadata server access (169.254.169.254)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+
+    # Allow Kubernetes API server communication
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              component: apiserver
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
+    {{- with .Values.networkPolicy.egress }}
+    # Custom egress rules from values
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}

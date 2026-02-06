@@ -1,235 +1,209 @@
-# Terraform Outputs for Craftplan MCP + A2A + elrmcp Infrastructure
+# Terraform Outputs for GCP Marketplace - GKE Cluster
 
 output "cluster_name" {
-  description = "EKS cluster name"
-  value       = module.eks.cluster_name
+  description = "GKE cluster name"
+  value       = google_container_cluster.primary.name
   sensitive   = false
 }
 
 output "cluster_endpoint" {
-  description = "EKS cluster endpoint"
-  value       = module.eks.cluster_endpoint
+  description = "GKE cluster endpoint"
+  value       = google_container_cluster.primary.endpoint
   sensitive   = false
 }
 
-output "cluster_certificate_authority_data" {
-  description = "EKS cluster certificate authority data"
-  value       = module.eks.cluster_certificate_authority_data
+output "cluster_ca_certificate" {
+  description = "GKE cluster CA certificate"
+  value       = google_container_cluster.primary.master_auth[0].cluster_ca_certificate
   sensitive   = true
 }
 
-output "node_group_name" {
-  description = "EKS node group name"
-  value       = module.eks.node_groups["main"].name
+output "cluster_client_certificate" {
+  description = "GKE cluster client certificate"
+  value       = google_container_cluster.primary.master_auth[0].client_certificate
+  sensitive   = true
+}
+
+output "cluster_client_key" {
+  description = "GKE cluster client key"
+  value       = google_container_cluster.primary.master_auth[0].client_key
+  sensitive   = true
+}
+
+output "kubeconfig" {
+  description = "Kubernetes config for connecting to the cluster"
+  value = templatefile("${path.module}/templates/kubeconfig.tpl", {
+    cluster_name           = google_container_cluster.primary.name
+    cluster_endpoint       = google_container_cluster.primary.endpoint
+    cluster_ca_certificate = google_container_cluster.primary.master_auth[0].cluster_ca_certificate
+    project_id             = var.gcp_project
+    region                 = var.gcp_region
+  })
+  sensitive = true
+}
+
+output "kubeconfig_raw" {
+  description = "Raw kubeconfig for kubectl access"
+  value = {
+    host                   = google_container_cluster.primary.endpoint
+    cluster_ca_certificate = base64decode(google_container_cluster.primary.master_auth[0].cluster_ca_certificate)
+    token                  = data.google_client_config.default.access_token
+  }
+  sensitive = true
+}
+
+output "gke_cluster_location" {
+  description = "GKE cluster location (region or zone)"
+  value       = google_container_cluster.primary.location
   sensitive   = false
 }
 
-output "vpc_id" {
-  description = "VPC ID"
-  value       = module.vpc.vpc_id
+output "gke_cluster_version" {
+  description = "GKE cluster master version"
+  value       = google_container_cluster.primary.master_version
   sensitive   = false
 }
 
-output "private_subnets" {
-  description = "Private subnet IDs"
-  value       = module.vpc.private_subnets
+output "node_pool_name" {
+  description = "Primary node pool name"
+  value       = google_container_node_pool.primary_nodes.name
   sensitive   = false
 }
 
-output "public_subnets" {
-  description = "Public subnet IDs"
-  value       = module.vpc.public_subnets
+output "node_pool_version" {
+  description = "Primary node pool version"
+  value       = google_container_node_pool.primary_nodes.version
+  sensitive   = false
+}
+
+output "node_pool_instance_group_urls" {
+  description = "Node pool instance group URLs"
+  value       = google_container_node_pool.primary_nodes.instance_group_urls
+  sensitive   = false
+}
+
+output "network_name" {
+  description = "VPC network name"
+  value       = google_compute_network.vpc.name
+  sensitive   = false
+}
+
+output "subnet_name" {
+  description = "Subnet name"
+  value       = google_compute_subnetwork.subnet.name
+  sensitive   = false
+}
+
+output "subnet_cidr" {
+  description = "Subnet CIDR range"
+  value       = google_compute_subnetwork.subnet.ip_cidr_range
+  sensitive   = false
+}
+
+output "pods_ip_range" {
+  description = "IP range for pods"
+  value       = google_compute_subnetwork.subnet.secondary_ip_range[0].ip_cidr_range
+  sensitive   = false
+}
+
+output "services_ip_range" {
+  description = "IP range for services"
+  value       = google_compute_subnetwork.subnet.secondary_ip_range[1].ip_cidr_range
+  sensitive   = false
+}
+
+output "project_id" {
+  description = "GCP project ID"
+  value       = var.gcp_project
+  sensitive   = false
+}
+
+output "region" {
+  description = "GCP region"
+  value       = var.gcp_region
+  sensitive   = false
+}
+
+output "zone" {
+  description = "GCP zone"
+  value       = var.gcp_zone
+  sensitive   = false
+}
+
+output "service_account_email" {
+  description = "Service account email for GKE nodes"
+  value       = google_service_account.gke_service_account.email
   sensitive   = false
 }
 
 output "kubernetes_namespace" {
-  description = "Kubernetes namespace for Craftplan"
+  description = "Kubernetes namespace for application"
   value       = kubernetes_namespace.craftplan.metadata[0].name
   sensitive   = false
 }
 
-output "service_account" {
-  description = "Kubernetes service account for Craftplan"
+output "service_account_name" {
+  description = "Kubernetes service account name"
   value       = kubernetes_service_account.craftplan.metadata[0].name
   sensitive   = false
 }
 
-output "load_balancer_arn" {
-  description = "Application Load Balancer ARN"
-  value       = module.eks.kubelet[0].load_balancer_arn
+output "workload_identity_service_account" {
+  description = "GCP service account for Workload Identity"
+  value       = google_service_account.workload_identity.email
   sensitive   = false
 }
 
-output "load_balancer_dns_name" {
-  description = "Application Load Balancer DNS name"
-  value       = module.eks.kubelet[0].load_balancer_dns_name
+output "cluster_ipv4_cidr" {
+  description = "IPv4 CIDR block for the cluster"
+  value       = google_container_cluster.primary.cluster_ipv4_cidr
   sensitive   = false
 }
 
-output "database_endpoint" {
-  description = "Database endpoint"
-  value       = module.rds.cluster_endpoint
-  sensitive   = true
-}
-
-output "database_port" {
-  description = "Database port"
-  value       = module.rds.cluster_port
+output "services_ipv4_cidr" {
+  description = "IPv4 CIDR block for services"
+  value       = google_container_cluster.primary.services_ipv4_cidr
   sensitive   = false
 }
 
-output "redis_endpoint" {
-  description = "Redis endpoint"
-  value       = module.redis.primary_endpoint_address
-  sensitive   = true
-}
-
-output "redis_port" {
-  description = "Redis port"
-  value       = module.redis.port
+output "master_authorized_networks" {
+  description = "Master authorized networks configuration"
+  value       = google_container_cluster.primary.master_authorized_networks_config
   sensitive   = false
 }
 
-output "minio_endpoint" {
-  description = "MinIO endpoint"
-  value       = module.minio.endpoint
+output "cluster_secondary_range_name" {
+  description = "Secondary range name for cluster pods"
+  value       = google_container_cluster.primary.ip_allocation_policy[0].cluster_secondary_range_name
   sensitive   = false
 }
 
-output "minio_console_endpoint" {
-  description = "MinIO console endpoint"
-  value       = module.minio.console_endpoint
+output "services_secondary_range_name" {
+  description = "Secondary range name for services"
+  value       = google_container_cluster.primary.ip_allocation_policy[0].services_secondary_range_name
   sensitive   = false
 }
 
-output "prometheus_endpoint" {
-  description = "Prometheus endpoint"
-  value       = "http://grafana.${module.eks.kubelet[0].load_balancer_dns_name}/prometheus"
+output "kubectl_config_command" {
+  description = "Command to configure kubectl"
+  value       = "gcloud container clusters get-credentials ${google_container_cluster.primary.name} --region ${var.gcp_region} --project ${var.gcp_project}"
   sensitive   = false
 }
 
-output "grafana_endpoint" {
-  description = "Grafana endpoint"
-  value       = "http://grafana.${module.eks.kubelet[0].load_balancer_dns_name}"
+output "console_url" {
+  description = "GCP Console URL for the cluster"
+  value       = "https://console.cloud.google.com/kubernetes/clusters/details/${var.gcp_region}/${google_container_cluster.primary.name}?project=${var.gcp_project}"
   sensitive   = false
 }
 
-output "alertmanager_endpoint" {
-  description = "Alertmanager endpoint"
-  value       = "http://alertmanager.${module.eks.kubelet[0].load_balancer_dns_name}"
+output "ingress_gateway_ip" {
+  description = "Ingress gateway external IP address"
+  value       = try(google_compute_address.ingress_ip.address, null)
   sensitive   = false
 }
 
-output "loki_endpoint" {
-  description = "Loki endpoint"
-  value       = "http://loki.${module.eks.kubelet[0].load_balancer_dns_name}"
-  sensitive   = false
-}
-
-output "craftplan_ingress_url" {
-  description = "Craftplan ingress URL"
-  value       = "http://craftplan.${module.eks.kubelet[0].load_balancer_dns_name}"
-  sensitive   = false
-}
-
-output "mcp_server_ingress_url" {
-  description = "MCP server ingress URL"
-  value       = "http://mcp.${module.eks.kubelet[0].load_balancer_dns_name}"
-  sensitive   = false
-}
-
-output "a2a_agent_ingress_url" {
-  description = "A2A agent ingress URL"
-  value       = "http://a2a.${module.eks.kubelet[0].load_balancer_dns_name}"
-  sensitive   = false
-}
-
-output "elrmcp_ingress_url" {
-  description = "elrmcp ingress URL"
-  value       = "http://elrmcp.${module.eks.kubelet[0].load_balancer_dns_name}"
-  sensitive   = false
-}
-
-output "kubernetes_config" {
-  description = "Kubernetes configuration file content"
-  value       = local.kubeconfig
-  sensitive   = true
-}
-
-output "aws_region" {
-  description = "AWS region"
-  value       = var.aws_region
-  sensitive   = false
-}
-
-output "environment" {
-  description = "Environment name"
-  value       = var.environment
-  sensitive   = false
-}
-
-output "total_nodes" {
-  description = "Total number of nodes in the cluster"
-  value       = module.eks.node_groups["main"].scale_desired
-  sensitive   = false
-}
-
-output "cluster_version" {
-  description = "EKS cluster version"
-  value       = module.eks.cluster_version
-  sensitive   = false
-}
-
-output "node_instance_types" {
-  description = "Node instance types"
-  value       = module.eks.node_groups["main"].instance_types
-  sensitive   = false
-}
-
-output "cluster_status" {
-  description = "EKS cluster status"
-  value       = module.eks.cluster_status
-  sensitive   = false
-}
-
-output "cluster_platform_version" {
-  description = "EKS cluster platform version"
-  value       = module.eks.cluster_platform_version
-  sensitive   = false
-}
-
-output "cluster_update_version" {
-  description = "EKS cluster update version"
-  value       = module.eks.cluster_update_version
-  sensitive   = false
-}
-
-output "cluster_security_group_id" {
-  description = "EKS cluster security group ID"
-  value       = module.eks.cluster_security_group_id
-  sensitive   = false
-}
-
-output "node_security_group_id" {
-  description = "EKS node security group ID"
-  value       = module.eks.node_security_group_id
-  sensitive   = false
-}
-
-output "vpc_cidr" {
-  description = "VPC CIDR block"
-  value       = module.vpc.vpc_cidr
-  sensitive   = false
-}
-
-output "availability_zones" {
-  description = "Availability zones"
-  value       = module.vpc.azs
-  sensitive   = false
-}
-
-output "nat_gateway_public_ips" {
-  description = "NAT gateway public IPs"
-  value       = module.vpc.nat_public_ips
+output "load_balancer_ip" {
+  description = "Load balancer IP for external access"
+  value       = try(google_compute_global_address.lb_ip.address, null)
   sensitive   = false
 }

@@ -1,0 +1,70 @@
+applicationApiVersion: v1beta1
+
+properties:
+  name:
+    type: string
+    x-google-marketplace:
+      type: NAME
+    description: Name of the application instance
+
+  namespace:
+    type: string
+    x-google-marketplace:
+      type: NAMESPACE
+    description: Kubernetes namespace for deployment
+
+  deployerServiceAccount:
+    type: string
+    x-google-marketplace:
+      type: DEPLOYER_IMAGE
+    description: Service account for deployer
+
+  replicas:
+    type: integer
+    default: 3
+    minimum: 1
+    maximum: 10
+    description: Number of replicas
+
+  image:
+    type: string
+    x-google-marketplace:
+      type: IMAGE
+    description: Application Docker image
+
+  serviceAccountName:
+    type: string
+    x-google-marketplace:
+      type: SERVICE_ACCOUNT
+      serviceAccount:
+        roles:
+          - type: ClusterRole
+            rulesType: PREDEFINED
+            rulesFromRoleName: cluster-admin
+    description: Service account for the application
+
+  storageClass:
+    type: string
+    default: standard
+    x-google-marketplace:
+      type: STORAGE_CLASS
+      storageClass:
+        type: SSD
+    description: Storage class for persistent volumes
+
+  certificateAuthority:
+    type: string
+    x-google-marketplace:
+      type: TLS_CERTIFICATE
+      tlsCertificate:
+        generatedProperties:
+          base64EncodedPrivateKey: tls.base64EncodedPrivateKey
+          base64EncodedCertificate: tls.base64EncodedCertificate
+    description: TLS certificate authority
+
+required:
+  - name
+  - namespace
+  - deployerServiceAccount
+  - image
+  - serviceAccountName

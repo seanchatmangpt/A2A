@@ -1,0 +1,126 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "a2a.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ include "a2a.name" . }}
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    {{- if .Values.ingress.ssl.enabled }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.ssl.staticIpName | quote }}
+    networking.gke.io/managed-certificates: {{ include "a2a.fullname" . }}-cert
+    {{- end }}
+    {{- if .Values.ingress.backendConfig.enabled }}
+    cloud.google.com/backend-config: '{"default": "{{ include "a2a.fullname" . }}-backend-config"}'
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "a2a.fullname" $ }}
+                port:
+                  {{- if .servicePort }}
+                  number: {{ .servicePort }}
+                  {{- else }}
+                  number: {{ $.Values.service.port | default 80 }}
+                  {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+---
+{{- if and .Values.ingress.enabled .Values.ingress.ssl.enabled }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ include "a2a.fullname" . }}-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+spec:
+  domains:
+    {{- range .Values.ingress.hosts }}
+    - {{ .host }}
+    {{- end }}
+{{- end }}
+---
+{{- if and .Values.ingress.enabled .Values.ingress.backendConfig.enabled }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ include "a2a.fullname" . }}-backend-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.ingress.backendConfig.healthCheck }}
+  healthCheck:
+    checkIntervalSec: {{ .Values.ingress.backendConfig.healthCheck.checkIntervalSec | default 30 }}
+    timeoutSec: {{ .Values.ingress.backendConfig.healthCheck.timeoutSec | default 5 }}
+    healthyThreshold: {{ .Values.ingress.backendConfig.healthCheck.healthyThreshold | default 2 }}
+    unhealthyThreshold: {{ .Values.ingress.backendConfig.healthCheck.unhealthyThreshold | default 2 }}
+    type: {{ .Values.ingress.backendConfig.healthCheck.type | default "HTTP" }}
+    requestPath: {{ .Values.ingress.backendConfig.healthCheck.requestPath | default "/health" }}
+    port: {{ .Values.ingress.backendConfig.healthCheck.port | default 8080 }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.connectionDraining }}
+  connectionDraining:
+    drainingTimeoutSec: {{ .Values.ingress.backendConfig.connectionDraining.drainingTimeoutSec | default 60 }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.timeoutSec }}
+  timeoutSec: {{ .Values.ingress.backendConfig.timeoutSec }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.sessionAffinity }}
+  sessionAffinity:
+    affinityType: {{ .Values.ingress.backendConfig.sessionAffinity.affinityType | default "CLIENT_IP" }}
+    affinityCookieTtlSec: {{ .Values.ingress.backendConfig.sessionAffinity.affinityCookieTtlSec | default 3600 }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.cdn }}
+  cdn:
+    enabled: {{ .Values.ingress.backendConfig.cdn.enabled }}
+    cachePolicy:
+      includeHost: {{ .Values.ingress.backendConfig.cdn.cachePolicy.includeHost | default true }}
+      includeProtocol: {{ .Values.ingress.backendConfig.cdn.cachePolicy.includeProtocol | default true }}
+      includeQueryString: {{ .Values.ingress.backendConfig.cdn.cachePolicy.includeQueryString | default false }}
+    {{- if .Values.ingress.backendConfig.cdn.negativeCaching }}
+    negativeCaching: {{ .Values.ingress.backendConfig.cdn.negativeCaching }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.iap }}
+  iap:
+    enabled: {{ .Values.ingress.backendConfig.iap.enabled }}
+    oauthclientCredentials:
+      secretName: {{ .Values.ingress.backendConfig.iap.oauthclientCredentials.secretName }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.securityPolicy }}
+  securityPolicy:
+    name: {{ .Values.ingress.backendConfig.securityPolicy.name }}
+  {{- end }}
+  {{- if .Values.ingress.backendConfig.customRequestHeaders }}
+  customRequestHeaders:
+    headers:
+      {{- toYaml .Values.ingress.backendConfig.customRequestHeaders.headers | nindent 6 }}
+  {{- end }}
+{{- end }}

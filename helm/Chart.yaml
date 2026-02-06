@@ -1,0 +1,19 @@
+apiVersion: v2
+name: a2a-protocol
+version: 1.0.0
+appVersion: "1.0.0"
+description: Agent2Agent (A2A) Protocol - An open protocol enabling communication and interoperability between opaque agentic applications
+type: application
+keywords:
+  - ai
+  - agents
+  - protocol
+  - a2a
+  - agent2agent
+home: https://a2a-protocol.org
+sources:
+  - https://github.com/a2aproject/A2A
+maintainers:
+  - name: A2A Project
+    url: https://a2a-protocol.org
+icon: https://raw.githubusercontent.com/a2aproject/A2A/main/docs/assets/a2a-logo-black.svg
