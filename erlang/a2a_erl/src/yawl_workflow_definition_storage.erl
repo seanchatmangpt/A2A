@@ -272,7 +272,7 @@ create_definition_tables() ->
 %% @private
 load_definitions_from_storage() ->
     Trans = fun() ->
-        mnesia:match_object(#definition{_ = '_'})
+        mnesia:match_object(yawl_workflow_definition, #definition{_ = '_'}, read)
     end,
     case mnesia:transaction(Trans) of
         {atomic, Definitions} ->
@@ -548,7 +548,9 @@ definition_to_summary_map(#definition{} = Def) ->
 generate_definition_id() ->
     UniqueId = erlang:unique_integer([positive, monotonic]),
     Time = erlang:monotonic_time(millisecond),
-    <<UniqueId:32, Time:32>>.
+    TimeBin = integer_to_binary(Time),
+    IdBin = integer_to_binary(UniqueId),
+    <<"def_", TimeBin/binary, "_", IdBin/binary>>.
 
 %% @private
 maps_get(Key, Map, Default) ->
@@ -559,8 +561,14 @@ maps_get(Key, Map, Default) ->
 
 %% @private
 maps_get_to_atom(Key, Map, Default) ->
-    case maps:get(Key, Map, Default) of
-        Default -> Default;
+    case maps:find(Key, Map) of
+        error -> Default;
+        {ok, Value} -> convert_to_atom(Value, Default)
+    end.
+
+convert_to_atom(Default, Default) -> Default;
+convert_to_atom(Value, Default) ->
+    case Value of
         Bin when is_binary(Bin) ->
             try binary_to_existing_atom(Bin, utf8)
             catch error:badarg -> Default

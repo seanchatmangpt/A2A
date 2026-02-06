@@ -313,7 +313,7 @@ determine_pattern_type(Tasks, Conditions) ->
 generate_workflow_xml(WorkflowMap) ->
     WorkflowId = maps:get(workflow_id, WorkflowMap, <<"anonymous">>),
     PatternType = maps:get(pattern_type, WorkflowMap, basic_sequential),
-    WorkflowName = maps:get(<<"name">>, WorkflowMap, #{}, <<"Unnamed">>),
+    WorkflowName = maps:get(<<"name">>, WorkflowMap, <<"Unnamed">>),
 
     Xml = [
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",

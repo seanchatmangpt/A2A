@@ -157,7 +157,7 @@ from_json(Req, State) ->
 %% @private
 handle_list_definitions(Req) ->
     %% Parse query parameters
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_string(QS),
 
     PatternType = maps_get(<<"pattern_type">>, Params, undefined),
@@ -259,7 +259,7 @@ maps_get(Key, Map, Default) ->
 to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
-to_binary(Term) -> io_lib:format("~p", [Term]).
+to_binary(Term) -> iolist_to_binary(io_lib:format("~p", [Term])).
 
 %% @private
 response_json(Req, StatusCode, Body) ->
@@ -272,4 +272,6 @@ response_json(Req, StatusCode, Body) ->
 generate_definition_id() ->
     UniqueId = erlang:unique_integer([positive, monotonic]),
     Time = erlang:monotonic_time(millisecond),
-    <<"def_", Time:64, "_", UniqueId:64>>.
+    TimeBin = integer_to_binary(Time),
+    IdBin = integer_to_binary(UniqueId),
+    <<"def_", TimeBin/binary, "_", IdBin/binary>>.

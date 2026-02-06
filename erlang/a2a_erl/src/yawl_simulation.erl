@@ -336,7 +336,7 @@ dfs_find_cycle(Current, Graph, Path, Visited, AccCycle) ->
             {cycle, lists:reverse(Cycle)};
         false ->
             NewVisited = sets:add_element(Current, Visited),
-            Successors = case maps:get(Current, Graph) of
+            Successors = case maps:get(Current, Graph, undefined) of
                 undefined -> [];
                 TransList -> [M || {_T, M} <- TransList]
             end,

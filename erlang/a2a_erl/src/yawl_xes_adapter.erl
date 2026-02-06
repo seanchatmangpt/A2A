@@ -796,8 +796,8 @@ format_timestamp_xes(Millis) ->
     Seconds = Millis div 1000,
     {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:system_time_to_universal_time(Seconds, second),
     Ms = Millis rem 1000,
-    lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0B.~3.10.0BZ",
-        [Year, Month, Day, Hour, Minute, Second, Ms])).
+    list_to_binary(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0B.~3.10.0BZ",
+        [Year, Month, Day, Hour, Minute, Second, Ms]))).
 
 %% @private
 build_output_config(stdio, _State) ->

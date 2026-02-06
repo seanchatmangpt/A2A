@@ -41,6 +41,7 @@
 
 -include("yawl_types.hrl").
 -include("yawl_xes.hrl").
+-include_lib("xmerl/include/xmerl.hrl").
 
 %%====================================================================
 %% Type Definitions
@@ -109,7 +110,7 @@ validate_ocel_xes(XESBinary) ->
 
     Missing = lists:filter(
         fun(Element) ->
-            not binary:match(XESBinary, Element) =:= nomatch
+            binary:match(XESBinary, Element) =:= nomatch
         end,
         RequiredElements
     ),
@@ -332,11 +333,11 @@ build_event_attributes(Event) ->
     %% Build non-OCEL attributes
     maps:fold(
         fun(Key, Value, Acc) ->
-            case binary:prefix(Key, <<"ocel:">>) of
-                true -> Acc;
-                false ->
-                    AttrXML = io_lib:format("    <string key=\"~s\" value=\"~s\"/>~n",
-                        [Key, format_ocel_value(Value)]),
+            case binary:match(Key, <<"ocel:">>) of
+                {0, _} -> Acc;
+                _ ->
+                    AttrXML = iolist_to_binary(io_lib:format("    <string key=\"~s\" value=\"~s\"/>~n",
+                        [Key, format_ocel_value(Value)])),
                     <<Acc/binary, AttrXML/binary>>
             end
         end,
@@ -345,14 +346,99 @@ build_event_attributes(Event) ->
     ).
 
 %% @private
-parse_ocel_xes(_XESBinary) ->
-    %% Parse OCEL XES - placeholder
-    {ok, #{
-        version => <<"1.0">>,
-        object_types => [],
-        events => [],
-        objects => #{}
-    }}.
+parse_ocel_xes(XESBinary) ->
+    %% Parse OCEL XES XML into OCEL log structure
+    try
+        {Doc, _} = xmerl_scan:string(binary_to_list(XESBinary)),
+        %% Extract version
+        Version = extract_xes_attr_value(Doc, "ocel:version", <<"1.0">>),
+        %% Extract object types
+        ObjectTypes = extract_ocel_object_types(Doc),
+        %% Extract events
+        Events = extract_ocel_events(Doc),
+        {ok, #{
+            version => Version,
+            object_types => ObjectTypes,
+            events => Events,
+            objects => #{}
+        }}
+    catch
+        _:Reason ->
+            {error, {parse_error, Reason}}
+    end.
+
+%% @private
+extract_xes_attr_value(#xmlElement{content = Content}, Key, Default) ->
+    case lists:filter(fun
+        (#xmlElement{name = string, attributes = Attrs}) ->
+            case lists:keyfind(key, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = K} -> K =:= Key;
+                _ -> false
+            end;
+        (_) -> false
+    end, Content) of
+        [#xmlElement{attributes = Attrs} | _] ->
+            case lists:keyfind(value, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = V} -> list_to_binary(V);
+                _ -> Default
+            end;
+        _ -> Default
+    end;
+extract_xes_attr_value(_, _Key, Default) ->
+    Default.
+
+%% @private
+extract_ocel_object_types(#xmlElement{content = Content}) ->
+    lists:filtermap(fun
+        (#xmlElement{name = string, attributes = Attrs}) ->
+            case lists:keyfind(key, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = "ocel:object-type"} ->
+                    case lists:keyfind(value, #xmlAttribute.name, Attrs) of
+                        #xmlAttribute{value = V} -> {true, list_to_binary(V)};
+                        _ -> false
+                    end;
+                _ -> false
+            end;
+        (_) -> false
+    end, Content);
+extract_ocel_object_types(_) ->
+    [].
+
+%% @private
+extract_ocel_events(#xmlElement{content = Content}) ->
+    lists:filtermap(fun
+        (#xmlElement{name = event} = EventElem) ->
+            {true, parse_ocel_event_element(EventElem)};
+        (_) -> false
+    end, Content);
+extract_ocel_events(_) ->
+    [].
+
+%% @private
+parse_ocel_event_element(#xmlElement{content = Content}) ->
+    lists:foldl(fun
+        (#xmlElement{name = string, attributes = Attrs}, Acc) ->
+            Key = case lists:keyfind(key, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = K} -> list_to_binary(K);
+                _ -> <<>>
+            end,
+            Val = case lists:keyfind(value, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = V} -> list_to_binary(V);
+                _ -> <<>>
+            end,
+            Acc#{Key => Val};
+        (#xmlElement{name = date, attributes = Attrs}, Acc) ->
+            Key = case lists:keyfind(key, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = K} -> list_to_binary(K);
+                _ -> <<>>
+            end,
+            Val = case lists:keyfind(value, #xmlAttribute.name, Attrs) of
+                #xmlAttribute{value = V} -> list_to_binary(V);
+                _ -> <<>>
+            end,
+            Acc#{Key => Val};
+        (_, Acc) -> Acc
+    end, #{}, Content).
 
 %% @private
 format_value(Value) when is_binary(Value) ->

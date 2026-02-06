@@ -510,8 +510,8 @@ create_trace_for_object_type(Events, ObjType) ->
     ),
 
     #xes_trace{
-        trace_id = list_to_binary([atom_to_list(ObjType), "_trace"]),
-        case_id = list_to_binary([atom_to_list(ObjType), "_case"]),
+        trace_id = list_to_binary([binary_to_list(ObjType), "_trace"]),
+        case_id = list_to_binary([binary_to_list(ObjType), "_case"]),
         events = XESEvents
     }.
 
@@ -573,11 +573,11 @@ extract_temporal_patterns(Events) ->
         fun(E, Acc) ->
             Activity = maps:get(activity, E),
             Timestamp = maps:get(timestamp, E),
-            #{
+            [#{
                 activity => Activity,
                 timestamp => Timestamp,
                 strength => 1.0
-            }
+            } | Acc]
         end,
         [],
         Events
@@ -590,10 +590,10 @@ extract_action_patterns(Events) ->
         fun(E, Acc) ->
             Activity = maps:get(activity, E),
             Objects = maps:get(objects, E, #{}),
-            #{
+            [#{
                 activity => Activity,
                 object_types => maps:keys(Objects)
-            }
+            } | Acc]
         end,
         [],
         Events

@@ -615,7 +615,7 @@ init([]) ->
     end,
 
     %% Create tables if they don't exist
-    case create_tables() of
+    TableResult = case create_tables() of
         ok -> ok;
         {error, creation_failed} ->
             %% Tables might already exist, try waiting for them
@@ -631,19 +631,24 @@ init([]) ->
             end
     end,
 
-    %% Recover any in-flight workflows from previous session
-    recover_running_workflows(),
+    case TableResult of
+        {stop, StopReason} ->
+            {stop, StopReason};
+        ok ->
+            %% Recover any in-flight workflows from previous session
+            recover_running_workflows(),
 
-    State = #state{
-        table_status = #{},
-        backup_interval = undefined,
-        checkpoint_interval = 60000,  %% Default: 60 seconds
-        periodic_checkpoints_enabled = false,
-        checkpoint_timer = undefined,
-        max_checkpoints_per_workflow = 10,
-        recovery_status = #{}
-    },
-    {ok, State}.
+            State = #state{
+                table_status = #{},
+                backup_interval = undefined,
+                checkpoint_interval = 60000,  %% Default: 60 seconds
+                periodic_checkpoints_enabled = false,
+                checkpoint_timer = undefined,
+                max_checkpoints_per_workflow = 10,
+                recovery_status = #{}
+            },
+            {ok, State}
+    end.
 
 %% @private
 handle_call(enable_periodic_checkpoints, _From, State) ->
@@ -916,7 +921,7 @@ do_save_periodic_checkpoint(WorkflowId, State) ->
                         last_checkpoint_time => erlang:monotonic_time(millisecond),
                         status => checkpointed
                     },
-                    maps:put(WorkflowId, RecoveryStatus, State#state.recovery_status);
+                    State#state{recovery_status = maps:put(WorkflowId, RecoveryStatus, State#state.recovery_status)};
                 {error, Reason} ->
                     error_logger:error_msg("Failed to save periodic checkpoint for workflow ~p: ~p~n",
                                           [WorkflowId, Reason]),

@@ -176,7 +176,14 @@ init([Options]) ->
 
 %% @private
 init_state(Options) ->
-    ClaudeBin = maps:get(claude_bin, Options, os:find_executable("claude")),
+    ClaudeBin = case maps:get(claude_bin, Options, undefined) of
+        undefined ->
+            case os:find_executable("claude") of
+                false -> "claude";
+                Path -> Path
+            end;
+        Bin -> Bin
+    end,
     AllowedTools = maps:get(allowed_tools, Options, []),
     SystemPrompt = maps:get(system_prompt, Options,
         <<"You are a workflow automation assistant. Help users create and optimize YAWL workflows.">>),
@@ -218,7 +225,7 @@ handle_call(create_session, _From, State) ->
     }};
 
 handle_call({continue_session, SessionId}, _From, State) ->
-    case maps:get(SessionId, State#state.sessions) of
+    case maps:get(SessionId, State#state.sessions, undefined) of
         undefined ->
             {reply, {error, session_not_found}, State};
         _Session ->
@@ -226,7 +233,7 @@ handle_call({continue_session, SessionId}, _From, State) ->
     end;
 
 handle_call({get_history, SessionId}, _From, State) ->
-    case maps:get(SessionId, State#state.sessions) of
+    case maps:get(SessionId, State#state.sessions, undefined) of
         undefined ->
             {reply, {error, session_not_found}, State};
         Session ->
@@ -247,7 +254,7 @@ handle_cast({append_system_prompt, Prompt}, State) ->
     {noreply, State#state{system_prompt = <<Current/binary, "\n", Prompt/binary>>}};
 
 handle_cast({human_feedback, ApprovalId, Feedback, Context}, State) ->
-    case maps:get(ApprovalId, State#state.sessions) of
+    case maps:get(ApprovalId, State#state.sessions, undefined) of
         undefined ->
             {noreply, State};
         Approval ->
@@ -289,23 +296,23 @@ do_llm_generate(Prompt, Options, State) ->
     Args = ["-p", quote_prompt(Prompt)],
 
     %% Add output format
-    case OutputFormat of
+    Args1 = case OutputFormat of
         json -> Args ++ ["--output-format", "json"];
         stream_json -> Args ++ ["--output-format", "stream-json"];
         text -> Args
     end,
 
     %% Add allowed tools
-    case AllowedTools of
-        [] -> Args;
-        _ -> Args ++ ["--allowedTools", string:join(AllowedTools, ",")]
+    Args2 = case AllowedTools of
+        [] -> Args1;
+        _ -> Args1 ++ ["--allowedTools" | string:tokens(string:join(AllowedTools, ","), ",")]
     end,
 
     %% Add system prompt if specified
     AppendPrompt = proplists:get_value(append_system_prompt, Options, <<>>),
     FinalArgs = case AppendPrompt of
-        <<>> -> Args;
-        _ -> Args ++ ["--append-system-prompt", binary_to_list(AppendPrompt)]
+        <<>> -> Args2;
+        _ -> Args2 ++ ["--append-system-prompt", binary_to_list(AppendPrompt)]
     end,
 
     case os:find_executable(ClaudeBin) of
@@ -315,10 +322,14 @@ do_llm_generate(Prompt, Options, State) ->
             Port = open_port({spawn_executable, ClaudeBin},
                 [{args, FinalArgs}, binary, exit_status, stderr_to_stdout]),
             try
-                {Output, 0} = receive_port_output(Port, Timeout),
-                {ok, parse_output(Output, OutputFormat)}
+                case receive_port_output(Port, Timeout) of
+                    {Output, 0} ->
+                        {ok, parse_output(Output, OutputFormat)};
+                    {Output, Code} ->
+                        {error, {exit_code, Code, Output}}
+                end
             catch
-                {timeout, _} ->
+                exit:timeout ->
                     port_close(Port),
                     {error, timeout}
             end
@@ -394,4 +405,4 @@ stream_port_output(Port, Callback, Timeout) ->
 %% @private
 generate_id() ->
     Binary = term_to_binary({node(), erlang:monotonic_time(microsecond), erlang:unique_integer([positive])}),
-    lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary]).
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary])).

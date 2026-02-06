@@ -267,7 +267,7 @@ find_matching_model(Query, Candidates) ->
     case Scores of
         [] -> none;
         _ ->
-            {BestModel, BestScore} = lists:max(fun({_, S1}, {_, S2}) -> S1 > S2 end, Scores),
+            [{BestModel, BestScore} | _] = lists:sort(fun({_, S1}, {_, S2}) -> S1 > S2 end, Scores),
             {BestModel, BestScore}
     end.
 
@@ -317,7 +317,14 @@ generate_sample_traces(Model, Count) ->
     Transitions = maps:get(transitions, Model, []),
 
     %% For simplicity, just return permutations of activities
-    lists:sublist(lists:usort([lists:shuffle(Activities) || _ <- lists:seq(1, Count * 10)]), Count).
+    lists:sublist(lists:usort([shuffle_list(Activities) || _ <- lists:seq(1, Count * 10)]), Count).
+
+%% @private
+%% Manual list shuffle since lists:shuffle/1 does not exist.
+shuffle_list([]) -> [];
+shuffle_list(List) ->
+    Tagged = [{rand:uniform(), X} || X <- List],
+    [X || {_, X} <- lists:sort(Tagged)].
 
 %% @private
 trace_similarity(Trace1, Trace2) ->
@@ -337,7 +344,7 @@ longest_common_subsequence(Seq1, Seq2) ->
     N = length(Seq2),
 
     %% Initialize DP table
-    Table = array:new({default, 0}),
+    Table = array:new([{default, 0}]),
 
     %% Fill table
     Filled = fill_lcs_table(Seq1, Seq2, M, N, Table),
@@ -357,10 +364,10 @@ fill_lcs_table(Seq1, Seq2, I, J, Table) ->
         false ->
             max(get_lcs_val(Table, I - 1, J), get_lcs_val(Table, I, J - 1))
     end,
-    NewTable = array:set(I, CurrentLen, array:get(I, Table), Table),
-    fill_lcs_table(Seq1, Seq2, I - 1, J, NewTable),
-    fill_lcs_table(Seq1, Seq2, I, J - 1, NewTable),
-    NewTable.
+    NewTable = array:set(I, CurrentLen, Table),
+    NewTable2 = fill_lcs_table(Seq1, Seq2, I - 1, J, NewTable),
+    NewTable3 = fill_lcs_table(Seq1, Seq2, I, J - 1, NewTable2),
+    NewTable3.
 
 %% @private
 get_lcs_val(Table, I, J) when I > 0, J > 0 ->
@@ -443,7 +450,7 @@ align_sequences(Seq1, Seq2, Gap, Mismatch, Match) ->
 %% @private
 init_alignment_table(Table, M, N, Gap) ->
     %% Initialize first row and column
-    Table1 = array:set(0, array:from_list(lists:seq(0, N) * Gap), Table),
+    Table1 = array:set(0, array:from_list([X * Gap || X <- lists:seq(0, N)]), Table),
     lists:foldl(
         fun(I, Acc) ->
             Row = array:new(N + 1, {default, I * Gap}),
@@ -473,9 +480,9 @@ fill_alignment_table(Seq1, Seq2, I, J, Gap, Mismatch, Match, Table) ->
     NewRow = array:set(J, NewVal, Row),
     NewTable = array:set(I, NewRow, Table),
 
-    fill_alignment_table(Seq1, Seq2, I - 1, J, Gap, Mismatch, Match, NewTable),
-    fill_alignment_table(Seq1, Seq2, I, J - 1, Gap, Mismatch, Match, NewTable),
-    NewTable.
+    NewTable2 = fill_alignment_table(Seq1, Seq2, I - 1, J, Gap, Mismatch, Match, NewTable),
+    NewTable3 = fill_alignment_table(Seq1, Seq2, I, J - 1, Gap, Mismatch, Match, NewTable2),
+    NewTable3.
 
 %% @private
 get_alignment_val(Table, I, J) when I >= 0, J >= 0 ->

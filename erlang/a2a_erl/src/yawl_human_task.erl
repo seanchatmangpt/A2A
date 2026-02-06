@@ -355,7 +355,7 @@ handle_call({complete_task, UserId, TaskId, Result}, _From, State) ->
 
 handle_call({get_user_worklist, UserId}, _From, State) ->
     TaskIds = maps_get_safe(UserId, State#state.worklists, []),
-    Tasks = lists:filter_map(fun(TaskId) ->
+    Tasks = lists:filtermap(fun(TaskId) ->
         case find_allocation_by_task(TaskId, State) of
             {ok, _AllocationId, Allocation} -> {true, task_queue_to_map(Allocation)};
             {error, _} -> false
@@ -365,9 +365,9 @@ handle_call({get_user_worklist, UserId}, _From, State) ->
 
 handle_call({get_group_worklist, GroupId}, _From, State) ->
     %% Find all tasks assigned to this group but not yet claimed
-    Tasks = lists:filter_map(fun(_AllocationId, #yawl_task_queue{assigned_group = G, assigned_user = undefined} = Allocation) when G =:= GroupId ->
+    Tasks = lists:filtermap(fun({_AllocationId, #yawl_task_queue{assigned_group = G, assigned_user = undefined} = Allocation}) when G =:= GroupId ->
         {true, task_queue_to_map(Allocation)};
-        (_, _) -> false
+        ({_, _}) -> false
     end, maps:to_list(State#state.allocations)),
     {reply, {ok, Tasks}, State};
 
@@ -650,16 +650,16 @@ find_allocation_by_task(TaskId, State) ->
     lists:foldl(fun(AllocationId, Acc) ->
         case Acc of
             {ok, _, _} -> Acc;
-            error ->
+            {error, not_found} ->
                 Allocation = maps:get(AllocationId, State#state.allocations, undefined),
                 case Allocation of
                     #yawl_task_queue{task_id = TaskId} ->
                         {ok, AllocationId, Allocation};
                     _ ->
-                        error
+                        {error, not_found}
                 end
         end
-    end, error, maps:keys(State#state.allocations)).
+    end, {error, not_found}, maps:keys(State#state.allocations)).
 
 %% @private
 update_worklist(UserId, TaskId, Worklists) ->

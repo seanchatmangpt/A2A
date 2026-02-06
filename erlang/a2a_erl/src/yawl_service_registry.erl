@@ -433,15 +433,15 @@ find_service_by_name(ServiceName, State) ->
     lists:foldl(fun(ServiceId, Acc) ->
         case Acc of
             {ok, _, _} -> Acc;
-            error ->
+            {error, _} ->
                 case maps:get(ServiceId, State#state.services, undefined) of
                     #yawl_service_registry{service_name = ServiceName} = Service ->
                         {ok, ServiceId, Service};
                     _ ->
-                        error
+                        {error, not_found}
                 end
         end
-    end, error, maps:keys(State#state.services)).
+    end, {error, not_found}, maps:keys(State#state.services)).
 
 %% @private
 select_best_service(ServiceIds, Services) ->
@@ -492,15 +492,15 @@ invoke_service(#yawl_service_registry{endpoint = Endpoint}, Params, Options) ->
                     <<>> -> Url;
                     _ -> <<Url/binary, "?", QueryString/binary>>
                 end,
-                httpc_request(get, {FullUrl, []});
+                httpc_request(get, {binary_to_list(FullUrl), []});
             post ->
                 ContentType = maps_get(content_type, Options, <<"application/json">>),
                 Body = encode_body(Params, ContentType),
-                httpc_request(post, {Url, [], ContentType, Body});
+                httpc_request(post, {binary_to_list(Url), [], binary_to_list(ContentType), Body});
             put ->
                 ContentType = maps_get(content_type, Options, <<"application/json">>),
                 Body = encode_body(Params, ContentType),
-                httpc_request(put, {Url, [], ContentType, Body});
+                httpc_request(put, {binary_to_list(Url), [], binary_to_list(ContentType), Body});
             delete ->
                 httpc_request(delete, {Url, []})
         end,
@@ -528,7 +528,7 @@ build_query_string(Params) when is_map(Params) ->
    Pairs = maps:fold(fun(K, V, Acc) ->
         KBin = to_binary(K),
         VBin = to_binary(V),
-        [[KBin, "=", http_uri:encode(VBin)] | Acc]
+        [[KBin, "=", uri_string:quote(binary_to_list(VBin))] | Acc]
     end, [], Params),
     iolist_to_binary(lists:join($&, lists:reverse(Pairs)));
 build_query_string(_) ->

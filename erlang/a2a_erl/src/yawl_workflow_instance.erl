@@ -285,7 +285,7 @@ code_change(_OldVsn, State, Data, _Extra) ->
 
 %% @private
 %% idle state - workflow created but not started
-idle(event, {subscribe, Subscriber}, Data) ->
+idle(cast, {subscribe, Subscriber}, Data) ->
     NewSubscribers = lists:usort([Subscriber | Data#data.subscribers]),
     {keep_state, Data#data{subscribers = NewSubscribers}};
 
@@ -296,7 +296,7 @@ idle({call, From}, start_workflow, Data) ->
         ;
         valid ->
             notify_subscribers(started, Data),
-            {next_state, running, Data, [{next_event, internal, process_tokens}]}
+            {next_state, running, Data, [{next_event, internal, process_tokens}, {reply, From, ok}]}
     end;
 
 idle({call, From}, cancel_workflow, Data) ->
@@ -465,6 +465,9 @@ running(EventType, EventContent, Data) ->
 
 %% @private
 %% waiting state - waiting for external events or task completion
+waiting(internal, process_tokens, Data) ->
+    {next_state, running, Data, []};
+
 waiting({call, From}, {complete_task, TaskId, Result}, Data) ->
     NewCompleted = [TaskId | Data#data.completed_tasks],
     NewTasks = maps:remove(TaskId, Data#data.current_tasks),
@@ -487,7 +490,7 @@ waiting({call, From}, {complete_task, TaskId, Result}, Data) ->
 
 waiting({call, From}, resume_workflow, Data) ->
     notify_subscribers(resumed, Data),
-    {next_state, running, Data, [{next_event, internal, process_tokens}], [{reply, From, ok}]};
+    {next_state, running, Data, [{next_event, internal, process_tokens}, {reply, From, ok}]};
 
 waiting({call, From}, cancel_workflow, Data) ->
     notify_subscribers(cancelled, Data),
@@ -775,11 +778,12 @@ get_enabled_transitions(Data) ->
 %% Select transition with highest priority from enabled transitions
 select_transition_by_priority(Enabled, Data) ->
     Priorities = Data#data.transition_priorities,
-    lists:max(fun(A, B) ->
-        PriorityA = maps:get(A, Priorities, 0),
-        PriorityB = maps:get(B, Priorities, 0),
-        PriorityA >= PriorityB
-    end, Enabled).
+    lists:foldl(fun(T, Best) ->
+        case maps:get(T, Priorities, 0) > maps:get(Best, Priorities, 0) of
+            true -> T;
+            false -> Best
+        end
+    end, hd(Enabled), tl(Enabled)).
 
 %% @private
 %% Fire a transition: consume input tokens, produce output tokens, apply effects
@@ -1119,7 +1123,7 @@ create_checkpoint(Data) ->
     case yawl_persistence:save_checkpoint(Data#data.workflow_id, Checkpoint) of
         ok -> CheckpointId;
         {error, Reason} ->
-            error_logger:critical_msg("YAWL Workflow Instance: Failed to save checkpoint ~p for workflow ~p: ~p~n",
+            error_logger:error_msg("YAWL Workflow Instance: Failed to save checkpoint ~p for workflow ~p: ~p~n",
                                    [CheckpointId, Data#data.workflow_id, Reason]),
             exit({persistence_failure, Reason})
     end.

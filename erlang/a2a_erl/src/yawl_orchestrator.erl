@@ -261,7 +261,7 @@ do_execute_workflow(WorkflowId, State) ->
                     end;
                 {InstancePid, _Ref} ->
                     %% Instance already running
-                    {ok, #{status => running, instance => InstancePid}}, State
+                    {{ok, #{status => running, instance => InstancePid}}, State}
             end
     end.
 
@@ -279,7 +279,7 @@ do_get_status(WorkflowId, State) ->
 
 do_cancel_workflow(WorkflowId, State) ->
     case maps:get(WorkflowId, State#state.workflows, undefined) of
-        undefined -> {error, workflow_not_found};
+        undefined -> {{error, workflow_not_found}, State};
         Workflow ->
             CancelledWorkflow = Workflow#yawl_workflow{status = cancelled,
                 end_time = erlang:monotonic_time(millisecond)},
@@ -289,7 +289,7 @@ do_cancel_workflow(WorkflowId, State) ->
 
 do_cleanup_workflow(WorkflowId, State) ->
     case maps:is_key(WorkflowId, State#state.workflows) of
-        false -> {error, workflow_not_found};
+        false -> {{error, workflow_not_found}, State};
         true ->
             NewWorkflows = maps:remove(WorkflowId, State#state.workflows),
             NewSubscribers = maps:remove(WorkflowId, State#state.subscribers),
@@ -314,7 +314,7 @@ do_get_workflow_result(WorkflowId, State) ->
 
 do_subscribe(WorkflowId, SubscriberPid, State) ->
     case maps:is_key(WorkflowId, State#state.workflows) of
-        false -> {error, workflow_not_found};
+        false -> {{error, workflow_not_found}, State};
         true ->
             CurrentSubscribers = maps:get(WorkflowId, State#state.subscribers, []),
             case lists:member(SubscriberPid, CurrentSubscribers) of
@@ -328,7 +328,7 @@ do_subscribe(WorkflowId, SubscriberPid, State) ->
 
 do_unsubscribe(WorkflowId, SubscriberPid, State) ->
     case maps:get(WorkflowId, State#state.subscribers, undefined) of
-        undefined -> {error, workflow_not_found};
+        undefined -> {{error, workflow_not_found}, State};
         Subscribers ->
             NewSubscribersList = lists:delete(SubscriberPid, Subscribers),
             NewSubscribers = case NewSubscribersList of
@@ -341,7 +341,7 @@ do_unsubscribe(WorkflowId, SubscriberPid, State) ->
 do_pause_workflow(WorkflowId, State) ->
     case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
         undefined ->
-            {error, workflow_instance_not_found};
+            {{error, workflow_instance_not_found}, State};
         {InstancePid, _Ref} ->
             case yawl_workflow_instance:suspend_workflow(InstancePid) of
                 ok ->
@@ -365,7 +365,7 @@ do_pause_workflow(WorkflowId, State) ->
 do_resume_workflow(WorkflowId, State) ->
     case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
         undefined ->
-            {error, workflow_instance_not_found};
+            {{error, workflow_instance_not_found}, State};
         {InstancePid, _Ref} ->
             case yawl_workflow_instance:resume_workflow(InstancePid) of
                 ok ->
@@ -452,7 +452,7 @@ create_and_start_instance(WorkflowId, Workflow, State) ->
             case yawl_persistence:save_workflow(PersistWorkflow) of
                 ok -> ok;
                 {error, Reason} ->
-                    error_logger:critical_msg("YAWL Orchestrator: Failed to persist workflow ~p: ~p~n",
+                    error_logger:error_msg("YAWL Orchestrator: Failed to persist workflow ~p: ~p~n",
                                            [WorkflowId, Reason]),
                     {error, persistence_failure}
             end,

@@ -268,8 +268,8 @@
 -define(CPN_GUARD, <<"cpn:guard">>).
 
 %% Helper macros for extended XES attributes
--define(XES_OCEL_ATTR(Key, Value), {OCEL_PREFIX, Key, Value}).
--define(XES_PO_ATTR(Key, Value), {PO_PREFIX, Key, Value}).
--define(XES_LLM_ATTR(Key, Value), {LLM_PREFIX, Key, Value}).
--define(XES_REACH_ATTR(Key, Value), {REACH_PREFIX, Key, Value}).
--define(XES_CPN_ATTR(Key, Value), {CPN_PREFIX, Key, Value}).
+-define(XES_OCEL_ATTR(Key, Value), {?OCEL_PREFIX, Key, Value}).
+-define(XES_PO_ATTR(Key, Value), {?PO_PREFIX, Key, Value}).
+-define(XES_LLM_ATTR(Key, Value), {?LLM_PREFIX, Key, Value}).
+-define(XES_REACH_ATTR(Key, Value), {?REACH_PREFIX, Key, Value}).
+-define(XES_CPN_ATTR(Key, Value), {?CPN_PREFIX, Key, Value}).

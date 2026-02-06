@@ -414,8 +414,11 @@ validate_field_type(Field, Value, integer) when is_binary(Value) ->
     catch error:badarg ->
         {error, <<Field/binary, ": cannot convert to integer">>}
     end;
+validate_field_type(Field, _Value, Type) when is_atom(Type) ->
+    {error, <<Field/binary, ": expected type ", (atom_to_binary(Type, utf8))/binary>>};
 validate_field_type(Field, _Value, Type) ->
-    {error, <<Field/binary, ": expected type ", (atom_to_binary(Type, utf8))/binary>>}.
+    TypeBin = iolist_to_binary(io_lib:format("~p", [Type])),
+    {error, <<Field/binary, ": expected type ", TypeBin/binary>>}.
 
 %% @doc Validate an enum value.
 -spec validate_enum(binary(), term(), [atom()]) -> {ok, term()} | {error, binary()}.
@@ -586,7 +589,7 @@ convert_to_binary(Value) when is_binary(Value) -> Value;
 convert_to_binary(Value) when is_atom(Value) -> atom_to_binary(Value, utf8);
 convert_to_binary(Value) when is_integer(Value) -> integer_to_binary(Value);
 convert_to_binary(Value) when is_list(Value) -> list_to_binary(Value);
-convert_to_binary(Value) -> io_lib:format("~p", [Value]).
+convert_to_binary(Value) -> iolist_to_binary(io_lib:format("~p", [Value])).
 
 %% @private
 %% @doc Validate UUID format.

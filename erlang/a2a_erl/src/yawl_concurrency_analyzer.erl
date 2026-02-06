@@ -40,7 +40,7 @@
 
 %% API exports - Concurrency metrics
 -export([
-    concurrency_degree/1,
+    concurrency_degree/2,
     average_concurrency/1,
     maximum_concurrency/1,
     concurrency_metrics/2
@@ -75,7 +75,7 @@ are_concurrent(NetMod, Place1, Place2) ->
 -spec find_concurrent_pairs(atom(), place_set() | all) -> [{place(), place()}].
 find_concurrent_pairs(NetMod, all) ->
     NetInfo = extract_net_info(NetMod),
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
     PlaceSet = sets:from_list(Places),
     find_concurrent_pairs(NetMod, PlaceSet);
 find_concurrent_pairs(NetMod, PlaceSet) ->
@@ -96,7 +96,7 @@ find_concurrent_pairs(NetMod, PlaceSet) ->
 -spec find_maximal_concurrent_set(atom(), place_set() | all) -> concurrent_set().
 find_maximal_concurrent_set(NetMod, all) ->
     NetInfo = extract_net_info(NetMod),
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
     PlaceSet = sets:from_list(Places),
     find_maximal_concurrent_set(NetMod, PlaceSet);
 find_maximal_concurrent_set(NetMod, PlaceSet) ->
@@ -145,7 +145,7 @@ concurrent_regions(NetMod) ->
     ),
 
     %% Find connected components (concurrent regions)
-    AllPlaces = NetInfo#{}.places,
+    AllPlaces = maps:get(places, NetInfo),
     Visited = sets:new(),
     find_connected_components(AllPlaces, Adj, Visited, []).
 
@@ -164,7 +164,7 @@ token_game(NetMod, Place1, Place2) ->
 
 %% @doc Verify concurrency semantics for a workflow net.
 -spec verify_concurrency_semantics(atom(), term()) -> map().
-verify_concurrency_semantics(NetMod, UsrInfo) ->
+verify_concurrency_semantics(NetMod, _UsrInfo) ->
     NetInfo = extract_net_info(NetMod),
 
     #{
@@ -185,11 +185,11 @@ verify_concurrency_semantics(NetMod, UsrInfo) ->
 -spec conflict_relation(atom(), place_set() | all) -> [{place(), place()}].
 conflict_relation(NetMod, all) ->
     NetInfo = extract_net_info(NetMod),
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
     conflict_relation(NetMod, sets:from_list(Places));
 conflict_relation(NetMod, PlaceSet) ->
     NetInfo = extract_net_info(NetMod),
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo),
 
     Places = sets:to_list(PlaceSet),
     AllPairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
@@ -208,7 +208,7 @@ conflict_relation(NetMod, PlaceSet) ->
 -spec causal_relation(atom(), place_set() | all) -> [{place(), place()}].
 causal_relation(NetMod, all) ->
     NetInfo = extract_net_info(NetMod),
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
     causal_relation(NetMod, sets:from_list(Places));
 causal_relation(NetMod, PlaceSet) ->
     NetInfo = extract_net_info(NetMod),
@@ -235,7 +235,7 @@ concurrent_relation(NetMod, PlaceSet) ->
 -spec relation_matrix(atom()) -> relation_map().
 relation_matrix(NetMod) ->
     NetInfo = extract_net_info(NetMod),
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
 
     AllPairs = [{P1, P2} || P1 <- Places, P2 <- Places],
 
@@ -302,11 +302,11 @@ maximum_concurrency(NetMod) ->
 
 %% @doc Get comprehensive concurrency metrics.
 -spec concurrency_metrics(atom(), term()) -> map().
-concurrency_metrics(NetMod, UsrInfo) ->
+concurrency_metrics(NetMod, _UsrInfo) ->
     NetInfo = extract_net_info(NetMod),
 
     %% Compute various metrics
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
 
     #{
         total_places => length(Places),
@@ -328,7 +328,7 @@ concurrency_metrics(NetMod, UsrInfo) ->
 check_structural_concurrency(NetInfo, Place1, Place2) ->
     %% For free-choice nets: places are concurrent if they don't share
     %% an output transition (no structural conflict)
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo),
 
     Post1 = sets:from_list(maps:get(Place1, Postset, [])),
     Post2 = sets:from_list(maps:get(Place2, Postset, [])),
@@ -371,9 +371,9 @@ build_postset(NetMod, Places, Transitions) ->
 %% @private
 %% Build successor map for reachability
 build_successor_map(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo),
+    Transitions = maps:get(transitions, NetInfo),
+    Postset = maps:get(postset, NetInfo),
 
     %% Place -> Transitions -> Places
     lists:foldl(
@@ -384,7 +384,7 @@ build_successor_map(NetInfo) ->
                     %% Find places in T's postset
                     lists:filter(
                         fun(Place) ->
-                            lists:member(Place, NetInfo#{}.preset)
+                            lists:member(Place, maps:get(T, maps:get(preset, NetInfo), []))
                         end,
                         Places
                     )
@@ -541,7 +541,7 @@ get_initial_marking(NetMod) ->
 %% Determine relation between two places
 determine_relation(NetInfo, P1, P2) ->
     %% Check in order: conflict, causal, concurrent
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo),
 
     Post1 = sets:from_list(maps:get(P1, Postset, [])),
     Post2 = sets:from_list(maps:get(P2, Postset, [])),
@@ -565,7 +565,7 @@ determine_relation(NetInfo, P1, P2) ->
 
 %% @private
 classify_net_type(NetInfo) ->
-    Places = NetInfo#{}.places,
+    Places = maps:get(places, NetInfo),
     ConcurrentPairs = find_concurrent_pairs_from_info(NetInfo, sets:from_list(Places)),
 
     case length(ConcurrentPairs) of
@@ -576,7 +576,7 @@ classify_net_type(NetInfo) ->
 
 %% @private
 find_concurrent_pairs_from_info(NetInfo, PlaceSet) ->
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo),
     Places = sets:to_list(PlaceSet),
     AllPairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
 

@@ -53,6 +53,10 @@
       a2a_sse_handler,
       a2a_push_notifier,
       a2a_json,
+      a2a_echo_handler,
+      a2a_handler,
+      a2a_health_handler,
+      a2a_metrics,
       %% YAWL Workflow Pattern Modules
       yawl_patterns,
       yawl_orchestrator,
@@ -64,8 +68,13 @@
       yawl_workitem_processor,
       %% YAWL Persistence
       yawl_persistence,
-      %% YAWL XML
+      %% YAWL XML & XES
       yawl_xml_parser,
+      yawl_xes_logger,
+      yawl_xes_adapter,
+      yawl_xes_formatter,
+      yawl_workflow_xes,
+      yawl_object_centric_xes,
       %% YAWL Resource Management
       yawl_resource_manager,
       yawl_mock_resource_manager,
@@ -76,6 +85,7 @@
       yawl_a2a_events,
       yawl_a2a_resource_integration,
       yawl_error_recovery,
+      yawl_event_bridge,
       %% YAWL REST API
       yawl_rest,
       yawl_rest_handler,
@@ -87,27 +97,44 @@
       yawl_rest_workitem_handler,
       yawl_rest_service_handler,
       yawl_rest_metrics_handler,
+      yawl_rest_cpn_handler,
+      yawl_rest_hitl_handler,
+      yawl_rest_llm_handler,
+      yawl_rest_ocpm_handler,
+      yawl_rest_reachability_handler,
+      yawl_rest_xes_handler,
       yawl_health_handler,
       yawl_metrics,
+      %% YAWL Validation & Serialization
+      yawl_validation_schema,
+      yawl_request_validator,
+      yawl_response_serializer,
+      yawl_json_export,
+      %% YAWL Analysis
+      yawl_concurrency_analyzer,
+      yawl_cpn,
+      yawl_reachability,
+      yawl_partial_order,
+      yawl_post_dominance,
+      yawl_ocpm,
+      yawl_model_comparison,
+      yawl_simulation,
+      yawl_llm_validator,
+      %% YAWL Error Handling & Auth
+      yawl_error_codes,
+      yawl_error_response,
+      yawl_auth_middleware,
+      yawl_retry,
+      yawl_shutdown,
+      yawl_timeout,
+      yawl_sse,
       %% YAWL Templates and Definitions
       yawl_workflow_templates,
       yawl_workflow_definition_storage,
       %% Claude Headless & Human-in-the-Loop
       yawl_claude_headless,
       yawl_human_in_loop,
-      yawl_sse_hitl,
-      %% YAWL Tests
-      yawl_patterns_test,
-      yawl_orchestrator_test,
-      yawl_xml_parser_tests,
-      yawl_patterns_prop_test,
-      yawl_cancellation_after_sim_tests,
-      yawl_cancellation_base_sim_tests,
-      yawl_cancellation_or_sim_tests,
-      yawl_resource_patterns_sim_tests,
-      %% YAWL-A2A Integration Tests
-      yawl_a2a_integration_tests,
-      test_yawl_a2a_bridge
+      yawl_sse_hitl
   ]},
   {licenses, ["Apache-2.0"]},
   {links, [

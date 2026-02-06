@@ -122,6 +122,7 @@ ensure_ets_table() ->
 
 %% @private
 init(Req, Opts) ->
+    ensure_ets_table(),
     Method = cowboy_req:method(Req),
     LogId = cowboy_req:binding(log_id, Req),
     WorkflowId = cowboy_req:binding(workflow_id, Req),
@@ -294,7 +295,7 @@ from_json(Req, State) ->
 
 %% @private
 handle_list_logs(Req) ->
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_string(QS),
 
     WorkflowIdFilter = maps_get(<<"workflow_id">>, Params, undefined),
@@ -355,7 +356,7 @@ handle_get_export_info(LogId) ->
 
 %% @private
 handle_get_workflow_events(WorkflowId, Req) ->
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_string(QS),
 
     Format = maps_get(<<"format">>, Params, <<"json">>),

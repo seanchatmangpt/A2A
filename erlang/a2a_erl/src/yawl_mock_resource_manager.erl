@@ -65,8 +65,8 @@
     get_workflow_status/1
 ]).
 
--include_lib("yawl_types.hrl").
--include_lib("yawl_schema.hrl").
+-include("yawl_types.hrl").
+-include("yawl_schema.hrl").
 
 %%====================================================================
 %% Records
@@ -465,11 +465,11 @@ handle_cast({record_workitem_start, WorkitemId}, State) ->
             status = running,
             start_time = erlang:monotonic_time(millisecond)
         }
-    end, State#state.workitems, #workitem_state{
+    end, #workitem_state{
         workitem_id = WorkitemId,
         status = running,
         start_time = erlang:monotonic_time(millisecond)
-    }),
+    }, State#state.workitems),
     {noreply, State#state{workitems = NewWorkitems}};
 
 handle_cast({record_workitem_complete, WorkitemId}, State) ->
@@ -484,11 +484,11 @@ handle_cast({record_workitem_complete, WorkitemId}, State) ->
 handle_cast({record_choice, WorkitemId, Choice}, State) ->
     NewWorkitems = maps:update_with(WorkitemId, fun(WIState) ->
         WIState#workitem_state{choice = Choice}
-    end, State#state.workitems, #workitem_state{
+    end, #workitem_state{
         workitem_id = WorkitemId,
         status = pending,
         choice = Choice
-    }),
+    }, State#state.workitems),
     {noreply, State#state{workitems = NewWorkitems}};
 
 handle_cast({start_workflow, WorkflowId, PatternType}, State) ->

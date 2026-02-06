@@ -264,8 +264,8 @@ format_metadata(Metadata) when map_size(Metadata) =:= 0 ->
     <<>>;
 format_metadata(Metadata) ->
     maps:fold(fun(Key, Value, Acc) ->
-        Line = io_lib:format("    <string key=\"metadata:~s\" value=\"~s\"/>~n",
-            [to_binary(Key), escape_xml(format_value(Value))]),
+        Line = iolist_to_binary(io_lib:format("    <string key=\"metadata:~s\" value=\"~s\"/>~n",
+            [to_binary(Key), escape_xml(format_value(Value))])),
         <<Line/binary, Acc/binary>>
     end, <<>>, Metadata).
 

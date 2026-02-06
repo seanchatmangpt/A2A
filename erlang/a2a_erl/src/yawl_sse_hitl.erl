@@ -164,7 +164,7 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({send_event, StreamId, EventType, Data}, State) ->
-    case maps:get(StreamId, State#state.streams) of
+    case maps:get(StreamId, State#state.streams, undefined) of
         {Pid, _Ref} ->
             Event = format_sse_event(EventType, Data),
             Pid ! {send, Event},
@@ -193,7 +193,7 @@ handle_cast({broadcast, decision, ApprovalId, DecisionData}, State) ->
     {noreply, State};
 
 handle_cast({close_stream, StreamId}, State) ->
-    case maps:get(StreamId, State#state.streams) of
+    case maps:get(StreamId, State#state.streams, undefined) of
         {Pid, Ref} ->
             demonitor(Ref),
             Pid ! close,
@@ -212,7 +212,7 @@ handle_cast({unregister_client, ClientId}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', Ref, process, _Pid}, State) ->
+handle_info({'DOWN', Ref, process, _Pid, _Reason}, State) ->
     %% Stream process died, clean up
     Streams = maps:filter(fun(_K, {P, R}) -> {P, R} =/= {undefined, Ref} end, State#state.streams),
     Clients = maps:filter(fun(_K, V) -> not maps:is_key(V, Streams) end, State#state.clients),
@@ -260,7 +260,7 @@ format_sse_event(EventType, Data) ->
 %% @private
 find_stream_for_approval(ApprovalId, State) ->
     Streams = maps:to_list(State#state.streams),
-    case lists:search(fun({_, {Pid, _}} ->
+    case lists:search(fun({_, {Pid, _}}) ->
         is_process_alive(Pid)
     end, Streams) of
         {value, {StreamId, _}} ->
@@ -278,4 +278,4 @@ broadcast_to_approval_streams(ApprovalId, EventType, Data) ->
 %% @private
 generate_id() ->
     Binary = term_to_binary({node(), erlang:monotonic_time(microsecond), erlang:unique_integer([positive])}),
-    lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary]).
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary])).

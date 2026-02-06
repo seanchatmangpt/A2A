@@ -144,18 +144,18 @@ validate_json_body(Req, Options) ->
 -spec validate_query_params(cowboy_request(), atom()) ->
     {ok, map(), cowboy_request()} | {error, yawl_error_response:error_response(), cowboy_request()}.
 validate_query_params(Req, SchemaName) ->
-    {QS, Req1} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_params(QS),
 
     case yawl_validation_schema:validate({query_params, SchemaName}, Params) of
         {ok, ValidatedParams} ->
-            {ok, ValidatedParams, Req1};
+            {ok, ValidatedParams, Req};
         {error, ValidationErrors} ->
             ErrorResponse = yawl_error_response:format_error(
                 invalid_field_value,
                 #{errors => ValidationErrors, location => <<"query">>}
             ),
-            {error, ErrorResponse, Req1}
+            {error, ErrorResponse, Req}
     end.
 
 %% @doc Validate request headers.

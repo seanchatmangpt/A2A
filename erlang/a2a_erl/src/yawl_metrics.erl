@@ -607,7 +607,10 @@ build_workflow_prometheus(WorkflowMetrics) ->
               "\"} ", (integer_to_binary(Metrics#workflow_metrics.failed_executions))/binary>>,
             <<"yawl_workflow_duration_avg{pattern=\"",
               (atom_to_binary(Metrics#workflow_metrics.pattern_type, utf8))/binary,
-              "\"} ", (float_to_binary(Metrics#workflow_metrics.avg_execution_time, [{decimals, 2}, compact]))/binary>>
+              "\"} ", (case is_number(Metrics#workflow_metrics.avg_execution_time) of
+                  true -> float_to_binary(float(Metrics#workflow_metrics.avg_execution_time), [{decimals, 2}, compact]);
+                  false -> <<"0.0">>
+              end)/binary>>
         ] ++ Acc
     end, [], WorkflowMetrics),
     iolist_to_binary(lists:reverse(Lines)).
@@ -619,8 +622,14 @@ build_service_prometheus(ServiceMetrics) ->
         ServiceType = atom_to_binary(Metrics#service_metrics.service_type, utf8),
         TotalCalls = integer_to_binary(Metrics#service_metrics.total_calls),
         SuccessfulCalls = integer_to_binary(Metrics#service_metrics.successful_calls),
-        AvgResponseTime = float_to_binary(Metrics#service_metrics.avg_response_time, [{decimals, 2}, compact]),
-        SuccessRate = float_to_binary(Metrics#service_metrics.success_rate, [{decimals, 3}, compact]),
+        AvgResponseTime = case is_number(Metrics#service_metrics.avg_response_time) of
+            true -> float_to_binary(float(Metrics#service_metrics.avg_response_time), [{decimals, 2}, compact]);
+            false -> <<"0.0">>
+        end,
+        SuccessRate = case is_number(Metrics#service_metrics.success_rate) of
+            true -> float_to_binary(float(Metrics#service_metrics.success_rate), [{decimals, 3}, compact]);
+            false -> <<"0.0">>
+        end,
         [
             <<"yawl_service_calls_total{service=\"", ServiceName/binary,
               "\",type=\"", ServiceType/binary,
@@ -743,4 +752,4 @@ to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_integer(Term) -> integer_to_binary(Term);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
-to_binary(Term) -> io_lib:format("~p", [Term]).
+to_binary(Term) -> iolist_to_binary(io_lib:format("~p", [Term])).

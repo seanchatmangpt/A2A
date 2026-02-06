@@ -54,7 +54,7 @@ init(Req, State) ->
     MetricsType = cowboy_req:binding(metrics_type, Req),
 
     %% Determine format from query string or Accept header
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Format = case string:find(QS, "format=prometheus") of
         nomatch ->
             case cowboy_req:parse_header(<<"accept">>, Req) of
@@ -371,4 +371,4 @@ response_json(Req, StatusCode, Body) ->
 to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
-to_binary(Term) -> io_lib:format("~p", [Term]).
+to_binary(Term) -> iolist_to_binary(io_lib:format("~p", [Term])).

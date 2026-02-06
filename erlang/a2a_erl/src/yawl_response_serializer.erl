@@ -315,7 +315,7 @@ serialize_error(undefined) -> null;
 serialize_error(null) -> null;
 serialize_error(Error) when is_binary(Error) -> Error;
 serialize_error(Error) when is_atom(Error) -> atom_to_binary(Error, utf8);
-serialize_error(Error) -> io_lib:format("~p", [Error]).
+serialize_error(Error) -> iolist_to_binary(io_lib:format("~p", [Error])).
 
 %% @doc Serialize validation errors.
 -spec serialize_validation_errors([binary()]) -> serialized_response().
@@ -343,7 +343,7 @@ to_json(Response) ->
 -spec format_timestamp(integer()) -> binary().
 format_timestamp(Milliseconds) when is_integer(Milliseconds) ->
     Seconds = Milliseconds div 1000,
-    format_datetime(calendar:system_time_to_universal_time(Seconds)).
+    format_datetime(calendar:system_time_to_universal_time(Seconds, second)).
 
 %% @doc Format a datetime tuple to ISO 8601 string.
 -spec format_datetime(calendar:datetime()) -> binary().

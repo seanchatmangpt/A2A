@@ -385,10 +385,10 @@ get_system_info() ->
 get_memory_info() ->
     Memory = erlang:memory(),
     #{
-        total => maps:get(total, Memory, 0),
-        processes => maps:get(processes, Memory, 0),
-        system => maps:get(system, Memory, 0),
-        atom => maps:get(atom, Memory, 0),
-        binary => maps:get(binary, Memory, 0),
-        ets => maps:get(ets, Memory, 0)
+        total => proplists:get_value(total, Memory, 0),
+        processes => proplists:get_value(processes, Memory, 0),
+        system => proplists:get_value(system, Memory, 0),
+        atom => proplists:get_value(atom, Memory, 0),
+        binary => proplists:get_value(binary, Memory, 0),
+        ets => proplists:get_value(ets, Memory, 0)
     }.

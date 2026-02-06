@@ -209,7 +209,7 @@ handle_call({create_gate, WorkflowId, TaskId, DecisionPrompt, Options}, _From, S
     }};
 
 handle_call({check_status, ApprovalId}, _From, State) ->
-    case maps:get(ApprovalId, State#state.pending_approvals) of
+    case maps:get(ApprovalId, State#state.pending_approvals, undefined) of
         undefined ->
             {reply, {error, not_found}, State};
         Gate ->
@@ -217,7 +217,7 @@ handle_call({check_status, ApprovalId}, _From, State) ->
     end;
 
 handle_call({submit_approval, ApprovalId, Decision, Feedback}, _From, State) ->
-    case maps:get(ApprovalId, State#state.pending_approvals) of
+    case maps:get(ApprovalId, State#state.pending_approvals, undefined) of
         undefined ->
             {reply, {error, not_found}, State};
         Gate ->
@@ -266,7 +266,7 @@ handle_call({llm_decision, DecisionPrompt, Context, Options}, _From, State) ->
     end;
 
 handle_call({analyze_feedback, WorkflowId}, _From, State) ->
-    case maps:get(WorkflowId, State#state.feedback_store) of
+    case maps:get(WorkflowId, State#state.feedback_store, undefined) of
         undefined ->
             {reply, {error, no_feedback}, State};
         Feedback ->
@@ -302,7 +302,7 @@ handle_call({start_session, WorkflowId, Participants}, _From, State) ->
     }};
 
 handle_call({continue_session, SessionId, Message}, _From, State) ->
-    case maps:get(SessionId, State#state.sessions) of
+    case maps:get(SessionId, State#state.sessions, undefined) of
         undefined ->
             {reply, {error, session_not_found}, State};
         Session ->
@@ -335,7 +335,7 @@ handle_cast({collect_feedback, WorkflowId, Feedback}, State) ->
     }};
 
 handle_cast({end_session, SessionId}, State) ->
-    case maps:get(SessionId, State#state.sessions) of
+    case maps:get(SessionId, State#state.sessions, undefined) of
         undefined ->
             {noreply, State};
         Session ->
@@ -414,4 +414,4 @@ notify_participants(Participants, Message) ->
 %% @private
 generate_id() ->
     Binary = term_to_binary({node(), erlang:monotonic_time(microsecond), erlang:unique_integer([positive])}),
-    lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary]).
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0B", [B]) || <<B>> <= Binary])).

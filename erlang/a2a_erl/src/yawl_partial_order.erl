@@ -565,7 +565,7 @@ build_partial_order_xml(PO) ->
         fun(E) ->
             Id = maps:get(id, E),
             Succs = maps:get(Id, Order, []),
-            ConcurrentList = [C || {C1, C2} <- sets:to_list(Concurrent), C1 =:= Id],
+            ConcurrentList = [C2 || {C1, C2} <- sets:to_list(Concurrent), C1 =:= Id],
             io_lib:format(
                 "  <event id=\"~s\" succ=\"~s\" concurrent=\"~s\"/>~n",
                 [Id, string:join([binary_to_list(S) || S <- Succs], ","),
@@ -576,7 +576,7 @@ build_partial_order_xml(PO) ->
     ),
 
     iolist_to_binary([
-        "<partialOrder>~n",
+        "<partialOrder>\n",
         EventsXML,
         "</partialOrder>"
     ]).
@@ -586,12 +586,12 @@ build_partial_order_xml(PO) ->
 wrap_in_xes(PartialOrderXML, PO) ->
     TraceId = maps:get(trace_id, PO, <<"po_trace">>),
     iolist_to_binary([
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>~n",
-        "<log xes.version=\"1.0\" xes.xmlns=\"http://www.xes-standard.org/\">~n",
-        "  <extension name=\"PartialOrder\" prefix=\"po\" uri=\"http://www.yawl.org/partial-order.xesext\"/>~n",
-        "  <trace xes:id=\"", TraceId, "\">~n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<log xes.version=\"1.0\" xes.xmlns=\"http://www.xes-standard.org/\">\n",
+        "  <extension name=\"PartialOrder\" prefix=\"po\" uri=\"http://www.yawl.org/partial-order.xesext\"/>\n",
+        "  <trace xes:id=\"", TraceId, "\">\n",
         PartialOrderXML,
-        "  </trace>~n",
+        "  </trace>\n",
         "</log>"
     ]).
 

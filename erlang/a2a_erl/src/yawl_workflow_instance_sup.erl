@@ -29,16 +29,7 @@ start_link() ->
 %% @doc Start a new workflow instance.
 -spec start_child(binary(), map()) -> supervisor:startchild_ret().
 start_child(WorkflowId, Config) ->
-    SupervisorRef = ?MODULE,
-    ChildSpec = #{
-        id => WorkflowId,
-        start => {yawl_workflow_instance, start_link, [WorkflowId, Config]},
-        restart => temporary,
-        shutdown => 5000,
-        type => worker,
-        modules => [yawl_workflow_instance]
-    },
-    supervisor:start_child(SupervisorRef, ChildSpec).
+    supervisor:start_child(?MODULE, [WorkflowId, Config]).
 
 %%====================================================================
 %% Supervisor Callbacks
@@ -50,4 +41,12 @@ init([]) ->
         intensity => 10,
         period => 60
     },
-    {ok, {SupFlags, []}}.
+    ChildSpec = #{
+        id => yawl_workflow_instance,
+        start => {yawl_workflow_instance, start_link, []},
+        restart => temporary,
+        shutdown => 5000,
+        type => worker,
+        modules => [yawl_workflow_instance]
+    },
+    {ok, {SupFlags, [ChildSpec]}}.

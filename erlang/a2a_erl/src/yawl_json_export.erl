@@ -350,7 +350,7 @@ export_arcs(NetMod, Places, Transitions) ->
 %% @private
 normalize_workflow_json(JSON) ->
     %% Ensure all required fields are present
-    WorkflowId = case maps:get(<<"workflow_id">>, JSON) of
+    WorkflowId = case maps:get(<<"workflow_id">>, JSON, undefined) of
         undefined -> generate_workflow_id();
         Id -> Id
     end,
@@ -404,7 +404,7 @@ extract_json_from_text(Text) ->
 %% @private
 find_json_block(Text) ->
     %% Look for ```json...``` block
-    case re:run(Text, "```json\\s*([\\s\\S]*?)\\s*```") of
+    case re:run(Text, "```json\\s*([\\s\\S]*?)\\s*```", [{capture, all, list}]) of
         {match, [_, JSON]} ->
             {ok, JSON};
         nomatch ->

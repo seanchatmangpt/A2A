@@ -171,14 +171,17 @@ init([]) ->
 
 handle_call({is_reachable, NetMod, TargetMarking}, _From, State) ->
     CacheKey = {reachable, NetMod, TargetMarking},
-    case maps:get(CacheKey, State, undefined) of
+    Cache = maps:get(cache, State),
+    case maps:get(CacheKey, Cache, undefined) of
         undefined ->
             Result = do_is_reachable(NetMod, TargetMarking),
-            NewStats = maps:update_with(analyses, fun(V) -> V + 1 end, 1, State),
-            {reply, Result, State#{cache => maps:put(CacheKey, Result, State#state.cache),
-                                 statistics => NewStats}};
+            Stats = maps:get(statistics, State),
+            NewStats = maps:update_with(analyses, fun(V) -> V + 1 end, 1, Stats),
+            NewCache = maps:put(CacheKey, Result, Cache),
+            {reply, Result, State#{cache => NewCache, statistics => NewStats}};
         CachedResult ->
-            NewStats = maps:update_with(cache_hits, fun(V) -> V + 1 end, 1, State),
+            Stats = maps:get(statistics, State),
+            NewStats = maps:update_with(cache_hits, fun(V) -> V + 1 end, 1, Stats),
             {reply, CachedResult, State#{statistics => NewStats}}
     end;
 
@@ -358,8 +361,8 @@ are_places_concurrent(NetInfo, Place1, Place2) ->
     %% For free-choice nets: places are concurrent if they're not in the same
     %% preset of any transition (no structural conflict)
 
-    Postset1 = maps:get(Place1, NetInfo#{}.postset, []),
-    Postset2 = maps:get(Place2, NetInfo#{}.postset, []),
+    Postset1 = maps:get(Place1, maps:get(postset, NetInfo), []),
+    Postset2 = maps:get(Place2, maps:get(postset, NetInfo), []),
 
     %% Check if there's a shared transition in postset (structural conflict)
     SharedTransitions = sets:to_list(
@@ -431,7 +434,7 @@ do_diverging_transitions(NetMod, Marking) ->
     lists:usort(
         lists:flatmap(
             fun(Place) ->
-                maps:get(Place, NetInfo#{}.postset, [])
+                maps:get(Place, maps:get(postset, NetInfo), [])
             end,
             TokenPlaces
         )
@@ -471,8 +474,8 @@ do_get_diagnostics(NetMod, TargetMarking) ->
 
     #{
         net_info => #{
-            place_count => length(NetInfo#{}.places),
-            transition_count => length(NetInfo#{}.transitions),
+            place_count => length(maps:get(places, NetInfo)),
+            transition_count => length(maps:get(transitions, NetInfo)),
             is_acyclic => is_acyclic(NetInfo)
         },
         target_marking => TargetMarking,
@@ -491,8 +494,8 @@ reachability_op2(NetInfo, TargetMarking) ->
     %% 2. Compute post-dominance frontiers
     %% 3. Verify structural constraints
 
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
+    Places = maps:get(places, NetInfo),
+    Transitions = maps:get(transitions, NetInfo),
 
     %% Step 1: Check admissibility of target marking
     AdmissibleResult = is_marking_admissible(NetInfo, TargetMarking),
@@ -504,7 +507,7 @@ reachability_op2(NetInfo, TargetMarking) ->
                 reason => marking_not_admissible,
                 diagnostics => AdmissibleResult
             };
-        true ->
+        {true, _} ->
             %% Step 2: Compute post-dominance frontiers for efficient reachability
             PDF = compute_post_dominance_frontiers_impl(NetInfo),
 
@@ -529,13 +532,24 @@ reachability_op2(NetInfo, TargetMarking) ->
 %% Node n post-dominates node m if every path from m to exit must go through n
 do_compute_pdf(NetMod) ->
     NetInfo = extract_net_info(NetMod),
-    do_compute_pdf(NetMod).
+    Places = maps:get(places, NetInfo),
+    Transitions = maps:get(transitions, NetInfo),
+    %% Build post-dominator frontier from net info
+    #{places => Places, transitions => Transitions, pdf => compute_pdf_from_info(NetInfo)}.
+
+%% @private
+%% Compute post-dominance frontier map from net info
+compute_pdf_from_info(NetInfo) ->
+    Places = maps:get(places, NetInfo),
+    %% Initialize each place with an empty frontier set, then delegate
+    %% to the iterative implementation for the actual computation
+    compute_post_dominance_frontiers_impl(NetInfo).
 
 compute_post_dominance_frontiers_impl(NetInfo) ->
     %% Build control flow graph and compute post-dominance
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo),
+    Transitions = maps:get(transitions, NetInfo),
+    Postset = maps:get(postset, NetInfo),
 
     %% Compute post-dominance using iterative algorithm
     %% PDF(n) = {m | n post-dominates a predecessor of m, but not m itself}
@@ -568,8 +582,8 @@ compute_pdf_step(_Places, _Transitions, _Postset, ExitNode, PDF) ->
 %% @private
 %% Find the exit (sink) node of the net
 find_exit_node(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo),
+    Postset = maps:get(postset, NetInfo),
 
     %% Exit place has no outgoing transitions
     ExitPlaces = lists:filter(
@@ -590,10 +604,21 @@ find_exit_node(NetInfo) ->
 
 %% @private
 %% Verify reachability using post-dominance frontiers
-verify_reachability_with_pdf(_NetInfo, _Initial, _Target, _PDF) ->
-    %% Simplified implementation - in full version, this would use
-    %% the PDF to efficiently verify reachability
-    true.
+verify_reachability_with_pdf(NetInfo, _Initial, Target, _PDF) ->
+    %% Basic reachability check: verify target places are a subset of net places
+    %% and the target marking is admissible
+    NetPlaces = sets:from_list(maps:get(places, NetInfo)),
+    TargetPlaces = sets:from_list(maps:keys(Target)),
+    AllPlacesValid = sets:is_subset(TargetPlaces, NetPlaces),
+    case AllPlacesValid of
+        false -> false;
+        true ->
+            %% Check admissibility of target marking
+            case is_marking_admissible(NetInfo, Target) of
+                {true, _} -> true;
+                {false, _} -> false
+            end
+    end.
 
 %% @private
 %% Check if a marking is admissible
@@ -627,8 +652,8 @@ verify_afc_net(NetInfo) ->
 %% Check free-choice property: for any two places, if their postsets intersect,
 %% then they must have identical postsets
 check_free_choice_property(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo),
+    Postset = maps:get(postset, NetInfo),
 
     %% Check all pairs of places
     PlacePairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
@@ -649,8 +674,8 @@ check_free_choice_property(NetInfo) ->
 %% @private
 %% Find free-choice violations
 find_fc_violations(NetInfo) ->
-    Places = NetInfo#{}.places,
-    Postset = NetInfo#{}.postset,
+    Places = maps:get(places, NetInfo),
+    Postset = maps:get(postset, NetInfo),
 
     PlacePairs = [{P1, P2} || P1 <- Places, P2 <- Places, P1 < P2],
 
@@ -681,7 +706,7 @@ do_structural_conflict_analysis(NetMod) ->
 
 find_structural_conflicts(NetInfo) ->
     %% Conflicts occur when multiple places share a transition in their postset
-    Postset = NetInfo#{}.postset,
+    Postset = maps:get(postset, NetInfo),
 
     %% Group places by their postsets
     PostsetGroups = maps:fold(
@@ -731,9 +756,9 @@ do_s_component_analysis(NetMod) ->
 %% Check if net is acyclic
 is_acyclic(NetInfo) ->
     %% Build adjacency and check for cycles using DFS
-    Places = NetInfo#{}.places,
-    Transitions = NetInfo#{}.transitions,
-    Preset = NetInfo#{}.preset,
+    Places = maps:get(places, NetInfo),
+    Transitions = maps:get(transitions, NetInfo),
+    Preset = maps:get(preset, NetInfo),
 
     %% Simplified acyclicity check - in full version would do proper DFS
     %% For now, assume acyclic if no self-loops
@@ -760,14 +785,28 @@ get_transition_postset(Transition, NetInfo) ->
             end
         end,
         [],
-        NetInfo#{}.postset
+        maps:get(postset, NetInfo)
     ).
 
 %% @private
 %% Find cycle violations
-find_cycle_violations(_NetInfo) ->
-    %% Placeholder - would implement cycle detection
-    [].
+find_cycle_violations(NetInfo) ->
+    %% Basic cycle detection: check if any transition's postset
+    %% feeds back into its preset (self-loop detection)
+    Transitions = maps:get(transitions, NetInfo),
+    Preset = maps:get(preset, NetInfo),
+    lists:filtermap(
+        fun(T) ->
+            PresetT = maps:get(T, Preset, []),
+            PostsetT = get_transition_postset(T, NetInfo),
+            Overlap = [P || P <- PostsetT, lists:member(P, PresetT)],
+            case Overlap of
+                [] -> false;
+                _ -> {true, {cycle_violation, T, Overlap}}
+            end
+        end,
+        Transitions
+    ).
 
 %% @private
 %% Compute state space with diagnostics
@@ -788,11 +827,34 @@ do_compute_state_space_with_diagnostics(NetMod, UsrInfo) ->
     }.
 
 %% @private
-compute_state_space_stats(NetMod, InitialMarking, UsrInfo) ->
-    %% Simplified state space exploration
-    %% In full version, would use proper BFS/DFS
-    Reachable = [InitialMarking],
-    {length(Reachable), 0, 0}.
+compute_state_space_stats(NetMod, InitialMarking, _UsrInfo) ->
+    %% Compute state space statistics from actual exploration
+    NetInfo = extract_net_info(NetMod),
+    AllMarkings = compute_all_reachable_markings(NetInfo, InitialMarking),
+    Transitions = maps:get(transitions, NetInfo),
+    Preset = maps:get(preset, NetInfo),
+    %% Count deadlocks: markings with no enabled transitions
+    Deadlocks = length(lists:filter(
+        fun(M) ->
+            not lists:any(
+                fun(T) ->
+                    PresetT = maps:get(T, Preset, []),
+                    lists:all(fun(P) -> length(maps:get(P, M, [])) > 0 end, PresetT)
+                end,
+                Transitions
+            )
+        end,
+        AllMarkings
+    )),
+    %% Count concurrent markings: markings with tokens in multiple places
+    ConcurrentMarkings = length(lists:filter(
+        fun(M) ->
+            TokenPlaces = [P || {P, Tokens} <- maps:to_list(M), length(Tokens) > 0],
+            length(TokenPlaces) > 1
+        end,
+        AllMarkings
+    )),
+    {length(AllMarkings), Deadlocks, ConcurrentMarkings}.
 
 %% @private
 %% Extract net information from a gen_pnet module
@@ -844,7 +906,7 @@ get_initial_marking(NetMod) ->
 
 %% @private
 get_initial_marking_from_net(NetInfo) ->
-    NetMod = NetInfo#{}.net_module,
+    NetMod = maps:get(net_module, NetInfo),
     lists:foldl(
         fun(P, Acc) ->
             case NetMod:init_marking(P, []) of
@@ -853,7 +915,7 @@ get_initial_marking_from_net(NetInfo) ->
             end
         end,
         #{},
-        NetInfo#{}.places
+        maps:get(places, NetInfo)
     ).
 
 %% @private
@@ -873,6 +935,63 @@ build_initial_marking(NetMod, UsrInfo) ->
 
 %% @private
 %% Compute all reachable markings (for small nets)
-compute_all_reachable_markings(_NetInfo, InitialMarking) ->
-    %% Placeholder - would implement full state space exploration
-    [InitialMarking].
+compute_all_reachable_markings(NetInfo, InitialMarking) ->
+    %% BFS to compute all reachable markings (bounded to prevent explosion)
+    bfs_reachable(NetInfo, [InitialMarking], sets:from_list([InitialMarking]), 1000).
+
+%% @private
+bfs_reachable(_NetInfo, [], Visited, _Limit) ->
+    sets:to_list(Visited);
+bfs_reachable(_NetInfo, _Queue, Visited, 0) ->
+    %% Hit exploration limit
+    sets:to_list(Visited);
+bfs_reachable(NetInfo, [Current | Rest], Visited, Limit) ->
+    %% Find all enabled transitions and fire them
+    Transitions = maps:get(transitions, NetInfo),
+    Preset = maps:get(preset, NetInfo),
+    EnabledTransitions = lists:filter(
+        fun(T) ->
+            PresetT = maps:get(T, Preset, []),
+            lists:all(fun(P) -> length(maps:get(P, Current, [])) > 0 end, PresetT)
+        end,
+        Transitions
+    ),
+    NewMarkings = lists:filtermap(
+        fun(T) ->
+            NewMarking = fire_transition(T, Current, NetInfo),
+            case sets:is_element(NewMarking, Visited) of
+                true -> false;
+                false -> {true, NewMarking}
+            end
+        end,
+        EnabledTransitions
+    ),
+    NewVisited = lists:foldl(fun(M, Acc) -> sets:add_element(M, Acc) end, Visited, NewMarkings),
+    bfs_reachable(NetInfo, Rest ++ NewMarkings, NewVisited, Limit - length(NewMarkings)).
+
+%% @private
+%% Fire a transition: remove tokens from preset places, add tokens to postset places
+fire_transition(Transition, Marking, NetInfo) ->
+    PresetPlaces = maps:get(Transition, maps:get(preset, NetInfo), []),
+    PostsetPlaces = get_transition_postset(Transition, NetInfo),
+    %% Remove one token from each preset place
+    M1 = lists:foldl(
+        fun(P, Acc) ->
+            Tokens = maps:get(P, Acc, []),
+            case Tokens of
+                [_ | RestTokens] -> Acc#{P => RestTokens};
+                [] -> Acc
+            end
+        end,
+        Marking,
+        PresetPlaces
+    ),
+    %% Add one token to each postset place
+    lists:foldl(
+        fun(P, Acc) ->
+            Tokens = maps:get(P, Acc, []),
+            Acc#{P => [token | Tokens]}
+        end,
+        M1,
+        PostsetPlaces
+    ).

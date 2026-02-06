@@ -191,7 +191,7 @@ from_json(Req, State) ->
 %% @private
 handle_list_workflows(Req) ->
     %% Parse query parameters
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_string(QS),
 
     {Status, Limit, Offset} = {
@@ -546,7 +546,7 @@ maps_get(Key, Map, Default) ->
 to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
-to_binary(Term) -> io_lib:format("~p", [Term]).
+to_binary(Term) -> iolist_to_binary(io_lib:format("~p", [Term])).
 
 %% @private
 %% @doc Validate request body using the validation schema module.

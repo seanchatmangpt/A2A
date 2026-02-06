@@ -151,30 +151,26 @@ log_pattern_complete(WorkflowId, PatternType, InstanceId) ->
 
 -spec log_event(#xes_event{}) -> ok.
 log_event(Event) ->
-    spawn(fun() ->
-        State = get(?XES_STATE),
-        Enabled = maps_get(enabled, State, true),
-        case Enabled of
-            false -> ok;
-            true ->
-                ?LOG_DEBUG("[XES] ~s ~s ~p",
-                    [format_timestamp_ms(Event#xes_event.timestamp),
-                     Event#xes_event.activity,
-                     Event#xes_event.data_attrs]),
-                CurrentTrace = maps_get(current_trace, State, undefined),
-                NewTrace = case CurrentTrace of
-                    #xes_trace{events = Events} = T ->
-                        T#xes_trace{events = Events ++ [Event]};
-                    _ -> undefined
-                end,
-                put(?XES_STATE, (get(?XES_STATE))#{current_trace => NewTrace}),
-                Buffer = maps_get(buffer, State, []),
-                NewBuffer = Buffer ++ [Event],
-                put(?XES_STATE, (get(?XES_STATE))#{buffer => NewBuffer}),
-                ok
-        end
-    end),
-    ok.
+    State = get(?XES_STATE),
+    Enabled = maps_get(enabled, State, true),
+    case Enabled of
+        false -> ok;
+        true ->
+            ?LOG_DEBUG("[XES] ~s ~s ~p",
+                [format_timestamp_ms(Event#xes_event.timestamp),
+                 Event#xes_event.activity,
+                 Event#xes_event.data_attrs]),
+            CurrentTrace = maps_get(current_trace, State, undefined),
+            NewTrace = case CurrentTrace of
+                #xes_trace{events = Events} = T ->
+                    T#xes_trace{events = Events ++ [Event]};
+                _ -> undefined
+            end,
+            Buffer = maps_get(buffer, State, []),
+            NewBuffer = Buffer ++ [Event],
+            put(?XES_STATE, State#{current_trace => NewTrace, buffer => NewBuffer}),
+            ok
+    end.
 
 -spec create_workflow_start_event(binary(), binary()) -> #xes_event{}.
 create_workflow_start_event(WorkflowId, CaseId) ->

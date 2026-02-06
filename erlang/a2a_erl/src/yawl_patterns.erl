@@ -1325,10 +1325,21 @@ is_cancellation_pattern(PatternType) ->
 
 is_resource_pattern(PatternType) ->
     PatternBin = atom_to_binary(PatternType, utf8),
-    case PatternBin of
-        <<_:(byte_size(PatternBin) - 14)/binary, "_with_allocation">> -> true;
-        <<_:(byte_size(PatternBin) - 17)/binary, "_without_allocation">> -> true;
-        _ -> false
+    Sz = byte_size(PatternBin),
+    WithAllocSz = 16,  %% byte_size(<<"_with_allocation">>)
+    WithoutAllocSz = 19,  %% byte_size(<<"_without_allocation">>)
+    if
+        Sz > WithAllocSz ->
+            case PatternBin of
+                <<_:(Sz - WithAllocSz)/binary, "_with_allocation">> -> true;
+                _ when Sz > WithoutAllocSz ->
+                    case PatternBin of
+                        <<_:(Sz - WithoutAllocSz)/binary, "_without_allocation">> -> true;
+                        _ -> false
+                    end;
+                _ -> false
+            end;
+        true -> false
     end.
 
 get_cancellation_scope(PatternType) ->
@@ -1651,48 +1662,6 @@ generate_pattern_definition(PatternType, Config) ->
                 complexity => medium,
                 cancellation_scope => block
             };
-        %% All other cancellation patterns follow similar structure
-        _ ->
-            PatternBin = atom_to_binary(PatternType, utf8),
-            IsCancellation = case PatternBin of
-                <<"cancelation_", _/binary>> -> true;
-                _ -> lists:member(PatternType, [cancelation, cancelation_block, cancelation_scope,
-                                               cancelation_thread, cancelation_subprocess, cancelation_multiple_instances,
-                                               cancelation_point, cancelation_end, cancelation_cancel])
-            end,
-            case IsCancellation of
-                true ->
-                    #{
-                        pattern_type => PatternType,
-                        places => [start, task1, task2, cancel, 'end'],
-                        transitions => [start, t1, t2, cancel_workflow, finish],
-                        marking => #{start => [workflow_token]},
-                        preset => #{
-                            start => [start],
-                            cancel_workflow => [cancel],
-                            finish => ['end']
-                        },
-                        postset => #{
-                            start => [t1, cancel_workflow],
-                            t1 => [t2],
-                            t2 => [finish],
-                            cancel_workflow => [finish],
-                            finish => []
-                        },
-                        complexity => medium,
-                        cancellation_scope => get_cancellation_scope_from_name(PatternType)
-                    };
-                _ ->
-                    #{
-                        pattern_type => PatternType,
-                        places => [start, task1, task2, 'end'],
-                        transitions => [start, t1, t2, finish],
-                        marking => #{start => [workflow_token]},
-                        preset => #{start => [start], finish => ['end']},
-                        postset => #{start => [t1], t1 => [t2], t2 => [finish], finish => []},
-                        complexity => medium
-                    }
-            end;
         %% Resource allocation patterns
         implicit_merge_with_allocation ->
             #{
@@ -1739,35 +1708,62 @@ generate_pattern_definition(PatternType, Config) ->
                 complexity => medium,
                 resource_allocation => without_allocation
             };
-        %% Other resource patterns
+        %% All other patterns - cancellation and resource patterns
         _ ->
-            case {lists:suffix(<<"_with_allocation">>, atom_to_binary(PatternType, utf8)),
-                  lists:suffix(<<"_without_allocation">>, atom_to_binary(PatternType, utf8))} of
-                {true, _} ->
+            PatternBin = atom_to_binary(PatternType, utf8),
+            IsCancellation = case PatternBin of
+                <<"cancelation_", _/binary>> -> true;
+                _ -> lists:member(PatternType, [cancelation, cancelation_block, cancelation_scope,
+                                               cancelation_thread, cancelation_subprocess, cancelation_multiple_instances,
+                                               cancelation_point, cancelation_end, cancelation_cancel])
+            end,
+            case IsCancellation of
+                true ->
                     #{
                         pattern_type => PatternType,
-                        places => [start, task1, task2, 'end'],
-                        transitions => [start, t1, t2, finish],
+                        places => [start, task1, task2, cancel, 'end'],
+                        transitions => [start, t1, t2, cancel_workflow, finish],
                         marking => #{start => [workflow_token]},
-                        preset => #{start => [start], finish => ['end']},
-                        postset => #{start => [t1, t2], t1 => [finish], t2 => [finish], finish => []},
+                        preset => #{
+                            start => [start],
+                            cancel_workflow => [cancel],
+                            finish => ['end']
+                        },
+                        postset => #{
+                            start => [t1, cancel_workflow],
+                            t1 => [t2],
+                            t2 => [finish],
+                            cancel_workflow => [finish],
+                            finish => []
+                        },
                         complexity => medium,
-                        resource_allocation => get_allocation_type_from_name(PatternType)
+                        cancellation_scope => get_cancellation_scope_from_name(PatternType)
                     };
-                _ ->
-                    #{
-                        pattern_type => PatternType,
-                        places => [start, task1, task2, 'end'],
-                        transitions => [start, t1, t2, finish],
-                        marking => #{start => [workflow_token]},
-                        preset => #{start => [start], finish => ['end']},
-                        postset => #{start => [t1, t2], t1 => [finish], t2 => [finish], finish => []},
-                        complexity => medium
-                    }
-            end;
-        _ ->
-            %% Default to basic sequential for unknown patterns
-            generate_pattern_definition(basic_sequential, Config)
+                false ->
+                    case is_resource_pattern(PatternType) of
+                        true ->
+                            #{
+                                pattern_type => PatternType,
+                                places => [start, task1, task2, 'end'],
+                                transitions => [start, t1, t2, finish],
+                                marking => #{start => [workflow_token]},
+                                preset => #{start => [start], finish => ['end']},
+                                postset => #{start => [t1, t2], t1 => [finish], t2 => [finish], finish => []},
+                                complexity => medium,
+                                resource_allocation => get_allocation_type_from_name(PatternType)
+                            };
+                        false ->
+                            #{
+                                pattern_type => PatternType,
+                                places => [start, task1, task2, 'end'],
+                                transitions => [start, t1, t2, finish],
+                                marking => #{start => [workflow_token]},
+                                preset => #{start => [start], finish => ['end']},
+                                postset => #{start => [t1], t1 => [t2], t2 => [finish], finish => []},
+                                complexity => medium
+                            }
+                    end
+            end
     end.
 
 generate_multi_instance_preset(NumInstances) ->
@@ -1875,12 +1871,12 @@ validate_pattern_config(Pattern, _Config) ->
                                    cancelation_point, cancelation_end, cancelation_cancel])
     end,
     IsResource = case PatternBin of
-        S when byte_size(S) > 14 ->
+        S when byte_size(S) > 16 ->
             case S of
-                <<_:(byte_size(S) - 14)/binary, "_with_allocation">> -> true;
-                _ when byte_size(S) > 17 ->
+                <<_:(byte_size(S) - 16)/binary, "_with_allocation">> -> true;
+                _ when byte_size(S) > 19 ->
                     case S of
-                        <<_:(byte_size(S) - 17)/binary, "_without_allocation">> -> true;
+                        <<_:(byte_size(S) - 19)/binary, "_without_allocation">> -> true;
                         _ -> false
                     end;
                 _ -> false

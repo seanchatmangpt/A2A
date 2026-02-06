@@ -478,10 +478,9 @@ process_event(EventType, EventData, State) ->
                 undefined ->
                     %% No workflow ID, buffer for now
                     Buffer = [XESEvent | State#state.event_buffer],
-                    MaybeFlush = maybe_flush_buffer(Buffer, State),
-                    MaybeFlush#state{
-                        statistics = update_stats(EventType, State#state.statistics)
-                    };
+                    _FlushedState = maybe_flush_buffer(Buffer, State),
+                    UpdatedStats = update_stats(EventType, State#state.statistics),
+                    {State#state.traces, UpdatedStats};
                 _ ->
                     %% Add to trace
                     CurrentTraces = State#state.traces,
@@ -734,7 +733,7 @@ trace_to_xml(Trace) ->
 %% @private
 event_to_xml(Event) ->
     TimestampMs = integer_to_binary(Event#xes_event.timestamp),
-    TimestampStr = format_timestamp(Event#xes_event.timestamp),
+    TimestampStr = list_to_binary(format_timestamp(Event#xes_event.timestamp)),
     ResourceAttr = case Event#xes_event.resource of
         undefined -> <<>>;
         Resource -> <<" <string key=\"org:resource\" value=\"", Resource/binary, "\"/>">>

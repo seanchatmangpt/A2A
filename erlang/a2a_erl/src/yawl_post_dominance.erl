@@ -227,8 +227,8 @@ find_transition_postset(NetMod, Transition) ->
     Places = NetMod:place_lst(),
 
     lists:filter(fun(P) ->
-        %% Check if P has T in its preset (meaning T -> P edge)
-        lists:member(P, NetMod:preset(Transition))
+        %% Check if P is in the postset of T (meaning T -> P edge)
+        lists:member(P, NetMod:postset(Transition))
     end, Places).
 
 %% @private
@@ -247,8 +247,8 @@ find_exit_node(Places, Successors) ->
 
     case ExitPlaces of
         [Exit] -> Exit;
-        _ when ExitPlaces =/= [] -> hd(ExitPlaces);
-        true -> 'end'  % Default
+        [H|_] -> H;
+        [] -> 'end'  % Default
     end.
 
 %% @private
@@ -313,10 +313,10 @@ compute_post_dominators_iter(Nodes, Exit, Predecessors, DomMap, Iterations) ->
                             %% No predecessors = unreachable from exit
                             Acc#{Node => sets:from_list([Node])};
                         _ ->
-                            %% Intersection of post-dominators of all predecessors
+                            %% Post-dom(n) = {n} UNION (INTERSECTION of post-dom sets of predecessors)
                             PredDomSets = [maps:get(P, Acc, sets:from_list([P])) || P <- Preds],
-                            Intersection = sets:intersection([sets:from_list([Node]) | PredDomSets]),
-                            Acc#{Node => Intersection}
+                            Intersection = sets:intersection(PredDomSets),
+                            Acc#{Node => sets:union(sets:from_list([Node]), Intersection)}
                     end
             end
         end,

@@ -163,7 +163,7 @@ handle_list_categories() ->
 %% @private
 handle_validate_pattern(Req) ->
     %% Parse query parameters for validation
-    {QS, _} = cowboy_req:qs(Req),
+    QS = cowboy_req:qs(Req),
     Params = parse_query_string(QS),
 
     PatternTypeBin = maps_get(<<"pattern_type">>, Params, undefined),

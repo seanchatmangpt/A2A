@@ -407,12 +407,12 @@ format_error(ErrorCode) ->
 -spec format_error(error_code(), map()) -> map().
 format_error(ErrorCode, Details) ->
     Info = error_info(ErrorCode),
-    #{
+    maps:merge(#{
         error_code => atom_to_binary(maps:get(code, Info), utf8),
         error_category => atom_to_binary(maps:get(category, Info), utf8),
         message => maps:get(message, Info),
         http_status => maps:get(http_status, Info)
-    } ++ Details.
+    }, Details).
 
 %% @doc Format an error with a custom message and details.
 -spec format_error(error_code(), binary(), map()) -> map().

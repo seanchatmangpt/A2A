@@ -465,7 +465,7 @@ do_list_templates(State) ->
 %% @private
 do_delete_template(Id, State) ->
     case maps:is_key(Id, State#state.templates) of
-        false -> {error, not_found};
+        false -> {{error, not_found}, State};
         true ->
             NewTemplates = maps:remove(Id, State#state.templates),
             NewState = State#state{templates = NewTemplates},
@@ -591,11 +591,11 @@ do_create_template_from_workflow(WorkflowId, Options, State) ->
                 parameters => maps_get(<<"parameters">>, Options, [])
             },
 
-            NewState = State#state{templates = maps:put(Template#{
-                <<"id">> => Template
-            }, State#state.templates)},
+            TemplateId = generate_template_id(),
+            FullTemplate = Template#{<<"id">> => TemplateId},
+            NewState = State#state{templates = maps:put(TemplateId, FullTemplate, State#state.templates)},
 
-            {{ok, maps:get(<<"id">>, Template)}, NewState}
+            {{ok, TemplateId}, NewState}
     end.
 
 %% @private
@@ -620,7 +620,9 @@ template_to_summary_map(#template{} = T) ->
 generate_template_id() ->
     UniqueId = erlang:unique_integer([positive, monotonic]),
     Time = erlang:monotonic_time(millisecond),
-    <<"tpl_", Time:64, "_", UniqueId:64>>.
+    TimeBin = integer_to_binary(Time),
+    IdBin = integer_to_binary(UniqueId),
+    <<"tpl_", TimeBin/binary, "_", IdBin/binary>>.
 
 %% @private
 maps_get(Key, Map, Default) ->

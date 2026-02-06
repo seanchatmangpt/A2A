@@ -268,7 +268,7 @@ handle_call(list_resources, _From, State) ->
 
 handle_call({list_resources_by_type, Type}, _From, State) ->
     ResourceIds = maps:get(Type, State#state.resource_by_type, []),
-    Resources = lists:filter_map(fun(Id) ->
+    Resources = lists:filtermap(fun(Id) ->
         case maps:get(Id, State#state.resources, undefined) of
             undefined -> false;
             Resource -> {true, resource_to_map(Resource)}
@@ -442,7 +442,7 @@ handle_call({remove_capability, ResourceId, Capability}, _From, State) ->
 
 handle_call({find_resources_by_capability, Capability}, _From, State) ->
     ResourceIds = maps:get(Capability, State#state.resource_by_capability, []),
-    Resources = lists:filter_map(fun(Id) ->
+    Resources = lists:filtermap(fun(Id) ->
         case maps:get(Id, State#state.resources, undefined) of
             undefined -> false;
             Resource -> {true, resource_to_map(Resource)}
@@ -457,7 +457,7 @@ handle_call({find_resources_by_capabilities, Capabilities}, _From, State) ->
         sets:to_list(sets:intersection(sets:from_list(Acc), sets:from_list(Ids)))
     end, maps:keys(State#state.resources), Capabilities),
 
-    Resources = lists:filter_map(fun(Id) ->
+    Resources = lists:filtermap(fun(Id) ->
         case maps:get(Id, State#state.resources, undefined) of
             undefined -> false;
             Resource -> {true, resource_to_map(Resource)}

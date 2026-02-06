@@ -217,7 +217,7 @@ handle_info({phase_timeout, PhaseName}, State) ->
 handle_info({timeout, PhaseName}, State) ->
     error_logger:error_msg("YAWL Shutdown: Overall timeout during phase ~p~n", [PhaseName]),
     %% Force shutdown
-    error_logger:critical_msg("YAWL Shutdown: Forcing immediate shutdown due to timeout~n", []),
+    error_logger:error_msg("YAWL Shutdown: Forcing immediate shutdown due to timeout~n", []),
     init:stop(),
     {noreply, State};
 
