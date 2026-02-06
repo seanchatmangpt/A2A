@@ -1,0 +1,19 @@
+{application, beamai_core, [
+    {description, "BeamAI Core - Kernel and foundation for the BeamAI framework"},
+    {vsn, "0.1.0"},
+    {registered, [beamai_kernel]},
+    {mod, {beamai_core_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        hackney,
+        jsx,
+        uuid
+    ]},
+    {env, [
+        {default_llm, anthropic}
+    ]},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

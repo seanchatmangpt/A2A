@@ -1,0 +1,20 @@
+{application, beamai_memory, [
+    {description, "BeamAI Memory System - Context storage with ETS/SQLite backends"},
+    {vsn, "1.0.0"},
+    {registered, [beamai_memory_sup]},
+    {mod, {beamai_memory_app, []}},
+    {applications, [kernel, stdlib, beamai_core, esqlite]},
+    {modules, []},
+    {env, [
+        {backend, ets},
+        {sqlite_db_path, "beamai_memory.db"},
+        {checkpoint_interval, 60000},
+        {auto_checkpoint, true},
+        {default_ttl, infinity},
+        {max_buffer_size, 1000},
+        {forgetting_policy, ebbinghaus},
+        {decay_interval, 300000},
+        {importance_threshold, 0.3}
+    ]},
+    {licenses, ["Apache-2.0"]}
+]}.

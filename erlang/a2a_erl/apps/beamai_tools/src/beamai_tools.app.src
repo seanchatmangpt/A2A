@@ -1,0 +1,19 @@
+{application, beamai_tools, [
+    {description, "BeamAI Tools - Tool registration, middleware, security, and management"},
+    {vsn, "0.1.0"},
+    {registered, [beamai_tools, beamai_tool_security]},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core
+    ]},
+    {env, [
+        {max_tools, 1024},
+        {default_rate_limit, 100},
+        {rate_limit_window_ms, 60000},
+        {enable_security, true}
+    ]},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

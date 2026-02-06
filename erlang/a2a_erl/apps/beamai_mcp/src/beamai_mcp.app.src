@@ -1,0 +1,17 @@
+{application, beamai_mcp, [
+    {description, "BeamAI MCP - Model Context Protocol integration"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {beamai_mcp_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core,
+        jsx,
+        gun
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

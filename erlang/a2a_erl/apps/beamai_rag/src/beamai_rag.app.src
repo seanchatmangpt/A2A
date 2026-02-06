@@ -1,0 +1,17 @@
+{application, beamai_rag, [
+    {description, "BeamAI RAG - Retrieval-Augmented Generation support"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {beamai_rag_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core,
+        beamai_memory,
+        beamai_llm
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

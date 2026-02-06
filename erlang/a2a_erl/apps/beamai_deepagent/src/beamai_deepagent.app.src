@@ -1,0 +1,17 @@
+{application, beamai_deepagent, [
+    {description, "BeamAI DeepAgent - Advanced multi-step agent orchestration"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {beamai_deepagent_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core,
+        beamai_agent,
+        beamai_llm
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

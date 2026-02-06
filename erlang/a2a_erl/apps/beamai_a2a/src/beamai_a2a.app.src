@@ -1,0 +1,17 @@
+{application, beamai_a2a, [
+    {description, "BeamAI A2A - Agent-to-Agent protocol integration"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {beamai_a2a_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core,
+        cowboy,
+        jsx
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

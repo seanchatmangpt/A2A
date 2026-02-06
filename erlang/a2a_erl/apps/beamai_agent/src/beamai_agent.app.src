@@ -1,0 +1,15 @@
+{application, beamai_agent, [
+    {description, "BeamAI Agent - Agent lifecycle and behavior management"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {beamai_agent_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        beamai_core
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.
