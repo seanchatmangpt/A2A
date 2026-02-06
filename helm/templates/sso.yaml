@@ -1,0 +1,646 @@
+{{- if .Values.sso.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-config
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+data:
+  sso-config.yaml: |
+    # Enterprise SSO Configuration for Fortune 5 Companies
+    sso:
+      enabled: {{ .Values.sso.enabled }}
+      defaultProvider: {{ .Values.sso.defaultProvider | default "saml" | quote }}
+
+      # Session Management
+      session:
+        timeout: {{ .Values.sso.session.timeout | default 28800 }}
+        idleTimeout: {{ .Values.sso.session.idleTimeout | default 1800 }}
+        absoluteTimeout: {{ .Values.sso.session.absoluteTimeout | default 43200 }}
+        refreshTokenTTL: {{ .Values.sso.session.refreshTokenTTL | default 604800 }}
+        cookieName: {{ .Values.sso.session.cookieName | default "A2A_SESSION" | quote }}
+        cookieSecure: {{ .Values.sso.session.cookieSecure | default true }}
+        cookieHttpOnly: {{ .Values.sso.session.cookieHttpOnly | default true }}
+        cookieSameSite: {{ .Values.sso.session.cookieSameSite | default "Strict" | quote }}
+        cookieDomain: {{ .Values.sso.session.cookieDomain | default "" | quote }}
+        persistentSession: {{ .Values.sso.session.persistentSession | default false }}
+
+      # SAML Configuration
+      saml:
+        enabled: {{ .Values.sso.saml.enabled | default true }}
+        {{- if .Values.sso.saml.providers }}
+        providers:
+        {{- range .Values.sso.saml.providers }}
+        - name: {{ .name | quote }}
+          displayName: {{ .displayName | quote }}
+          entityId: {{ .entityId | quote }}
+          ssoUrl: {{ .ssoUrl | quote }}
+          sloUrl: {{ .sloUrl | default "" | quote }}
+          certificateFile: {{ .certificateFile | default "" | quote }}
+          certificateSecret: {{ .certificateSecret | default "" | quote }}
+          {{- if .metadataUrl }}
+          metadataUrl: {{ .metadataUrl | quote }}
+          metadataRefreshInterval: {{ .metadataRefreshInterval | default 3600 }}
+          {{- end }}
+          signRequests: {{ .signRequests | default true }}
+          wantAssertionsSigned: {{ .wantAssertionsSigned | default true }}
+          wantResponseSigned: {{ .wantResponseSigned | default true }}
+          nameIdFormat: {{ .nameIdFormat | default "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" | quote }}
+          assertionConsumerServiceUrl: {{ .assertionConsumerServiceUrl | quote }}
+          binding: {{ .binding | default "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" | quote }}
+          {{- if .attributeMapping }}
+          attributeMapping:
+            {{- toYaml .attributeMapping | nindent 12 }}
+          {{- end }}
+          {{- if .groupMapping }}
+          groupMapping:
+            {{- toYaml .groupMapping | nindent 12 }}
+          {{- end }}
+          allowedClockDrift: {{ .allowedClockDrift | default 300 }}
+          forceAuthn: {{ .forceAuthn | default false }}
+          authnContext: {{ .authnContext | default "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" | quote }}
+          {{- if .encryptionCertificate }}
+          encryptionCertificate: {{ .encryptionCertificate | quote }}
+          encryptionAlgorithm: {{ .encryptionAlgorithm | default "http://www.w3.org/2001/04/xmlenc#aes256-cbc" | quote }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+
+      # OIDC Configuration
+      oidc:
+        enabled: {{ .Values.sso.oidc.enabled | default true }}
+        {{- if .Values.sso.oidc.providers }}
+        providers:
+        {{- range .Values.sso.oidc.providers }}
+        - name: {{ .name | quote }}
+          displayName: {{ .displayName | quote }}
+          issuer: {{ .issuer | quote }}
+          clientId: {{ .clientId | quote }}
+          clientSecretKey: {{ .clientSecretKey | default "client-secret" | quote }}
+          discoveryUrl: {{ .discoveryUrl | default (printf "%s/.well-known/openid-configuration" .issuer) | quote }}
+          authorizationEndpoint: {{ .authorizationEndpoint | default "" | quote }}
+          tokenEndpoint: {{ .tokenEndpoint | default "" | quote }}
+          userInfoEndpoint: {{ .userInfoEndpoint | default "" | quote }}
+          jwksUri: {{ .jwksUri | default "" | quote }}
+          endSessionEndpoint: {{ .endSessionEndpoint | default "" | quote }}
+          redirectUri: {{ .redirectUri | quote }}
+          postLogoutRedirectUri: {{ .postLogoutRedirectUri | default "" | quote }}
+          scopes:
+          {{- if .scopes }}
+            {{- toYaml .scopes | nindent 12 }}
+          {{- else }}
+            - openid
+            - profile
+            - email
+            - groups
+          {{- end }}
+          responseType: {{ .responseType | default "code" | quote }}
+          responseMode: {{ .responseMode | default "query" | quote }}
+          codeChallengeMethod: {{ .codeChallengeMethod | default "S256" | quote }}
+          usePKCE: {{ .usePKCE | default true }}
+          {{- if .claimsMapping }}
+          claimsMapping:
+            {{- toYaml .claimsMapping | nindent 12 }}
+          {{- end }}
+          {{- if .groupsMapping }}
+          groupsMapping:
+            {{- toYaml .groupsMapping | nindent 12 }}
+          {{- end }}
+          tokenValidation:
+            validateIssuer: {{ .tokenValidation.validateIssuer | default true }}
+            validateAudience: {{ .tokenValidation.validateAudience | default true }}
+            validateExpiration: {{ .tokenValidation.validateExpiration | default true }}
+            clockSkew: {{ .tokenValidation.clockSkew | default 300 }}
+            requireSignedTokens: {{ .tokenValidation.requireSignedTokens | default true }}
+          acrValues: {{ .acrValues | default "" | quote }}
+          maxAge: {{ .maxAge | default 0 }}
+          prompt: {{ .prompt | default "" | quote }}
+        {{- end }}
+        {{- end }}
+
+      # Google Workspace Configuration
+      googleWorkspace:
+        enabled: {{ .Values.sso.googleWorkspace.enabled | default true }}
+        clientId: {{ .Values.sso.googleWorkspace.clientId | default "" | quote }}
+        clientSecretKey: {{ .Values.sso.googleWorkspace.clientSecretKey | default "google-client-secret" | quote }}
+        hostedDomain: {{ .Values.sso.googleWorkspace.hostedDomain | default "" | quote }}
+        {{- if .Values.sso.googleWorkspace.allowedDomains }}
+        allowedDomains:
+          {{- toYaml .Values.sso.googleWorkspace.allowedDomains | nindent 10 }}
+        {{- end }}
+        redirectUri: {{ .Values.sso.googleWorkspace.redirectUri | default "" | quote }}
+        scopes:
+        {{- if .Values.sso.googleWorkspace.scopes }}
+          {{- toYaml .Values.sso.googleWorkspace.scopes | nindent 10 }}
+        {{- else }}
+          - openid
+          - email
+          - profile
+          - https://www.googleapis.com/auth/admin.directory.user.readonly
+          - https://www.googleapis.com/auth/admin.directory.group.readonly
+        {{- end }}
+        {{- if .Values.sso.googleWorkspace.serviceAccountKey }}
+        serviceAccountKey: {{ .Values.sso.googleWorkspace.serviceAccountKey | quote }}
+        {{- end }}
+        adminEmail: {{ .Values.sso.googleWorkspace.adminEmail | default "" | quote }}
+        groupSync:
+          enabled: {{ .Values.sso.googleWorkspace.groupSync.enabled | default true }}
+          interval: {{ .Values.sso.googleWorkspace.groupSync.interval | default 3600 }}
+          {{- if .Values.sso.googleWorkspace.groupSync.groupFilter }}
+          groupFilter: {{ .Values.sso.googleWorkspace.groupSync.groupFilter | quote }}
+          {{- end }}
+          {{- if .Values.sso.googleWorkspace.groupSync.groupMapping }}
+          groupMapping:
+            {{- toYaml .Values.sso.googleWorkspace.groupSync.groupMapping | nindent 12 }}
+          {{- end }}
+        userSync:
+          enabled: {{ .Values.sso.googleWorkspace.userSync.enabled | default true }}
+          interval: {{ .Values.sso.googleWorkspace.userSync.interval | default 3600 }}
+          {{- if .Values.sso.googleWorkspace.userSync.userFilter }}
+          userFilter: {{ .Values.sso.googleWorkspace.userSync.userFilter | quote }}
+          {{- end }}
+          {{- if .Values.sso.googleWorkspace.userSync.attributeMapping }}
+          attributeMapping:
+            {{- toYaml .Values.sso.googleWorkspace.userSync.attributeMapping | nindent 12 }}
+          {{- end }}
+
+      # Active Directory / LDAP Configuration
+      activeDirectory:
+        enabled: {{ .Values.sso.activeDirectory.enabled | default true }}
+        {{- if .Values.sso.activeDirectory.servers }}
+        servers:
+        {{- range .Values.sso.activeDirectory.servers }}
+        - name: {{ .name | quote }}
+          host: {{ .host | quote }}
+          port: {{ .port | default 636 }}
+          useTLS: {{ .useTLS | default true }}
+          useStartTLS: {{ .useStartTLS | default false }}
+          skipTLSVerify: {{ .skipTLSVerify | default false }}
+          tlsCertSecret: {{ .tlsCertSecret | default "" | quote }}
+          baseDN: {{ .baseDN | quote }}
+          bindDN: {{ .bindDN | quote }}
+          bindPasswordKey: {{ .bindPasswordKey | default "ad-bind-password" | quote }}
+          userSearchBase: {{ .userSearchBase | default "" | quote }}
+          userSearchFilter: {{ .userSearchFilter | default "(sAMAccountName={username})" | quote }}
+          userSearchScope: {{ .userSearchScope | default "sub" | quote }}
+          groupSearchBase: {{ .groupSearchBase | default "" | quote }}
+          groupSearchFilter: {{ .groupSearchFilter | default "(member={userDN})" | quote }}
+          groupSearchScope: {{ .groupSearchScope | default "sub" | quote }}
+          {{- if .attributeMapping }}
+          attributeMapping:
+            username: {{ .attributeMapping.username | default "sAMAccountName" | quote }}
+            email: {{ .attributeMapping.email | default "mail" | quote }}
+            firstName: {{ .attributeMapping.firstName | default "givenName" | quote }}
+            lastName: {{ .attributeMapping.lastName | default "sn" | quote }}
+            displayName: {{ .attributeMapping.displayName | default "displayName" | quote }}
+            memberOf: {{ .attributeMapping.memberOf | default "memberOf" | quote }}
+            distinguishedName: {{ .attributeMapping.distinguishedName | default "distinguishedName" | quote }}
+            objectGUID: {{ .attributeMapping.objectGUID | default "objectGUID" | quote }}
+            userPrincipalName: {{ .attributeMapping.userPrincipalName | default "userPrincipalName" | quote }}
+            {{- if .attributeMapping.custom }}
+            {{- range $key, $value := .attributeMapping.custom }}
+            {{ $key }}: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if .groupMapping }}
+          groupMapping:
+            {{- toYaml .groupMapping | nindent 12 }}
+          {{- end }}
+          connectionTimeout: {{ .connectionTimeout | default 10 }}
+          searchTimeout: {{ .searchTimeout | default 30 }}
+          pageSize: {{ .pageSize | default 1000 }}
+          referralFollowing: {{ .referralFollowing | default false }}
+          useConnectionPool: {{ .useConnectionPool | default true }}
+          maxConnectionPoolSize: {{ .maxConnectionPoolSize | default 10 }}
+          syncInterval: {{ .syncInterval | default 3600 }}
+        {{- end }}
+        {{- end }}
+
+        # Active Directory Federation Services (ADFS)
+        adfs:
+          enabled: {{ .Values.sso.activeDirectory.adfs.enabled | default false }}
+          {{- if .Values.sso.activeDirectory.adfs.enabled }}
+          server: {{ .Values.sso.activeDirectory.adfs.server | quote }}
+          relyingPartyTrustIdentifier: {{ .Values.sso.activeDirectory.adfs.relyingPartyTrustIdentifier | quote }}
+          metadataUrl: {{ .Values.sso.activeDirectory.adfs.metadataUrl | quote }}
+          certificateFile: {{ .Values.sso.activeDirectory.adfs.certificateFile | default "" | quote }}
+          {{- end }}
+
+      # Multi-Factor Authentication
+      mfa:
+        enabled: {{ .Values.sso.mfa.enabled | default true }}
+        required: {{ .Values.sso.mfa.required | default false }}
+        {{- if .Values.sso.mfa.providers }}
+        providers:
+          {{- toYaml .Values.sso.mfa.providers | nindent 10 }}
+        {{- else }}
+        providers:
+          - totp
+          - sms
+          - email
+          - webauthn
+        {{- end }}
+        {{- if .Values.sso.mfa.exemptGroups }}
+        exemptGroups:
+          {{- toYaml .Values.sso.mfa.exemptGroups | nindent 10 }}
+        {{- end }}
+        {{- if .Values.sso.mfa.requiredForGroups }}
+        requiredForGroups:
+          {{- toYaml .Values.sso.mfa.requiredForGroups | nindent 10 }}
+        {{- end }}
+        gracePeriod: {{ .Values.sso.mfa.gracePeriod | default 0 }}
+        rememberDevice: {{ .Values.sso.mfa.rememberDevice | default true }}
+        rememberDeviceDuration: {{ .Values.sso.mfa.rememberDeviceDuration | default 2592000 }}
+
+      # Authorization and RBAC
+      authorization:
+        enabled: {{ .Values.sso.authorization.enabled | default true }}
+        defaultRole: {{ .Values.sso.authorization.defaultRole | default "user" | quote }}
+        {{- if .Values.sso.authorization.roleMapping }}
+        roleMapping:
+          {{- toYaml .Values.sso.authorization.roleMapping | nindent 10 }}
+        {{- end }}
+        {{- if .Values.sso.authorization.groupToRoleMapping }}
+        groupToRoleMapping:
+          {{- toYaml .Values.sso.authorization.groupToRoleMapping | nindent 10 }}
+        {{- end }}
+        {{- if .Values.sso.authorization.policies }}
+        policies:
+          {{- toYaml .Values.sso.authorization.policies | nindent 10 }}
+        {{- end }}
+        enforceRBAC: {{ .Values.sso.authorization.enforceRBAC | default true }}
+
+      # Audit Logging
+      audit:
+        enabled: {{ .Values.sso.audit.enabled | default true }}
+        logLevel: {{ .Values.sso.audit.logLevel | default "info" | quote }}
+        {{- if .Values.sso.audit.events }}
+        events:
+          {{- toYaml .Values.sso.audit.events | nindent 10 }}
+        {{- else }}
+        events:
+          - login_success
+          - login_failure
+          - logout
+          - session_expired
+          - mfa_challenge
+          - mfa_success
+          - mfa_failure
+          - user_created
+          - user_updated
+          - user_deleted
+          - group_sync
+          - role_assigned
+          - access_denied
+        {{- end }}
+        destination: {{ .Values.sso.audit.destination | default "stdout" | quote }}
+        {{- if eq (.Values.sso.audit.destination | default "stdout") "stackdriver" }}
+        stackdriver:
+          projectId: {{ .Values.sso.audit.stackdriver.projectId | quote }}
+          logName: {{ .Values.sso.audit.stackdriver.logName | default "a2a-sso-audit" | quote }}
+        {{- end }}
+        retention: {{ .Values.sso.audit.retention | default 2592000 }}
+
+      # Security Policies
+      security:
+        passwordPolicy:
+          minLength: {{ .Values.sso.security.passwordPolicy.minLength | default 12 }}
+          requireUppercase: {{ .Values.sso.security.passwordPolicy.requireUppercase | default true }}
+          requireLowercase: {{ .Values.sso.security.passwordPolicy.requireLowercase | default true }}
+          requireNumbers: {{ .Values.sso.security.passwordPolicy.requireNumbers | default true }}
+          requireSpecialChars: {{ .Values.sso.security.passwordPolicy.requireSpecialChars | default true }}
+          maxAge: {{ .Values.sso.security.passwordPolicy.maxAge | default 7776000 }}
+          preventReuse: {{ .Values.sso.security.passwordPolicy.preventReuse | default 5 }}
+        lockoutPolicy:
+          enabled: {{ .Values.sso.security.lockoutPolicy.enabled | default true }}
+          maxAttempts: {{ .Values.sso.security.lockoutPolicy.maxAttempts | default 5 }}
+          lockoutDuration: {{ .Values.sso.security.lockoutPolicy.lockoutDuration | default 900 }}
+          resetPeriod: {{ .Values.sso.security.lockoutPolicy.resetPeriod | default 300 }}
+        ipRestrictions:
+          enabled: {{ .Values.sso.security.ipRestrictions.enabled | default false }}
+          {{- if .Values.sso.security.ipRestrictions.allowlist }}
+          allowlist:
+            {{- toYaml .Values.sso.security.ipRestrictions.allowlist | nindent 12 }}
+          {{- end }}
+          {{- if .Values.sso.security.ipRestrictions.denylist }}
+          denylist:
+            {{- toYaml .Values.sso.security.ipRestrictions.denylist | nindent 12 }}
+          {{- end }}
+        requestSigning:
+          enabled: {{ .Values.sso.security.requestSigning.enabled | default true }}
+          algorithm: {{ .Values.sso.security.requestSigning.algorithm | default "RS256" | quote }}
+        tokenEncryption:
+          enabled: {{ .Values.sso.security.tokenEncryption.enabled | default true }}
+          algorithm: {{ .Values.sso.security.tokenEncryption.algorithm | default "A256GCM" | quote }}
+        csrfProtection:
+          enabled: {{ .Values.sso.security.csrfProtection.enabled | default true }}
+          tokenLength: {{ .Values.sso.security.csrfProtection.tokenLength | default 32 }}
+        cors:
+          enabled: {{ .Values.sso.security.cors.enabled | default true }}
+          {{- if .Values.sso.security.cors.allowedOrigins }}
+          allowedOrigins:
+            {{- toYaml .Values.sso.security.cors.allowedOrigins | nindent 12 }}
+          {{- end }}
+          allowCredentials: {{ .Values.sso.security.cors.allowCredentials | default true }}
+          maxAge: {{ .Values.sso.security.cors.maxAge | default 3600 }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-secrets
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+type: Opaque
+data:
+  {{- if .Values.sso.secrets }}
+  {{- range $key, $value := .Values.sso.secrets }}
+  {{ $key }}: {{ $value | b64enc | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.sso.saml.signingKey }}
+  saml-signing-key: {{ .Values.sso.saml.signingKey | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.saml.signingCert }}
+  saml-signing-cert: {{ .Values.sso.saml.signingCert | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.saml.encryptionKey }}
+  saml-encryption-key: {{ .Values.sso.saml.encryptionKey | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.oidc.clientSecret }}
+  oidc-client-secret: {{ .Values.sso.oidc.clientSecret | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.googleWorkspace.clientSecret }}
+  google-client-secret: {{ .Values.sso.googleWorkspace.clientSecret | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.activeDirectory.bindPassword }}
+  ad-bind-password: {{ .Values.sso.activeDirectory.bindPassword | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.jwtSigningKey }}
+  jwt-signing-key: {{ .Values.sso.jwtSigningKey | b64enc | quote }}
+  {{- end }}
+  {{- if .Values.sso.encryptionKey }}
+  encryption-key: {{ .Values.sso.encryptionKey | b64enc | quote }}
+  {{- end }}
+
+{{- if .Values.sso.saml.enabled }}
+{{- range .Values.sso.saml.providers }}
+{{- if .certificateContent }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "a2a.fullname" $ }}-saml-cert-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: saml-certificate
+    sso.a2a.io/provider: {{ .name | quote }}
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ $.Values.marketplace.partnerId }}","product_id":"{{ $.Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+type: Opaque
+data:
+  certificate.crt: {{ .certificateContent | b64enc | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-service
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+    {{- if .Values.sso.service.annotations }}
+    {{- toYaml .Values.sso.service.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.sso.service.type | default "ClusterIP" }}
+  {{- if and (eq (.Values.sso.service.type | default "ClusterIP") "LoadBalancer") .Values.sso.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.sso.service.loadBalancerIP }}
+  {{- end }}
+  {{- if .Values.sso.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml .Values.sso.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.sso.service.port | default 443 }}
+      targetPort: sso
+      protocol: TCP
+      name: https
+      {{- if and (eq (.Values.sso.service.type | default "ClusterIP") "NodePort") .Values.sso.service.nodePort }}
+      nodePort: {{ .Values.sso.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "a2a.selectorLabels" . | nindent 4 }}
+  sessionAffinity: {{ .Values.sso.service.sessionAffinity | default "ClientIP" }}
+  {{- if eq (.Values.sso.service.sessionAffinity | default "ClientIP") "ClientIP" }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ .Values.sso.service.sessionAffinityTimeout | default 10800 }}
+  {{- end }}
+
+{{- if .Values.sso.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-ingress
+  annotations:
+    {{- if .Values.sso.ingress.annotations }}
+    {{- toYaml .Values.sso.ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.sso.ingress.ssl.enabled }}
+    networking.gke.io/managed-certificates: {{ include "a2a.fullname" . }}-sso-cert
+    {{- end }}
+    kubernetes.io/ingress.class: {{ .Values.sso.ingress.className | default "gce" | quote }}
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+spec:
+  {{- if .Values.sso.ingress.className }}
+  ingressClassName: {{ .Values.sso.ingress.className }}
+  {{- end }}
+  {{- if .Values.sso.ingress.tls }}
+  tls:
+    {{- toYaml .Values.sso.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.sso.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "a2a.fullname" $ }}-sso
+                port:
+                  number: {{ .servicePort | default 443 }}
+          {{- end }}
+    {{- end }}
+
+{{- if .Values.sso.ingress.ssl.enabled }}
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-certificate
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+spec:
+  domains:
+    {{- range .Values.sso.ingress.hosts }}
+    - {{ .host }}
+    {{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.sso.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-network-policy
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "a2a.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8443
+    {{- if .Values.sso.networkPolicy.ingress }}
+    {{- toYaml .Values.sso.networkPolicy.ingress | nindent 4 }}
+    {{- end }}
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow LDAP/AD
+    - to:
+        {{- if .Values.sso.activeDirectory.servers }}
+        {{- range .Values.sso.activeDirectory.servers }}
+        - podSelector: {}
+        {{- end }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 389
+        - protocol: TCP
+          port: 636
+        - protocol: TCP
+          port: 3268
+        - protocol: TCP
+          port: 3269
+    # Allow HTTPS for OIDC/SAML
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- if .Values.sso.networkPolicy.egress }}
+    {{- toYaml .Values.sso.networkPolicy.egress | nindent 4 }}
+    {{- end }}
+{{- end }}
+
+{{- if .Values.sso.rbac.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-service-account
+  annotations:
+    {{- if .Values.sso.rbac.serviceAccount.annotations }}
+    {{- toYaml .Values.sso.rbac.serviceAccount.annotations | nindent 4 }}
+    {{- end }}
+    {{- if .Values.gcp.workloadIdentity }}
+    iam.gke.io/gcp-service-account: {{ .Values.sso.rbac.gcpServiceAccount | quote }}
+    {{- end }}
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-role
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "a2a.fullname" . }}-sso
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sso-role-binding
+  annotations:
+    marketplace.cloud.google.com/deploy-info: '{"partner_id":"{{ .Values.marketplace.partnerId }}","product_id":"{{ .Values.marketplace.solutionId }}","partner_name":"A2A Protocol"}'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "a2a.fullname" . }}-sso
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "a2a.fullname" . }}-sso
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+
+{{- end }}

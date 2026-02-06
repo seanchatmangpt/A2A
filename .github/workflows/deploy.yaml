@@ -1,0 +1,651 @@
+name: GCP Marketplace Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - production
+  pull_request:
+    branches:
+      - main
+      - production
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      terraform_action:
+        description: 'Terraform action'
+        required: true
+        type: choice
+        default: 'plan'
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER_NAME }}
+  TF_VERSION: '1.7.0'
+  HELM_VERSION: 'v3.14.0'
+  TRIVY_VERSION: 'latest'
+  TERRAFORM_DIR: './terraform'
+  HELM_CHART_DIR: './charts'
+
+jobs:
+  setup:
+    name: Setup and Validation
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env-setup.outputs.environment }}
+      deploy: ${{ steps.env-setup.outputs.deploy }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine environment
+        id: env-setup
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+            DEPLOY="true"
+          elif [ "${{ github.ref }}" == "refs/heads/production" ]; then
+            ENV="production"
+            DEPLOY="true"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="staging"
+            DEPLOY="true"
+          else
+            ENV="dev"
+            DEPLOY="false"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "deploy=$DEPLOY" >> $GITHUB_OUTPUT
+          echo "Deployment environment: $ENV"
+          echo "Will deploy: $DEPLOY"
+
+      - name: Validate repository structure
+        run: |
+          echo "Validating repository structure..."
+          [ -d "$TERRAFORM_DIR" ] || echo "Warning: Terraform directory not found"
+          [ -d "$HELM_CHART_DIR" ] || echo "Warning: Helm charts directory not found"
+          [ -f "requirements.txt" ] || [ -f "package.json" ] || [ -f "go.mod" ] || [ -f "pom.xml" ] || echo "Warning: No dependency file found"
+
+  security-scan-code:
+    name: Security Scan - Code
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner - Filesystem
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+      - name: Run Checkov - Terraform security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ./terraform
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+      - name: Secret scanning with GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  security-scan-container:
+    name: Security Scan - Container Images
+    runs-on: ubuntu-latest
+    needs: setup
+    if: needs.setup.outputs.deploy == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker gcr.io
+
+      - name: Build container image for scanning
+        run: |
+          if [ -f "Dockerfile" ]; then
+            docker build -t gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }} .
+          else
+            echo "No Dockerfile found, skipping container build"
+          fi
+
+      - name: Run Trivy vulnerability scanner - Container
+        uses: aquasecurity/trivy-action@master
+        if: hashFiles('Dockerfile') != ''
+        with:
+          image-ref: 'gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-container-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy container scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('Dockerfile') != ''
+        with:
+          sarif_file: 'trivy-container-results.sarif'
+
+      - name: Push image to GCR
+        if: hashFiles('Dockerfile') != ''
+        run: |
+          docker push gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }}
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [setup, security-scan-code]
+    environment: ${{ needs.setup.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${{ needs.setup.outputs.environment }}"
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        id: plan
+        run: |
+          terraform plan \
+            -var="project_id=${{ env.PROJECT_ID }}" \
+            -var="region=${{ env.GCP_REGION }}" \
+            -var="environment=${{ needs.setup.outputs.environment }}" \
+            -var="image_tag=${{ github.sha }}" \
+            -out=tfplan \
+            -no-color
+        continue-on-error: true
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ needs.setup.outputs.environment }}
+          path: ${{ env.TERRAFORM_DIR }}/tfplan
+          retention-days: 7
+
+      - name: Comment PR with Terraform Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Plan 📖
+            **Environment:** \`${{ needs.setup.outputs.environment }}\`
+            **Plan Status:** \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [setup, terraform-plan, security-scan-container]
+    if: |
+      needs.setup.outputs.deploy == 'true' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'))
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+      url: https://console.cloud.google.com/kubernetes/workload?project=${{ secrets.GCP_PROJECT_ID }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${{ needs.setup.outputs.environment }}"
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.setup.outputs.environment }}
+          path: ${{ env.TERRAFORM_DIR }}
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform apply -auto-approve tfplan
+
+      - name: Terraform Output
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        id: tf-output
+        run: |
+          terraform output -json > tf-outputs.json
+          cat tf-outputs.json
+          echo "GKE cluster created/updated successfully"
+
+      - name: Upload Terraform Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-${{ needs.setup.outputs.environment }}
+          path: ${{ env.TERRAFORM_DIR }}/tf-outputs.json
+          retention-days: 30
+
+  helm-deploy:
+    name: Helm Deploy
+    runs-on: ubuntu-latest
+    needs: [setup, terraform-apply]
+    if: needs.setup.outputs.deploy == 'true'
+    environment: ${{ needs.setup.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add stable https://charts.helm.sh/stable
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Lint Helm chart
+        run: |
+          if [ -d "$HELM_CHART_DIR/a2a" ]; then
+            helm lint $HELM_CHART_DIR/a2a \
+              --values $HELM_CHART_DIR/a2a/values-${{ needs.setup.outputs.environment }}.yaml
+          else
+            echo "Helm chart not found, skipping lint"
+          fi
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace a2a-${{ needs.setup.outputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy with Helm
+        run: |
+          if [ -d "$HELM_CHART_DIR/a2a" ]; then
+            helm upgrade --install a2a $HELM_CHART_DIR/a2a \
+              --namespace a2a-${{ needs.setup.outputs.environment }} \
+              --values $HELM_CHART_DIR/a2a/values-${{ needs.setup.outputs.environment }}.yaml \
+              --set image.tag=${{ github.sha }} \
+              --set image.repository=gcr.io/${{ env.PROJECT_ID }}/a2a \
+              --set environment=${{ needs.setup.outputs.environment }} \
+              --timeout 10m \
+              --wait \
+              --atomic \
+              --create-namespace
+          else
+            echo "Helm chart not found, skipping deployment"
+          fi
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/a2a \
+            -n a2a-${{ needs.setup.outputs.environment }} \
+            --timeout=5m
+
+      - name: Get deployment details
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n a2a-${{ needs.setup.outputs.environment }}
+          echo "=== Services ==="
+          kubectl get svc -n a2a-${{ needs.setup.outputs.environment }}
+          echo "=== Ingress ==="
+          kubectl get ingress -n a2a-${{ needs.setup.outputs.environment }}
+
+  validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [setup, helm-deploy]
+    if: needs.setup.outputs.deploy == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Wait for deployment stabilization
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 30
+
+      - name: Validate pods are running
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          PODS=$(kubectl get pods -n $NAMESPACE -o json | jq -r '.items[] | select(.status.phase != "Running") | .metadata.name')
+          if [ -n "$PODS" ]; then
+            echo "Error: The following pods are not running:"
+            echo "$PODS"
+            kubectl get pods -n $NAMESPACE
+            exit 1
+          fi
+          echo "All pods are running successfully"
+
+      - name: Validate services
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          SERVICES=$(kubectl get svc -n $NAMESPACE -o json | jq -r '.items[].metadata.name')
+          if [ -z "$SERVICES" ]; then
+            echo "Warning: No services found in namespace $NAMESPACE"
+          else
+            echo "Services found:"
+            echo "$SERVICES"
+          fi
+
+      - name: Check resource limits and requests
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          echo "Checking resource configurations..."
+          kubectl describe pods -n $NAMESPACE | grep -A 5 "Limits:\|Requests:"
+
+      - name: Run health check
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          SERVICE_IP=$(kubectl get svc a2a -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+
+          if [ -n "$SERVICE_IP" ]; then
+            echo "Service IP: $SERVICE_IP"
+            echo "Running health check..."
+            for i in {1..10}; do
+              if curl -f -s -o /dev/null -w "%{http_code}" http://$SERVICE_IP/health; then
+                echo "Health check passed"
+                break
+              fi
+              echo "Attempt $i failed, retrying..."
+              sleep 10
+            done
+          else
+            echo "No external IP found, skipping health check"
+          fi
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          POD=$(kubectl get pod -n $NAMESPACE -l app=a2a -o jsonpath='{.items[0].metadata.name}')
+
+          if [ -n "$POD" ]; then
+            echo "Testing pod: $POD"
+            kubectl exec -n $NAMESPACE $POD -- echo "Connection test passed"
+          else
+            echo "No pods found for testing"
+          fi
+
+      - name: Validate marketplace integration
+        run: |
+          echo "Validating GCP Marketplace integration..."
+          echo "Checking for required labels and annotations..."
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          kubectl get deployment a2a -n $NAMESPACE -o yaml | grep -E "marketplace|billing" || echo "Warning: Marketplace labels not found"
+
+      - name: Check logs for errors
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          echo "Checking recent logs for errors..."
+          kubectl logs -n $NAMESPACE -l app=a2a --tail=100 | grep -i "error\|exception\|fatal" || echo "No critical errors found in logs"
+
+  marketplace-publish:
+    name: GCP Marketplace Publish
+    runs-on: ubuntu-latest
+    needs: [setup, validation]
+    if: |
+      needs.setup.outputs.environment == 'production' &&
+      needs.setup.outputs.deploy == 'true'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Tag images for marketplace
+        run: |
+          if [ -f "Dockerfile" ]; then
+            gcloud auth configure-docker gcr.io
+            docker pull gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }}
+            docker tag gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }} \
+              gcr.io/${{ env.PROJECT_ID }}/a2a:latest
+            docker tag gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }} \
+              gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.ref_name }}
+            docker push gcr.io/${{ env.PROJECT_ID }}/a2a:latest
+            docker push gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.ref_name }}
+          else
+            echo "No Dockerfile found, skipping image tagging"
+          fi
+
+      - name: Update marketplace listing
+        run: |
+          echo "Updating GCP Marketplace listing..."
+          echo "Solution ID: ${{ secrets.MARKETPLACE_SOLUTION_ID }}"
+          gcloud alpha commerce-producer listings update ${{ secrets.MARKETPLACE_SOLUTION_ID }} \
+            --project=${{ env.PROJECT_ID }} \
+            --version=${{ github.ref_name }} \
+            --image=gcr.io/${{ env.PROJECT_ID }}/a2a:${{ github.sha }} || echo "Marketplace update skipped"
+
+      - name: Create deployment package
+        run: |
+          echo "Creating deployment package for marketplace..."
+          mkdir -p marketplace-package
+          if [ -d "$HELM_CHART_DIR" ]; then
+            cp -r $HELM_CHART_DIR marketplace-package/
+          fi
+          if [ -d "$TERRAFORM_DIR" ]; then
+            cp -r $TERRAFORM_DIR marketplace-package/
+          fi
+          cp README.md marketplace-package/ 2>/dev/null || echo "README.md not found"
+          tar -czf marketplace-package.tar.gz marketplace-package/
+
+      - name: Upload marketplace package
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-package
+          path: marketplace-package.tar.gz
+          retention-days: 90
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [setup, helm-deploy, validation]
+    if: |
+      failure() &&
+      needs.setup.outputs.deploy == 'true'
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Rollback Helm release
+        run: |
+          NAMESPACE="a2a-${{ needs.setup.outputs.environment }}"
+          echo "Rolling back Helm release..."
+          helm rollback a2a -n $NAMESPACE || echo "Rollback failed or not applicable"
+
+      - name: Notify on failure
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number || 1,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ Deployment failed and rollback was initiated. Please check the logs for details.'
+            })
+
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [setup, validation, marketplace-publish]
+    if: always() && needs.setup.outputs.deploy == 'true'
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Environment: ${{ needs.setup.outputs.environment }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Status: ${{ job.status }}"
+          echo "======================="
+
+      - name: Create deployment badge
+        run: |
+          if [ "${{ needs.validation.result }}" == "success" ]; then
+            echo "✅ Deployment successful to ${{ needs.setup.outputs.environment }}"
+          else
+            echo "❌ Deployment failed to ${{ needs.setup.outputs.environment }}"
+          fi

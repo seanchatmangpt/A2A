@@ -1,0 +1,1340 @@
+{{- if .Values.observability.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  application-overview.json: |
+    {
+      "dashboard": {
+        "title": "A2A Application Overview",
+        "uid": "a2a-app-overview",
+        "timezone": "utc",
+        "schemaVersion": 30,
+        "version": 1,
+        "refresh": "30s",
+        "time": {
+          "from": "now-6h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Rate",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",service=\"{{ include \"a2a.fullname\" . }}\"}[5m])) by (status_code)",
+                "legendFormat": "{{`{{status_code}}`}}",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "reqps", "label": "Requests/sec" },
+              { "format": "short" }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Response Time (p95, p99)",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le))",
+                "legendFormat": "p95",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le))",
+                "legendFormat": "p99",
+                "refId": "B"
+              }
+            ],
+            "yaxes": [
+              { "format": "s", "label": "Duration" },
+              { "format": "short" }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Error Rate",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "legendFormat": "Error Rate %",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "percent", "label": "Error %" },
+              { "format": "short" }
+            ],
+            "alert": {
+              "conditions": [
+                {
+                  "evaluator": { "params": [5], "type": "gt" },
+                  "operator": { "type": "and" },
+                  "query": { "params": ["A", "5m", "now"] },
+                  "reducer": { "params": [], "type": "avg" },
+                  "type": "query"
+                }
+              ],
+              "executionErrorState": "alerting",
+              "frequency": "60s",
+              "handler": 1,
+              "name": "High Error Rate",
+              "noDataState": "no_data",
+              "notifications": []
+            }
+          },
+          {
+            "id": 4,
+            "title": "Active Connections",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+            "targets": [
+              {
+                "expr": "sum(active_connections{namespace=\"{{ .Release.Namespace }}\"})",
+                "legendFormat": "Active Connections",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "CPU Usage",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+            "targets": [
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"{{ .Release.Namespace }}\",pod=~\"{{ include \"a2a.fullname\" . }}.*\"}[5m])) by (pod)",
+                "legendFormat": "{{`{{pod}}`}}",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "percentunit", "label": "CPU" },
+              { "format": "short" }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Memory Usage",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+            "targets": [
+              {
+                "expr": "sum(container_memory_usage_bytes{namespace=\"{{ .Release.Namespace }}\",pod=~\"{{ include \"a2a.fullname\" . }}.*\"}) by (pod)",
+                "legendFormat": "{{`{{pod}}`}}",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "bytes", "label": "Memory" },
+              { "format": "short" }
+            ]
+          },
+          {
+            "id": 7,
+            "title": "Database Query Duration",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le, operation))",
+                "legendFormat": "p95 - {{`{{operation}}`}}",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "title": "Cache Hit Rate",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+            "targets": [
+              {
+                "expr": "sum(rate(cache_hits_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) / (sum(rate(cache_hits_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) + sum(rate(cache_misses_total{namespace=\"{{ .Release.Namespace }}\"}[5m]))) * 100",
+                "legendFormat": "Hit Rate %",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "percent", "label": "Hit Rate" },
+              { "format": "short" }
+            ]
+          }
+        ]
+      }
+    }
+
+  business-metrics.json: |
+    {
+      "dashboard": {
+        "title": "A2A Business Metrics",
+        "uid": "a2a-business-metrics",
+        "timezone": "utc",
+        "schemaVersion": 30,
+        "version": 1,
+        "refresh": "1m",
+        "time": {
+          "from": "now-24h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Transactions Per Minute",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+            "targets": [
+              {
+                "expr": "sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 60",
+                "legendFormat": "Transactions/min",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Transaction Success Rate",
+            "type": "gauge",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+            "targets": [
+              {
+                "expr": "sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\",status=\"success\"}[5m])) / sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "value": 0, "color": "red" },
+                    { "value": 95, "color": "yellow" },
+                    { "value": 99, "color": "green" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": 3,
+            "title": "API Quota Usage",
+            "type": "bargauge",
+            "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+            "targets": [
+              {
+                "expr": "sum(api_quota_used{namespace=\"{{ .Release.Namespace }}\"}) by (client_id) / sum(api_quota_limit{namespace=\"{{ .Release.Namespace }}\"}) by (client_id) * 100",
+                "legendFormat": "{{`{{client_id}}`}}",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Revenue Metrics",
+            "type": "stat",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+            "targets": [
+              {
+                "expr": "sum(increase(transaction_revenue_total{namespace=\"{{ .Release.Namespace }}\"}[1h]))",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "currencyUSD"
+              }
+            }
+          },
+          {
+            "id": 5,
+            "title": "SLA Compliance",
+            "type": "gauge",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",latency_sla=\"met\"}[5m])) / sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "value": 0, "color": "red" },
+                    { "value": 99, "color": "yellow" },
+                    { "value": 99.9, "color": "green" }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+
+  infrastructure.json: |
+    {
+      "dashboard": {
+        "title": "A2A Infrastructure Metrics",
+        "uid": "a2a-infrastructure",
+        "timezone": "utc",
+        "schemaVersion": 30,
+        "version": 1,
+        "refresh": "30s",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Pod Status",
+            "type": "stat",
+            "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+            "targets": [
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Running\"})",
+                "legendFormat": "Running",
+                "refId": "A"
+              },
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Pending\"})",
+                "legendFormat": "Pending",
+                "refId": "B"
+              },
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Failed\"})",
+                "legendFormat": "Failed",
+                "refId": "C"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Network I/O",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+            "targets": [
+              {
+                "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "legendFormat": "RX - {{`{{pod}}`}}",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(container_network_transmit_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "legendFormat": "TX - {{`{{pod}}`}}",
+                "refId": "B"
+              }
+            ],
+            "yaxes": [
+              { "format": "Bps", "label": "Bytes/sec" },
+              { "format": "short" }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Disk I/O",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+            "targets": [
+              {
+                "expr": "sum(rate(container_fs_reads_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "legendFormat": "Read - {{`{{pod}}`}}",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(container_fs_writes_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "legendFormat": "Write - {{`{{pod}}`}}",
+                "refId": "B"
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "PVC Usage",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+            "targets": [
+              {
+                "expr": "kubelet_volume_stats_used_bytes{namespace=\"{{ .Release.Namespace }}\"} / kubelet_volume_stats_capacity_bytes{namespace=\"{{ .Release.Namespace }}\"} * 100",
+                "legendFormat": "{{`{{persistentvolumeclaim}}`}}",
+                "refId": "A"
+              }
+            ],
+            "yaxes": [
+              { "format": "percent", "label": "Usage %" },
+              { "format": "short" }
+            ]
+          }
+        ]
+      }
+    }
+
+  distributed-tracing.json: |
+    {
+      "dashboard": {
+        "title": "A2A Distributed Tracing",
+        "uid": "a2a-tracing",
+        "timezone": "utc",
+        "schemaVersion": 30,
+        "version": 1,
+        "refresh": "30s",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Trace Throughput",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+            "targets": [
+              {
+                "expr": "sum(rate(traces_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (service)",
+                "legendFormat": "{{`{{service}}`}}",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Span Duration Distribution",
+            "type": "heatmap",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+            "targets": [
+              {
+                "expr": "sum(rate(span_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le)",
+                "format": "heatmap",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Service Dependencies",
+            "type": "nodeGraph",
+            "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+            "targets": [
+              {
+                "expr": "sum(rate(traces_service_calls_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (source_service, destination_service)",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Error Spans",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+            "targets": [
+              {
+                "expr": "sum(rate(span_errors_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (service, error_type)",
+                "legendFormat": "{{`{{service}}`}} - {{`{{error_type}}`}}",
+                "refId": "A"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Trace Sampling Rate",
+            "type": "gauge",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+            "targets": [
+              {
+                "expr": "sum(rate(traces_sampled_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) / sum(rate(traces_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "refId": "A"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "a2a.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    monitoring: prometheus
+spec:
+  selector:
+    matchLabels:
+      {{- include "a2a.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: metrics
+    interval: {{ .Values.observability.scrapeInterval | default "30s" }}
+    path: /metrics
+    scheme: http
+    scrapeTimeout: {{ .Values.observability.scrapeTimeout | default "10s" }}
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: '(container_tasks_state|container_memory_failures_total)'
+      action: drop
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "a2a.fullname" . }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: a2a.availability
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        (
+          sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}",status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}"}[5m]))
+        ) * 100 > {{ .Values.observability.alerts.errorRateThreshold | default 5 }}
+      for: 5m
+      labels:
+        severity: critical
+        component: application
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate is {{`{{ $value | humanizePercentage }}`}} for namespace {{ .Release.Namespace }}"
+        runbook_url: "https://runbooks.example.com/high-error-rate"
+
+    - alert: HighLatency
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m])) by (le)
+        ) > {{ .Values.observability.alerts.latencyThreshold | default 1 }}
+      for: 10m
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High request latency"
+        description: "95th percentile latency is {{`{{ $value | humanizeDuration }}`}}"
+        runbook_url: "https://runbooks.example.com/high-latency"
+
+    - alert: ServiceDown
+      expr: |
+        up{namespace="{{ .Release.Namespace }}",job="{{ include "a2a.fullname" . }}"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        component: application
+      annotations:
+        summary: "Service is down"
+        description: "Service {{ include "a2a.fullname" . }} in namespace {{ .Release.Namespace }} is down"
+        runbook_url: "https://runbooks.example.com/service-down"
+
+    - alert: PodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: infrastructure
+      annotations:
+        summary: "Pod is crash looping"
+        description: "Pod {{`{{ $labels.pod }}`}} is restarting frequently"
+        runbook_url: "https://runbooks.example.com/crash-loop"
+
+  - name: a2a.performance
+    interval: 30s
+    rules:
+    - alert: HighCPUUsage
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{namespace="{{ .Release.Namespace }}",pod=~"{{ include "a2a.fullname" . }}.*"}[5m])) by (pod)
+        > {{ .Values.observability.alerts.cpuThreshold | default 0.8 }}
+      for: 10m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "High CPU usage"
+        description: "Pod {{`{{ $labels.pod }}`}} CPU usage is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/high-cpu"
+
+    - alert: HighMemoryUsage
+      expr: |
+        sum(container_memory_usage_bytes{namespace="{{ .Release.Namespace }}",pod=~"{{ include "a2a.fullname" . }}.*"}) by (pod)
+        /
+        sum(container_spec_memory_limit_bytes{namespace="{{ .Release.Namespace }}",pod=~"{{ include "a2a.fullname" . }}.*"}) by (pod)
+        > {{ .Values.observability.alerts.memoryThreshold | default 0.85 }}
+      for: 10m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "High memory usage"
+        description: "Pod {{`{{ $labels.pod }}`}} memory usage is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/high-memory"
+
+    - alert: DiskSpaceRunningOut
+      expr: |
+        (
+          kubelet_volume_stats_used_bytes{namespace="{{ .Release.Namespace }}"}
+          /
+          kubelet_volume_stats_capacity_bytes{namespace="{{ .Release.Namespace }}"}
+        ) > 0.85
+      for: 15m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Disk space running out"
+        description: "PVC {{`{{ $labels.persistentvolumeclaim }}`}} is {{`{{ $value | humanizePercentage }}`}} full"
+        runbook_url: "https://runbooks.example.com/disk-space"
+
+  - name: a2a.business
+    interval: 1m
+    rules:
+    - alert: TransactionFailureSpike
+      expr: |
+        (
+          sum(rate(business_transactions_total{namespace="{{ .Release.Namespace }}",status="failed"}[5m]))
+          /
+          sum(rate(business_transactions_total{namespace="{{ .Release.Namespace }}"}[5m]))
+        ) > {{ .Values.observability.alerts.transactionFailureThreshold | default 0.05 }}
+      for: 5m
+      labels:
+        severity: critical
+        component: business
+      annotations:
+        summary: "Transaction failure spike"
+        description: "Transaction failure rate is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/transaction-failure"
+
+    - alert: SLAViolation
+      expr: |
+        (
+          sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}",latency_sla="met"}[5m]))
+          /
+          sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}"}[5m]))
+        ) < {{ .Values.observability.alerts.slaThreshold | default 0.999 }}
+      for: 5m
+      labels:
+        severity: critical
+        component: business
+      annotations:
+        summary: "SLA violation detected"
+        description: "SLA compliance is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/sla-violation"
+
+    - alert: APIQuotaExceeded
+      expr: |
+        sum(api_quota_used{namespace="{{ .Release.Namespace }}"}) by (client_id)
+        /
+        sum(api_quota_limit{namespace="{{ .Release.Namespace }}"}) by (client_id)
+        > 0.95
+      for: 5m
+      labels:
+        severity: warning
+        component: business
+      annotations:
+        summary: "API quota nearly exceeded"
+        description: "Client {{`{{ $labels.client_id }}`}} has used {{`{{ $value | humanizePercentage }}`}} of quota"
+        runbook_url: "https://runbooks.example.com/quota-exceeded"
+
+  - name: a2a.database
+    interval: 30s
+    rules:
+    - alert: SlowDatabaseQueries
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(db_query_duration_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m])) by (le, operation)
+        ) > {{ .Values.observability.alerts.dbQueryThreshold | default 1 }}
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "Slow database queries"
+        description: "95th percentile query time for {{`{{ $labels.operation }}`}} is {{`{{ $value | humanizeDuration }}`}}"
+        runbook_url: "https://runbooks.example.com/slow-queries"
+
+    - alert: DatabaseConnectionPoolExhausted
+      expr: |
+        sum(db_connection_pool_active{namespace="{{ .Release.Namespace }}"})
+        /
+        sum(db_connection_pool_max{namespace="{{ .Release.Namespace }}"})
+        > 0.9
+      for: 5m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "Database connection pool exhausted"
+        description: "Connection pool usage is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/connection-pool"
+
+    - alert: LowCacheHitRate
+      expr: |
+        (
+          sum(rate(cache_hits_total{namespace="{{ .Release.Namespace }}"}[5m]))
+          /
+          (sum(rate(cache_hits_total{namespace="{{ .Release.Namespace }}"}[5m])) + sum(rate(cache_misses_total{namespace="{{ .Release.Namespace }}"}[5m])))
+        ) < {{ .Values.observability.alerts.cacheHitRateThreshold | default 0.7 }}
+      for: 15m
+      labels:
+        severity: warning
+        component: cache
+      annotations:
+        summary: "Low cache hit rate"
+        description: "Cache hit rate is {{`{{ $value | humanizePercentage }}`}}"
+        runbook_url: "https://runbooks.example.com/cache-hit-rate"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-loki-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+data:
+  loki-config.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+      log_level: {{ .Values.observability.logging.logLevel | default "info" }}
+
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: {{ .Values.observability.logging.replicationFactor | default 3 }}
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+      - from: 2024-01-01
+        store: boltdb-shipper
+        object_store: filesystem
+        schema: v11
+        index:
+          prefix: index_
+          period: 24h
+
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /loki/boltdb-shipper-active
+        cache_location: /loki/boltdb-shipper-cache
+        cache_ttl: 24h
+        shared_store: filesystem
+      filesystem:
+        directory: /loki/chunks
+
+    compactor:
+      working_directory: /loki/boltdb-shipper-compactor
+      shared_store: filesystem
+      retention_enabled: true
+      retention_delete_delay: 2h
+      retention_delete_worker_count: 150
+
+    limits_config:
+      retention_period: {{ .Values.observability.logging.retentionPeriod | default "744h" }}
+      ingestion_rate_mb: {{ .Values.observability.logging.ingestionRateMB | default 50 }}
+      ingestion_burst_size_mb: {{ .Values.observability.logging.ingestionBurstSizeMB | default 100 }}
+      max_streams_per_user: 0
+      max_query_length: 721h
+      max_query_parallelism: 32
+      max_entries_limit_per_query: 10000
+      max_label_value_length: 2048
+      max_label_name_length: 1024
+      max_label_names_per_series: 30
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      per_stream_rate_limit: 50MB
+      per_stream_rate_limit_burst: 100MB
+
+    chunk_store_config:
+      max_look_back_period: {{ .Values.observability.logging.maxLookBackPeriod | default "744h" }}
+
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: {{ .Values.observability.logging.retentionPeriod | default "744h" }}
+
+    query_range:
+      align_queries_with_step: true
+      max_retries: 5
+      cache_results: true
+      results_cache:
+        cache:
+          embedded_cache:
+            enabled: true
+            max_size_mb: 1024
+            ttl: 24h
+
+    frontend:
+      max_outstanding_per_tenant: 2048
+      compress_responses: true
+      log_queries_longer_than: 10s
+
+    querier:
+      max_concurrent: 20
+      query_timeout: 5m
+
+    ingester:
+      lifecycler:
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: {{ .Values.observability.logging.replicationFactor | default 3 }}
+      chunk_idle_period: 30m
+      chunk_retain_period: 15m
+      max_chunk_age: 2h
+      wal:
+        enabled: true
+        dir: /loki/wal
+        flush_on_shutdown: true
+
+    ruler:
+      enable_api: true
+      enable_alertmanager_v2: true
+      alertmanager_url: http://alertmanager:9093
+      storage:
+        type: local
+        local:
+          directory: /loki/rules
+      rule_path: /loki/rules-temp
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-fluent-bit-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Daemon Off
+        Flush {{ .Values.observability.logging.flushInterval | default 5 }}
+        Log_Level {{ .Values.observability.logging.logLevel | default "info" }}
+        Parsers_File parsers.conf
+        Parsers_File custom_parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+        storage.path /var/fluent-bit/state/flb-storage/
+        storage.sync normal
+        storage.checksum off
+        storage.max_chunks_up 128
+        storage.backlog.mem_limit 5M
+
+    [INPUT]
+        Name tail
+        Path /var/log/containers/*{{ include "a2a.fullname" . }}*.log
+        multiline.parser docker, cri
+        Tag kube.*
+        Mem_Buf_Limit 50MB
+        Skip_Long_Lines On
+        Skip_Empty_Lines On
+        Refresh_Interval 10
+        DB /var/fluent-bit/state/flb_kube.db
+        DB.locking true
+        storage.type filesystem
+
+    [INPUT]
+        Name systemd
+        Tag systemd.*
+        Path /var/log/journal
+        Read_From_Tail On
+        Strip_Underscores On
+
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        Kube_URL https://kubernetes.default.svc:443
+        Kube_CA_File /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File /var/run/secrets/kubernetes.io/serviceaccount/token
+        Kube_Tag_Prefix kube.var.log.containers.
+        Merge_Log On
+        Keep_Log Off
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+        Labels On
+        Annotations On
+        Buffer_Size 256KB
+
+    [FILTER]
+        Name parser
+        Match kube.*
+        Key_Name log
+        Parser json
+        Reserve_Data On
+        Preserve_Key On
+
+    [FILTER]
+        Name nest
+        Match kube.*
+        Operation lift
+        Nested_under kubernetes
+        Add_prefix k8s_
+
+    [FILTER]
+        Name modify
+        Match kube.*
+        Add namespace {{ .Release.Namespace }}
+        Add cluster {{ .Values.observability.clusterName | default "production" }}
+        Add app {{ include "a2a.fullname" . }}
+
+    [FILTER]
+        Name grep
+        Match kube.*
+        Regex k8s_namespace_name {{ .Release.Namespace }}
+
+    [FILTER]
+        Name record_modifier
+        Match *
+        Record hostname ${HOSTNAME}
+        Record cluster_name {{ .Values.observability.clusterName | default "production" }}
+
+    [OUTPUT]
+        Name loki
+        Match kube.*
+        Host {{ .Values.observability.logging.lokiHost | default "loki" }}
+        Port {{ .Values.observability.logging.lokiPort | default 3100 }}
+        Labels job=fluentbit, namespace=$k8s_namespace_name, pod=$k8s_pod_name, container=$k8s_container_name, app={{ include "a2a.fullname" . }}
+        Label_keys $k8s_labels
+        Line_format json
+        Auto_Kubernetes_Labels on
+        Retry_Limit {{ .Values.observability.logging.retryLimit | default 5 }}
+        storage.total_limit_size 10G
+
+    [OUTPUT]
+        Name prometheus_exporter
+        Match *
+        Host 0.0.0.0
+        Port 2021
+
+  parsers.conf: |
+    [PARSER]
+        Name docker
+        Format json
+        Time_Key time
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep On
+
+    [PARSER]
+        Name json
+        Format json
+        Time_Key timestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep On
+
+    [PARSER]
+        Name syslog
+        Format regex
+        Regex ^\<(?<pri>[0-9]+)\>(?<time>[^ ]* {1,2}[^ ]* [^ ]*) (?<host>[^ ]*) (?<ident>[a-zA-Z0-9_\/\.\-]*)(?:\[(?<pid>[0-9]+)\])?(?:[^\:]*\:)? *(?<message>.*)$
+        Time_Key time
+        Time_Format %b %d %H:%M:%S
+
+  custom_parsers.conf: |
+    [PARSER]
+        Name application_json
+        Format json
+        Time_Key timestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep On
+        Decode_Field_As escaped_utf8 log
+        Decode_Field_As json log
+
+    [PARSER]
+        Name nginx
+        Format regex
+        Regex ^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*)(?: "(?<referer>[^\"]*)" "(?<agent>[^\"]*)")
+        Time_Key time
+        Time_Format %d/%b/%Y:%H:%M:%S %z
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-jaeger-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+data:
+  jaeger-config.yaml: |
+    service_name: {{ include "a2a.fullname" . }}
+
+    sampler:
+      type: {{ .Values.observability.tracing.samplerType | default "probabilistic" }}
+      param: {{ .Values.observability.tracing.samplerParam | default 0.1 }}
+      sampling_server_url: http://jaeger-agent:5778/sampling
+      max_operations: 2000
+      sampling_refresh_interval: 60s
+
+    reporter:
+      log_spans: {{ .Values.observability.tracing.logSpans | default false }}
+      max_queue_size: {{ .Values.observability.tracing.maxQueueSize | default 10000 }}
+      flush_interval: {{ .Values.observability.tracing.flushInterval | default "5s" }}
+      local_agent_host_port: {{ .Values.observability.tracing.agentHost | default "jaeger-agent" }}:{{ .Values.observability.tracing.agentPort | default 6831 }}
+
+    headers:
+      trace_context_header_name: uber-trace-id
+      jaeger_debug_header: jaeger-debug-id
+      jaeger_baggage_header: jaeger-baggage
+      trace_baggage_header_prefix: uberctx-
+
+    baggage_restrictions:
+      deny_baggage_on_initialization_failure: false
+      refresh_interval: 60s
+      host_port: jaeger-agent:5778
+
+    throttler:
+      host_port: jaeger-agent:5778
+      refresh_interval: 60s
+      synchronous_initialization: false
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-otel-collector-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:14250
+          thrift_http:
+            endpoint: 0.0.0.0:14268
+          thrift_compact:
+            endpoint: 0.0.0.0:6831
+
+      zipkin:
+        endpoint: 0.0.0.0:9411
+
+      prometheus:
+        config:
+          scrape_configs:
+          - job_name: 'otel-collector'
+            scrape_interval: 30s
+            static_configs:
+            - targets: ['localhost:8888']
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.observability.tracing.memoryLimitMiB | default 2048 }}
+        spike_limit_mib: {{ .Values.observability.tracing.spikeMemoryLimitMiB | default 512 }}
+
+      attributes:
+        actions:
+        - key: cluster
+          value: {{ .Values.observability.clusterName | default "production" }}
+          action: insert
+        - key: namespace
+          value: {{ .Release.Namespace }}
+          action: insert
+        - key: application
+          value: {{ include "a2a.fullname" . }}
+          action: insert
+
+      resource:
+        attributes:
+        - key: service.namespace
+          value: {{ .Release.Namespace }}
+          action: insert
+        - key: deployment.environment
+          value: {{ .Values.environment | default "production" }}
+          action: insert
+
+      span:
+        name:
+          from_attributes: ["http.method", "http.route"]
+          separator: " "
+
+      probabilistic_sampler:
+        sampling_percentage: {{ .Values.observability.tracing.samplingPercentage | default 10 }}
+        hash_seed: 22
+
+    exporters:
+      otlp/jaeger:
+        endpoint: {{ .Values.observability.tracing.jaegerEndpoint | default "jaeger-collector:4317" }}
+        tls:
+          insecure: {{ .Values.observability.tracing.insecure | default true }}
+
+      otlp/tempo:
+        endpoint: {{ .Values.observability.tracing.tempoEndpoint | default "tempo:4317" }}
+        tls:
+          insecure: {{ .Values.observability.tracing.insecure | default true }}
+
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: {{ include "a2a.fullname" . }}
+        const_labels:
+          cluster: {{ .Values.observability.clusterName | default "production" }}
+          namespace: {{ .Release.Namespace }}
+
+      logging:
+        loglevel: {{ .Values.observability.tracing.logLevel | default "info" }}
+        sampling_initial: 5
+        sampling_thereafter: 200
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+      pprof:
+        endpoint: 0.0.0.0:1777
+
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp, jaeger, zipkin]
+          processors: [memory_limiter, batch, attributes, resource, span, probabilistic_sampler]
+          exporters: [otlp/jaeger, otlp/tempo, logging]
+
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, attributes, resource]
+          exporters: [prometheus, logging]
+
+      telemetry:
+        logs:
+          level: {{ .Values.observability.tracing.logLevel | default "info" }}
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-alertmanager-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: {{ .Values.observability.alerts.resolveTimeout | default "5m" }}
+      {{- if .Values.observability.alerts.smtp }}
+      smtp_smarthost: {{ .Values.observability.alerts.smtp.smarthost | quote }}
+      smtp_from: {{ .Values.observability.alerts.smtp.from | quote }}
+      smtp_auth_username: {{ .Values.observability.alerts.smtp.username | quote }}
+      smtp_auth_password: {{ .Values.observability.alerts.smtp.password | quote }}
+      smtp_require_tls: {{ .Values.observability.alerts.smtp.requireTLS | default true }}
+      {{- end }}
+      {{- if .Values.observability.alerts.slack }}
+      slack_api_url: {{ .Values.observability.alerts.slack.apiUrl | quote }}
+      {{- end }}
+      {{- if .Values.observability.alerts.pagerduty }}
+      pagerduty_url: {{ .Values.observability.alerts.pagerduty.url | default "https://events.pagerduty.com/v2/enqueue" | quote }}
+      {{- end }}
+
+    route:
+      group_by: ['alertname', 'cluster', 'namespace', 'severity']
+      group_wait: {{ .Values.observability.alerts.groupWait | default "30s" }}
+      group_interval: {{ .Values.observability.alerts.groupInterval | default "5m" }}
+      repeat_interval: {{ .Values.observability.alerts.repeatInterval | default "4h" }}
+      receiver: 'default'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'critical-alerts'
+        continue: true
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 1h
+
+      - match:
+          severity: warning
+        receiver: 'warning-alerts'
+        continue: true
+        group_interval: 5m
+        repeat_interval: 4h
+
+      - match:
+          component: business
+        receiver: 'business-alerts'
+        continue: true
+
+      - match_re:
+          alertname: (DatabaseConnectionPoolExhausted|SlowDatabaseQueries)
+        receiver: 'database-team'
+        continue: true
+
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'namespace', 'pod']
+
+    - source_match:
+        alertname: 'ServiceDown'
+      target_match_re:
+        alertname: '(HighErrorRate|HighLatency|HighCPUUsage|HighMemoryUsage)'
+      equal: ['namespace']
+
+    receivers:
+    - name: 'default'
+      {{- if .Values.observability.alerts.email }}
+      email_configs:
+      - to: {{ .Values.observability.alerts.email.to | quote }}
+        send_resolved: true
+        headers:
+          Subject: '[A2A] {{`{{ .GroupLabels.severity | toUpper }}`}} - {{`{{ .GroupLabels.alertname }}`}}'
+        html: |
+          {{`{{ range .Alerts }}`}}
+          <h3>{{`{{ .Labels.alertname }}`}}</h3>
+          <p><strong>Severity:</strong> {{`{{ .Labels.severity }}`}}</p>
+          <p><strong>Summary:</strong> {{`{{ .Annotations.summary }}`}}</p>
+          <p><strong>Description:</strong> {{`{{ .Annotations.description }}`}}</p>
+          <p><strong>Runbook:</strong> <a href="{{`{{ .Annotations.runbook_url }}`}}">{{`{{ .Annotations.runbook_url }}`}}</a></p>
+          <p><strong>Started:</strong> {{`{{ .StartsAt }}`}}</p>
+          {{`{{ end }}`}}
+      {{- end }}
+
+    - name: 'critical-alerts'
+      {{- if .Values.observability.alerts.pagerduty }}
+      pagerduty_configs:
+      - service_key: {{ .Values.observability.alerts.pagerduty.serviceKey | quote }}
+        send_resolved: true
+        severity: "{{`{{ .CommonLabels.severity }}`}}"
+        details:
+          firing: '{{`{{ template "pagerduty.default.instances" .Alerts.Firing }}`}}'
+          resolved: '{{`{{ template "pagerduty.default.instances" .Alerts.Resolved }}`}}'
+          num_firing: '{{`{{ .Alerts.Firing | len }}`}}'
+          num_resolved: '{{`{{ .Alerts.Resolved | len }}`}}'
+      {{- end }}
+      {{- if .Values.observability.alerts.slack }}
+      slack_configs:
+      - channel: {{ .Values.observability.alerts.slack.criticalChannel | default "#alerts-critical" | quote }}
+        send_resolved: true
+        title: '{{`{{ .CommonLabels.severity | toUpper }}`}} - {{`{{ .CommonLabels.alertname }}`}}'
+        text: |
+          {{`{{ range .Alerts }}`}}
+          *Alert:* {{`{{ .Labels.alertname }}`}}
+          *Severity:* {{`{{ .Labels.severity }}`}}
+          *Summary:* {{`{{ .Annotations.summary }}`}}
+          *Description:* {{`{{ .Annotations.description }}`}}
+          *Runbook:* {{`{{ .Annotations.runbook_url }}`}}
+          {{`{{ end }}`}}
+        color: '{{`{{ if eq .Status "firing" }}`}}danger{{`{{ else }}`}}good{{`{{ end }}`}}'
+      {{- end }}
+      {{- if .Values.observability.alerts.email }}
+      email_configs:
+      - to: {{ .Values.observability.alerts.email.criticalTo | default .Values.observability.alerts.email.to | quote }}
+        send_resolved: true
+        headers:
+          Subject: '[CRITICAL] A2A Alert - {{`{{ .GroupLabels.alertname }}`}}'
+      {{- end }}
+      {{- if .Values.observability.alerts.webhook }}
+      webhook_configs:
+      - url: {{ .Values.observability.alerts.webhook.criticalUrl | quote }}
+        send_resolved: true
+        max_alerts: 0
+      {{- end }}
+
+    - name: 'warning-alerts'
+      {{- if .Values.observability.alerts.slack }}
+      slack_configs:
+      - channel: {{ .Values.observability.alerts.slack.warningChannel | default "#alerts-warning" | quote }}
+        send_resolved: true
+        title: '{{`{{ .CommonLabels.alertname }}`}}'
+        text: '{{`{{ range .Alerts }}`}}{{`{{ .Annotations.summary }}`}}{{`{{ end }}`}}'
+        color: 'warning'
+      {{- end }}
+      {{- if .Values.observability.alerts.email }}
+      email_configs:
+      - to: {{ .Values.observability.alerts.email.warningTo | default .Values.observability.alerts.email.to | quote }}
+        send_resolved: true
+      {{- end }}
+
+    - name: 'business-alerts'
+      {{- if .Values.observability.alerts.slack }}
+      slack_configs:
+      - channel: {{ .Values.observability.alerts.slack.businessChannel | default "#business-alerts" | quote }}
+        send_resolved: true
+        title: 'Business Alert - {{`{{ .CommonLabels.alertname }}`}}'
+        text: |
+          {{`{{ range .Alerts }}`}}
+          *Summary:* {{`{{ .Annotations.summary }}`}}
+          *Description:* {{`{{ .Annotations.description }}`}}
+          *Impact:* Business operations may be affected
+          {{`{{ end }}`}}
+      {{- end }}
+      {{- if .Values.observability.alerts.email }}
+      email_configs:
+      - to: {{ .Values.observability.alerts.email.businessTo | default .Values.observability.alerts.email.to | quote }}
+        send_resolved: true
+        headers:
+          Subject: '[BUSINESS] A2A Alert - {{`{{ .GroupLabels.alertname }}`}}'
+      {{- end }}
+
+    - name: 'database-team'
+      {{- if .Values.observability.alerts.email }}
+      email_configs:
+      - to: {{ .Values.observability.alerts.email.databaseTeam | default .Values.observability.alerts.email.to | quote }}
+        send_resolved: true
+        headers:
+          Subject: '[DATABASE] A2A Alert - {{`{{ .GroupLabels.alertname }}`}}'
+      {{- end }}
+      {{- if .Values.observability.alerts.slack }}
+      slack_configs:
+      - channel: {{ .Values.observability.alerts.slack.databaseChannel | default "#database-alerts" | quote }}
+        send_resolved: true
+      {{- end }}
+
+    templates:
+    - '/etc/alertmanager/template/*.tmpl'
+
+{{- end }}

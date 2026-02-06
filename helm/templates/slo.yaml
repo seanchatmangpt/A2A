@@ -1,0 +1,522 @@
+{{- if .Values.slo.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "a2a.fullname" . }}-slo-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: slo
+  annotations:
+    description: "SLI/SLO configuration for Fortune 5 compliance"
+data:
+  slo-config.yaml: |
+    # Service Level Indicators (SLIs)
+    slis:
+      availability:
+        name: "Service Availability"
+        description: "Percentage of successful requests over total requests"
+        query: |
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[{{ .Values.slo.timeWindow }}])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[{{ .Values.slo.timeWindow }}]))
+        target: {{ .Values.slo.availability.target }}
+        unit: "percentage"
+
+      latency_p95:
+        name: "95th Percentile Latency"
+        description: "95% of requests complete within threshold"
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="{{ include "a2a.fullname" . }}"}[{{ .Values.slo.timeWindow }}])) by (le))
+        target: {{ .Values.slo.latency.p95Target }}
+        unit: "seconds"
+
+      latency_p99:
+        name: "99th Percentile Latency"
+        description: "99% of requests complete within threshold"
+        query: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="{{ include "a2a.fullname" . }}"}[{{ .Values.slo.timeWindow }}])) by (le))
+        target: {{ .Values.slo.latency.p99Target }}
+        unit: "seconds"
+
+      error_rate:
+        name: "Error Rate"
+        description: "Percentage of failed requests"
+        query: |
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[{{ .Values.slo.timeWindow }}])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[{{ .Values.slo.timeWindow }}]))
+        target: {{ .Values.slo.errorRate.target }}
+        unit: "percentage"
+
+      saturation:
+        name: "System Saturation"
+        description: "Resource utilization percentage"
+        query: |
+          max(
+            max(container_memory_working_set_bytes{pod=~"{{ include "a2a.fullname" . }}-.*"} /
+                container_spec_memory_limit_bytes{pod=~"{{ include "a2a.fullname" . }}-.*"}),
+            max(rate(container_cpu_usage_seconds_total{pod=~"{{ include "a2a.fullname" . }}-.*"}[{{ .Values.slo.timeWindow }}]) /
+                container_spec_cpu_quota{pod=~"{{ include "a2a.fullname" . }}-.*"})
+          )
+        target: {{ .Values.slo.saturation.target }}
+        unit: "percentage"
+
+    # Service Level Objectives (SLOs)
+    slos:
+      - name: "monthly-availability"
+        description: "99.99% availability over 30 days"
+        objective: {{ .Values.slo.availability.target }}
+        sli: "availability"
+        timeWindow: "30d"
+        errorBudget:
+          total: {{ .Values.slo.availability.errorBudget }}
+          remaining: "calculated"
+          policy: "alerting"
+
+      - name: "weekly-availability"
+        description: "99.95% availability over 7 days"
+        objective: {{ .Values.slo.availability.weeklyTarget | default "0.9995" }}
+        sli: "availability"
+        timeWindow: "7d"
+        errorBudget:
+          total: {{ .Values.slo.availability.weeklyErrorBudget | default "0.0005" }}
+          remaining: "calculated"
+          policy: "alerting"
+
+      - name: "latency-performance"
+        description: "95% of requests under 500ms"
+        objective: {{ .Values.slo.latency.p95Target }}
+        sli: "latency_p95"
+        timeWindow: "{{ .Values.slo.timeWindow }}"
+        errorBudget:
+          total: {{ .Values.slo.latency.errorBudget }}
+          remaining: "calculated"
+          policy: "warning"
+
+      - name: "critical-latency"
+        description: "99% of requests under 1s"
+        objective: {{ .Values.slo.latency.p99Target }}
+        sli: "latency_p99"
+        timeWindow: "{{ .Values.slo.timeWindow }}"
+        errorBudget:
+          total: {{ .Values.slo.latency.p99ErrorBudget | default "0.01" }}
+          remaining: "calculated"
+          policy: "critical"
+
+      - name: "error-rate-threshold"
+        description: "Error rate below 0.01%"
+        objective: {{ .Values.slo.errorRate.target }}
+        sli: "error_rate"
+        timeWindow: "{{ .Values.slo.timeWindow }}"
+        errorBudget:
+          total: {{ .Values.slo.errorRate.errorBudget }}
+          remaining: "calculated"
+          policy: "critical"
+
+    # Error Budget Policies
+    errorBudgetPolicies:
+      critical:
+        consumption:
+          - threshold: 0.5
+            action: "page-oncall"
+            severity: "critical"
+          - threshold: 0.75
+            action: "halt-deployments"
+            severity: "critical"
+          - threshold: 0.9
+            action: "emergency-response"
+            severity: "critical"
+
+      alerting:
+        consumption:
+          - threshold: 0.6
+            action: "alert-oncall"
+            severity: "warning"
+          - threshold: 0.8
+            action: "page-oncall"
+            severity: "critical"
+
+      warning:
+        consumption:
+          - threshold: 0.7
+            action: "notify-team"
+            severity: "info"
+          - threshold: 0.85
+            action: "alert-oncall"
+            severity: "warning"
+
+    # Uptime Monitoring Configuration
+    uptimeMonitoring:
+      endpoints:
+        - name: "health-check"
+          url: "/health"
+          interval: "10s"
+          timeout: "5s"
+          expectedStatus: 200
+        - name: "readiness-check"
+          url: "/ready"
+          interval: "10s"
+          timeout: "5s"
+          expectedStatus: 200
+        - name: "liveness-check"
+          url: "/healthz"
+          interval: "30s"
+          timeout: "10s"
+          expectedStatus: 200
+
+      synthetic:
+        enabled: {{ .Values.slo.syntheticMonitoring.enabled | default true }}
+        locations: {{ .Values.slo.syntheticMonitoring.locations | default (list "us-central1" "us-east1" "us-west1" "europe-west1" "asia-east1") | toYaml | nindent 10 }}
+        frequency: {{ .Values.slo.syntheticMonitoring.frequency | default "60s" }}
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "a2a.fullname" . }}-slo-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: slo
+    prometheus: {{ .Values.slo.prometheus.name | default "kube-prometheus" }}
+    role: alert-rules
+spec:
+  groups:
+  - name: a2a.slo.availability
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOAvailabilityCritical
+      expr: |
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[5m])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[5m]))
+        ) < {{ .Values.slo.availability.target }}
+      for: 2m
+      labels:
+        severity: critical
+        slo: availability
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+      annotations:
+        summary: "SLO Availability breach - immediate attention required"
+        description: "Service availability is {{ "{{" }} printf \"%.4f\" $value {{ "}}" }}% which is below SLO target of {{ .Values.slo.availability.target }}%"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/availability"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/slo-availability"
+
+    - alert: SLOAvailabilityWarning
+      expr: |
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[15m])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[15m]))
+        ) < ({{ .Values.slo.availability.target }} + 0.0005)
+      for: 5m
+      labels:
+        severity: warning
+        slo: availability
+        component: a2a
+        tier: platform
+      annotations:
+        summary: "SLO Availability approaching threshold"
+        description: "Service availability is {{ "{{" }} printf \"%.4f\" $value {{ "}}" }}% which is approaching SLO target"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/availability"
+
+  - name: a2a.slo.latency
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOLatencyP95Breach
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket{job="{{ include "a2a.fullname" . }}"}[5m])) by (le)
+        ) > {{ .Values.slo.latency.p95Target }}
+      for: 3m
+      labels:
+        severity: warning
+        slo: latency
+        component: a2a
+        tier: platform
+        percentile: p95
+      annotations:
+        summary: "P95 latency SLO breach"
+        description: "95th percentile latency is {{ "{{" }} printf \"%.3f\" $value {{ "}}" }}s exceeding target of {{ .Values.slo.latency.p95Target }}s"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/latency"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/slo-latency"
+
+    - alert: SLOLatencyP99Breach
+      expr: |
+        histogram_quantile(0.99,
+          sum(rate(http_request_duration_seconds_bucket{job="{{ include "a2a.fullname" . }}"}[5m])) by (le)
+        ) > {{ .Values.slo.latency.p99Target }}
+      for: 3m
+      labels:
+        severity: critical
+        slo: latency
+        component: a2a
+        tier: platform
+        percentile: p99
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+      annotations:
+        summary: "P99 latency SLO critical breach"
+        description: "99th percentile latency is {{ "{{" }} printf \"%.3f\" $value {{ "}}" }}s exceeding critical target of {{ .Values.slo.latency.p99Target }}s"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/latency"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/slo-latency"
+
+  - name: a2a.slo.errors
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOErrorRateCritical
+      expr: |
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[5m])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[5m]))
+        ) > {{ .Values.slo.errorRate.target }}
+      for: 2m
+      labels:
+        severity: critical
+        slo: error-rate
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+      annotations:
+        summary: "Error rate exceeds SLO threshold"
+        description: "Error rate is {{ "{{" }} printf \"%.4f\" $value {{ "}}" }}% exceeding target of {{ .Values.slo.errorRate.target }}%"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/errors"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/slo-errors"
+
+    - alert: SLOErrorRateBudgetExhausted
+      expr: |
+        (
+          1 - (
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[30d])) /
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}"}[30d]))
+          )
+        ) > (1 - {{ .Values.slo.availability.target }})
+      for: 5m
+      labels:
+        severity: critical
+        slo: error-budget
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+      annotations:
+        summary: "Error budget exhausted - deployment freeze required"
+        description: "30-day error budget has been exhausted. Current consumption: {{ "{{" }} printf \"%.2f\" $value {{ "}}" }}%"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/error-budget"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/error-budget"
+
+  - name: a2a.slo.error-budget
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOErrorBudget50PercentConsumed
+      expr: |
+        (
+          1 - (
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[30d])) /
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}"}[30d]))
+          )
+        ) / (1 - {{ .Values.slo.availability.target }}) > 0.5
+      for: 10m
+      labels:
+        severity: warning
+        slo: error-budget
+        component: a2a
+        tier: platform
+      annotations:
+        summary: "50% of error budget consumed"
+        description: "Error budget consumption at {{ "{{" }} printf \"%.1f\" (multiply $value 100) {{ "}}" }}% - increased vigilance required"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/error-budget"
+
+    - alert: SLOErrorBudget75PercentConsumed
+      expr: |
+        (
+          1 - (
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[30d])) /
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}"}[30d]))
+          )
+        ) / (1 - {{ .Values.slo.availability.target }}) > 0.75
+      for: 5m
+      labels:
+        severity: critical
+        slo: error-budget
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+      annotations:
+        summary: "75% of error budget consumed - deployment restrictions in effect"
+        description: "Error budget consumption at {{ "{{" }} printf \"%.1f\" (multiply $value 100) {{ "}}" }}% - consider halting non-critical deployments"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/error-budget"
+
+    - alert: SLOErrorBudget90PercentConsumed
+      expr: |
+        (
+          1 - (
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}", status!~"5.."}[30d])) /
+            sum(increase(http_requests_total{job="{{ include "a2a.fullname" . }}"}[30d]))
+          )
+        ) / (1 - {{ .Values.slo.availability.target }}) > 0.9
+      for: 2m
+      labels:
+        severity: critical
+        slo: error-budget
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+        emergency: "true"
+      annotations:
+        summary: "90% of error budget consumed - DEPLOYMENT FREEZE"
+        description: "Error budget consumption at {{ "{{" }} printf \"%.1f\" (multiply $value 100) {{ "}}" }}% - HALT ALL DEPLOYMENTS"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/error-budget"
+
+  - name: a2a.slo.saturation
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOSaturationHigh
+      expr: |
+        max(
+          max(container_memory_working_set_bytes{pod=~"{{ include "a2a.fullname" . }}-.*"} /
+              container_spec_memory_limit_bytes{pod=~"{{ include "a2a.fullname" . }}-.*"}),
+          max(rate(container_cpu_usage_seconds_total{pod=~"{{ include "a2a.fullname" . }}-.*"}[5m]) /
+              on(pod) group_left container_spec_cpu_quota{pod=~"{{ include "a2a.fullname" . }}-.*"})
+        ) > {{ .Values.slo.saturation.target }}
+      for: 5m
+      labels:
+        severity: warning
+        slo: saturation
+        component: a2a
+        tier: platform
+      annotations:
+        summary: "Resource saturation approaching limits"
+        description: "System saturation at {{ "{{" }} printf \"%.1f\" (multiply $value 100) {{ "}}" }}% - scale up may be required"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/saturation"
+
+  - name: a2a.slo.uptime
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOUptimeServiceDown
+      expr: |
+        up{job="{{ include "a2a.fullname" . }}"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        slo: uptime
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+        pagerduty: "true"
+      annotations:
+        summary: "Service is DOWN - immediate action required"
+        description: "Service {{ include "a2a.fullname" . }} is not responding to health checks"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/uptime"
+        dashboard_url: "{{ .Values.slo.dashboardUrl }}/uptime"
+
+    - alert: SLOUptimeMultiplePodsDown
+      expr: |
+        count(up{job="{{ include "a2a.fullname" . }}"} == 0) > 1
+      for: 30s
+      labels:
+        severity: critical
+        slo: uptime
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+        pagerduty: "true"
+        emergency: "true"
+      annotations:
+        summary: "CRITICAL: Multiple service instances DOWN"
+        description: "{{ "{{" }} $value {{ "}}" }} instances of {{ include "a2a.fullname" . }} are DOWN - potential outage"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/uptime"
+
+    - alert: SLOUptimePodRestartingFrequently
+      expr: |
+        rate(kube_pod_container_status_restarts_total{pod=~"{{ include "a2a.fullname" . }}-.*"}[15m]) > {{ .Values.slo.uptime.restartThreshold | default "0.1" }}
+      for: 5m
+      labels:
+        severity: warning
+        slo: uptime
+        component: a2a
+        tier: platform
+      annotations:
+        summary: "Pod restarting frequently"
+        description: "Pod {{ "{{" }} $labels.pod {{ "}}" }} has restarted {{ "{{" }} printf \"%.2f\" $value {{ "}}" }} times in 15m"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/pod-restarts"
+
+  - name: a2a.slo.burn-rate
+    interval: {{ .Values.slo.evaluationInterval | default "30s" }}
+    rules:
+    - alert: SLOBurnRateFast
+      expr: |
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[1h])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[1h]))
+        ) > (14.4 * (1 - {{ .Values.slo.availability.target }}))
+        and
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[5m])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[5m]))
+        ) > (14.4 * (1 - {{ .Values.slo.availability.target }}))
+      for: 2m
+      labels:
+        severity: critical
+        slo: burn-rate
+        component: a2a
+        tier: platform
+        oncall: {{ .Values.slo.oncall.team | default "platform-team" }}
+        burnrate: fast
+      annotations:
+        summary: "CRITICAL: Fast error budget burn detected"
+        description: "Error budget will be exhausted in 2 days at current rate"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/burn-rate"
+
+    - alert: SLOBurnRateSlow
+      expr: |
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[6h])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[6h]))
+        ) > (6 * (1 - {{ .Values.slo.availability.target }}))
+        and
+        (
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}", status=~"5.."}[30m])) /
+          sum(rate(http_requests_total{job="{{ include "a2a.fullname" . }}"}[30m]))
+        ) > (6 * (1 - {{ .Values.slo.availability.target }}))
+      for: 15m
+      labels:
+        severity: warning
+        slo: burn-rate
+        component: a2a
+        tier: platform
+        burnrate: slow
+      annotations:
+        summary: "Elevated error budget burn rate"
+        description: "Error budget will be exhausted in 5 days at current rate"
+        runbook_url: "{{ .Values.slo.runbookUrl }}/burn-rate"
+
+{{- if .Values.slo.customAlerts }}
+{{ .Values.slo.customAlerts | toYaml }}
+{{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "a2a.fullname" . }}-slo-exporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2a.labels" . | nindent 4 }}
+    app.kubernetes.io/component: slo-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9099"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9099
+    targetPort: 9099
+    protocol: TCP
+    name: metrics
+  selector:
+    {{- include "a2a.selectorLabels" . | nindent 4 }}
+
+{{- end }}
