@@ -1,0 +1,602 @@
+version: "1.0"
+schema_version: "2024.1"
+
+license_types:
+  trial:
+    id: "trial"
+    name: "Trial License"
+    duration_days: 30
+    renewable: false
+    grace_period_days: 7
+    pricing:
+      cost: 0
+      currency: "USD"
+    restrictions:
+      max_users: 5
+      max_agents: 10
+      max_workflows: 20
+      max_api_calls_per_day: 1000
+      max_storage_gb: 10
+      data_retention_days: 30
+    features:
+      core_platform: true
+      basic_workflows: true
+      api_access: true
+      email_support: true
+      phone_support: false
+      sla_guarantee: false
+      custom_integrations: false
+      advanced_analytics: false
+      multi_tenant: false
+      sso: false
+      audit_logs: false
+      compliance_reports: false
+      white_labeling: false
+
+  basic:
+    id: "basic"
+    name: "Basic License"
+    duration_days: 365
+    renewable: true
+    grace_period_days: 14
+    pricing:
+      cost: 99
+      currency: "USD"
+      billing_cycle: "monthly"
+      annual_discount_percent: 20
+    restrictions:
+      max_users: 25
+      max_agents: 50
+      max_workflows: 100
+      max_api_calls_per_day: 10000
+      max_storage_gb: 100
+      data_retention_days: 90
+      rate_limit_per_minute: 100
+    features:
+      core_platform: true
+      basic_workflows: true
+      advanced_workflows: false
+      api_access: true
+      email_support: true
+      phone_support: false
+      sla_guarantee: false
+      custom_integrations: false
+      advanced_analytics: false
+      multi_tenant: false
+      sso: false
+      audit_logs: true
+      compliance_reports: false
+      white_labeling: false
+      geo_redundancy: false
+
+  professional:
+    id: "professional"
+    name: "Professional License"
+    duration_days: 365
+    renewable: true
+    grace_period_days: 14
+    pricing:
+      cost: 299
+      currency: "USD"
+      billing_cycle: "monthly"
+      annual_discount_percent: 25
+    restrictions:
+      max_users: 100
+      max_agents: 250
+      max_workflows: 500
+      max_api_calls_per_day: 100000
+      max_storage_gb: 500
+      data_retention_days: 365
+      rate_limit_per_minute: 500
+    features:
+      core_platform: true
+      basic_workflows: true
+      advanced_workflows: true
+      api_access: true
+      email_support: true
+      phone_support: true
+      sla_guarantee: "99.5"
+      custom_integrations: true
+      advanced_analytics: true
+      multi_tenant: false
+      sso: true
+      audit_logs: true
+      compliance_reports: true
+      white_labeling: false
+      geo_redundancy: false
+      priority_queue: true
+      custom_branding: false
+
+  enterprise:
+    id: "enterprise"
+    name: "Enterprise License"
+    duration_days: 365
+    renewable: true
+    grace_period_days: 30
+    pricing:
+      cost: 999
+      currency: "USD"
+      billing_cycle: "monthly"
+      annual_discount_percent: 30
+      custom_pricing_available: true
+    restrictions:
+      max_users: -1  # unlimited
+      max_agents: -1  # unlimited
+      max_workflows: -1  # unlimited
+      max_api_calls_per_day: -1  # unlimited
+      max_storage_gb: -1  # unlimited
+      data_retention_days: -1  # unlimited
+      rate_limit_per_minute: 5000
+    features:
+      core_platform: true
+      basic_workflows: true
+      advanced_workflows: true
+      api_access: true
+      email_support: true
+      phone_support: true
+      sla_guarantee: "99.9"
+      custom_integrations: true
+      advanced_analytics: true
+      multi_tenant: true
+      sso: true
+      audit_logs: true
+      compliance_reports: true
+      white_labeling: true
+      geo_redundancy: true
+      priority_queue: true
+      custom_branding: true
+      dedicated_support: true
+      on_premise_deployment: true
+      disaster_recovery: true
+
+  developer:
+    id: "developer"
+    name: "Developer License"
+    duration_days: 365
+    renewable: true
+    grace_period_days: 7
+    pricing:
+      cost: 49
+      currency: "USD"
+      billing_cycle: "monthly"
+    restrictions:
+      max_users: 5
+      max_agents: 20
+      max_workflows: 50
+      max_api_calls_per_day: 50000
+      max_storage_gb: 50
+      data_retention_days: 90
+      rate_limit_per_minute: 200
+    features:
+      core_platform: true
+      basic_workflows: true
+      advanced_workflows: true
+      api_access: true
+      email_support: true
+      phone_support: false
+      sla_guarantee: false
+      custom_integrations: true
+      advanced_analytics: false
+      multi_tenant: false
+      sso: false
+      audit_logs: true
+      compliance_reports: false
+      white_labeling: false
+      sandbox_environment: true
+      api_documentation: true
+      webhooks: true
+
+entitlements:
+  features:
+    core_platform:
+      id: "core_platform"
+      name: "Core Platform Access"
+      description: "Access to the base A2A platform functionality"
+      required: true
+
+    basic_workflows:
+      id: "basic_workflows"
+      name: "Basic Workflows"
+      description: "Create and execute standard workflow templates"
+      dependencies: ["core_platform"]
+
+    advanced_workflows:
+      id: "advanced_workflows"
+      name: "Advanced Workflows"
+      description: "Custom workflow builder with conditional logic and branching"
+      dependencies: ["basic_workflows"]
+
+    api_access:
+      id: "api_access"
+      name: "API Access"
+      description: "REST API access with authentication"
+      rate_limiting: true
+
+    email_support:
+      id: "email_support"
+      name: "Email Support"
+      description: "Email-based customer support"
+      sla_response_hours: 48
+
+    phone_support:
+      id: "phone_support"
+      name: "Phone Support"
+      description: "Telephone support during business hours"
+      sla_response_hours: 4
+
+    sso:
+      id: "sso"
+      name: "Single Sign-On"
+      description: "SAML 2.0 and OAuth 2.0 SSO integration"
+      protocols: ["SAML2", "OAuth2", "OpenID"]
+
+    audit_logs:
+      id: "audit_logs"
+      name: "Audit Logging"
+      description: "Complete audit trail of all system activities"
+      retention_configurable: true
+
+    compliance_reports:
+      id: "compliance_reports"
+      name: "Compliance Reports"
+      description: "Pre-built compliance reports for SOC2, HIPAA, GDPR"
+      supported_standards: ["SOC2", "HIPAA", "GDPR", "ISO27001"]
+
+    white_labeling:
+      id: "white_labeling"
+      name: "White Labeling"
+      description: "Custom branding and logo replacement"
+      dependencies: ["enterprise"]
+
+    multi_tenant:
+      id: "multi_tenant"
+      name: "Multi-Tenancy"
+      description: "Isolated tenant environments with data separation"
+
+    advanced_analytics:
+      id: "advanced_analytics"
+      name: "Advanced Analytics"
+      description: "Custom dashboards, reports, and data export"
+
+    custom_integrations:
+      id: "custom_integrations"
+      name: "Custom Integrations"
+      description: "Build custom integrations via SDK"
+
+    geo_redundancy:
+      id: "geo_redundancy"
+      name: "Geographic Redundancy"
+      description: "Data replication across multiple regions"
+
+    on_premise_deployment:
+      id: "on_premise_deployment"
+      name: "On-Premise Deployment"
+      description: "Deploy on customer infrastructure"
+
+  quotas:
+    users:
+      name: "User Accounts"
+      unit: "users"
+      metered: true
+
+    agents:
+      name: "AI Agents"
+      unit: "agents"
+      metered: true
+
+    workflows:
+      name: "Workflows"
+      unit: "workflows"
+      metered: true
+
+    api_calls:
+      name: "API Calls"
+      unit: "calls"
+      metered: true
+      reset_interval: "daily"
+
+    storage:
+      name: "Storage"
+      unit: "GB"
+      metered: true
+
+    data_retention:
+      name: "Data Retention"
+      unit: "days"
+      metered: false
+
+enforcement:
+  mechanisms:
+    license_key_validation:
+      enabled: true
+      algorithm: "RSA-4096"
+      signature_required: true
+      online_validation: true
+      offline_grace_period_days: 7
+
+    usage_tracking:
+      enabled: true
+      metrics_collection_interval_seconds: 300
+      metrics:
+        - user_count
+        - agent_count
+        - workflow_count
+        - api_call_count
+        - storage_usage
+        - feature_usage
+      aggregation_window: "1h"
+
+    quota_enforcement:
+      enabled: true
+      enforcement_mode: "hard"  # hard, soft, warn
+      check_interval_seconds: 60
+      violation_actions:
+        soft_limit_reached:
+          - send_notification
+          - log_event
+        hard_limit_reached:
+          - block_action
+          - send_notification
+          - log_event
+          - trigger_alert
+
+    feature_gating:
+      enabled: true
+      check_on_access: true
+      cache_duration_seconds: 300
+      fallback_behavior: "deny"
+
+    expiration_handling:
+      check_interval_seconds: 3600
+      warning_days_before_expiry: [30, 14, 7, 3, 1]
+      actions_on_expiry:
+        - disable_write_operations
+        - send_notification
+        - show_renewal_prompt
+      grace_period_actions:
+        - allow_read_only
+        - disable_api_access
+        - show_renewal_banner
+      post_grace_period_actions:
+        - disable_login
+        - archive_data
+        - send_final_notice
+
+  validation:
+    license_signature:
+      required: true
+      algorithm: "RSA-SHA256"
+      public_key_location: "/etc/a2a/keys/license_public.pem"
+
+    hardware_binding:
+      enabled: false
+      binding_type: "mac_address"  # mac_address, cpu_id, disk_serial
+      max_activations: 3
+
+    ip_whitelist:
+      enabled: false
+      enforcement_level: "warn"  # enforce, warn, log
+
+    geo_restrictions:
+      enabled: false
+      allowed_countries: []
+      blocked_countries: []
+
+    time_based_restrictions:
+      enabled: false
+      allowed_hours_utc: []
+
+  tampering_protection:
+    enabled: true
+    code_signing_verification: true
+    integrity_checks: true
+    check_interval_seconds: 1800
+    actions_on_tampering:
+      - disable_system
+      - log_security_event
+      - notify_administrator
+      - create_forensic_snapshot
+
+compliance:
+  checking:
+    automated_checks:
+      enabled: true
+      check_interval_hours: 24
+      checks:
+        - license_validity
+        - quota_compliance
+        - feature_entitlement
+        - user_count_verification
+        - api_usage_verification
+        - storage_quota_verification
+        - data_retention_compliance
+
+    audit_requirements:
+      audit_log_retention_days: 2555  # 7 years
+      audit_log_encryption: true
+      audit_log_immutability: true
+      audit_events:
+        - license_activation
+        - license_deactivation
+        - license_renewal
+        - quota_exceeded
+        - feature_access_denied
+        - compliance_violation
+        - administrative_override
+
+    reporting:
+      compliance_reports:
+        - name: "License Usage Report"
+          schedule: "monthly"
+          format: ["pdf", "json", "csv"]
+          recipients: ["admin", "compliance_team"]
+
+        - name: "Quota Utilization Report"
+          schedule: "weekly"
+          format: ["json", "csv"]
+          recipients: ["admin"]
+
+        - name: "Feature Usage Report"
+          schedule: "monthly"
+          format: ["pdf", "json"]
+          recipients: ["admin", "billing"]
+
+        - name: "Compliance Violations Report"
+          schedule: "daily"
+          format: ["json"]
+          recipients: ["admin", "security_team"]
+          immediate_on_violation: true
+
+    standards_compliance:
+      SOC2:
+        enabled: true
+        controls:
+          - access_control
+          - change_management
+          - risk_mitigation
+          - monitoring
+        audit_frequency_months: 12
+
+      HIPAA:
+        enabled: false
+        requires_baa: true
+        encryption_required: true
+        audit_trail_required: true
+
+      GDPR:
+        enabled: true
+        data_residency_enforcement: true
+        right_to_erasure: true
+        data_portability: true
+        consent_management: true
+
+      ISO27001:
+        enabled: false
+        information_security_controls: true
+
+  violations:
+    handling:
+      detection:
+        real_time_monitoring: true
+        threshold_alerts: true
+        anomaly_detection: true
+
+      response:
+        automatic_remediation: false
+        notification_required: true
+        escalation_chain:
+          - level: 1
+            notify: ["system_admin"]
+            timeout_minutes: 60
+          - level: 2
+            notify: ["security_team", "compliance_officer"]
+            timeout_minutes: 240
+          - level: 3
+            notify: ["cto", "legal_team"]
+            timeout_minutes: 1440
+
+      severity_levels:
+        critical:
+          examples:
+            - license_expired_beyond_grace
+            - tampering_detected
+            - unauthorized_feature_access
+          actions:
+            - immediate_notification
+            - system_lockdown
+            - create_incident_ticket
+
+        high:
+          examples:
+            - quota_exceeded_significantly
+            - repeated_compliance_violations
+            - audit_log_tampering
+          actions:
+            - notification
+            - restrict_functionality
+            - create_incident_ticket
+
+        medium:
+          examples:
+            - quota_soft_limit_exceeded
+            - license_expiring_soon
+            - feature_access_attempts
+          actions:
+            - notification
+            - log_event
+
+        low:
+          examples:
+            - usage_spike_detected
+            - configuration_drift
+          actions:
+            - log_event
+
+    remediation:
+      automatic_actions:
+        quota_exceeded:
+          - throttle_requests
+          - disable_new_resource_creation
+          - notify_admin
+
+        license_expired:
+          - enable_grace_period
+          - restrict_to_read_only
+          - display_renewal_prompt
+
+        feature_not_entitled:
+          - deny_access
+          - log_attempt
+          - suggest_upgrade
+
+      manual_actions:
+        upgrade_required: true
+        approval_workflow: true
+        documentation_required: true
+
+license_server:
+  configuration:
+    mode: "online"  # online, offline, hybrid
+    server_url: "https://license.a2a.example.com"
+    heartbeat_interval_seconds: 3600
+    timeout_seconds: 30
+    retry_attempts: 3
+    retry_backoff_seconds: 60
+
+  offline_mode:
+    enabled: true
+    max_offline_duration_days: 30
+    license_caching: true
+    local_validation: true
+    sync_on_reconnect: true
+
+  activation:
+    methods:
+      - online_activation
+      - offline_activation
+      - phone_activation
+    max_activations_per_license: 5
+    deactivation_required_for_transfer: true
+
+  communication:
+    protocol: "HTTPS"
+    encryption: "TLS1.3"
+    certificate_pinning: true
+    mutual_tls: false
+
+metadata:
+  version_history:
+    - version: "1.0"
+      date: "2024-01-15"
+      changes: "Initial license schema definition"
+
+  contact:
+    support_email: "licensing@a2a.example.com"
+    sales_email: "sales@a2a.example.com"
+    compliance_email: "compliance@a2a.example.com"
+
+  legal:
+    terms_of_service_url: "https://a2a.example.com/terms"
+    privacy_policy_url: "https://a2a.example.com/privacy"
+    eula_url: "https://a2a.example.com/eula"
+    license_agreement_version: "2024.1"

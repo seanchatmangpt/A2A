@@ -1,0 +1,427 @@
+imports:
+- path: templates/gke_cluster.jinja
+- path: templates/network.jinja
+- path: templates/cloudsql.jinja
+- path: templates/storage.jinja
+- path: templates/loadbalancer.jinja
+- path: templates/iam.jinja
+
+resources:
+# VPC Network
+- name: a2a-network
+  type: templates/network.jinja
+  properties:
+    name: $(ref.deployment.name)-vpc
+    region: {{ properties["region"] }}
+    subnetCidr: 10.0.0.0/20
+    podsCidr: 10.4.0.0/14
+    servicesCidr: 10.0.16.0/20
+    masterCidr: 172.16.0.0/28
+
+# Service Accounts
+- name: a2a-iam
+  type: templates/iam.jinja
+  properties:
+    namespace: {{ properties["namespace"] }}
+    serviceAccountName: {{ properties["serviceAccountName"] }}
+    projectId: {{ env["project"] }}
+
+# GKE Cluster
+- name: a2a-gke-cluster
+  type: templates/gke_cluster.jinja
+  properties:
+    clusterName: $(ref.deployment.name)-cluster
+    region: {{ properties["region"] }}
+    zone: {{ properties["zone"] }}
+    projectId: {{ env["project"] }}
+    network: $(ref.a2a-network.selfLink)
+    subnetwork: $(ref.a2a-network.subnetSelfLink)
+    podsRange: pods
+    servicesRange: services
+    masterIpv4Cidr: 172.16.0.0/28
+    nodeCount: {{ properties["nodeCount"] }}
+    minNodeCount: {{ properties["minNodeCount"] }}
+    maxNodeCount: {{ properties["maxNodeCount"] }}
+    machineType: {{ properties["machineType"] }}
+    diskSizeGb: {{ properties["diskSizeGb"] }}
+    enableAutoUpgrade: true
+    enableAutoRepair: true
+    enableStackdriverLogging: true
+    enableStackdriverMonitoring: true
+    enableNetworkPolicy: true
+    enableWorkloadIdentity: true
+    workloadPool: {{ env["project"] }}.svc.id.goog
+    releaseChannel: {{ properties["releaseChannel"] }}
+    maintenanceWindow: "03:00"
+
+# Cloud SQL Database
+- name: a2a-cloudsql
+  type: templates/cloudsql.jinja
+  properties:
+    instanceName: $(ref.deployment.name)-db
+    region: {{ properties["region"] }}
+    databaseVersion: {{ properties["databaseVersion"] }}
+    tier: {{ properties["databaseTier"] }}
+    diskSize: {{ properties["databaseDiskSize"] }}
+    backupEnabled: true
+    backupStartTime: "02:00"
+    pointInTimeRecoveryEnabled: true
+    ipv4Enabled: false
+    privateNetwork: $(ref.a2a-network.selfLink)
+    requireSsl: true
+    databaseName: a2a_db
+    availabilityType: {{ properties["databaseAvailabilityType"] }}
+    maintenanceWindow:
+      day: 7
+      hour: 3
+    flags:
+    - name: max_connections
+      value: "{{ properties["maxDatabaseConnections"] }}"
+
+# Persistent Storage
+- name: a2a-storage
+  type: templates/storage.jinja
+  properties:
+    namespace: {{ properties["namespace"] }}
+    dataStorageSize: {{ properties["dataStorageSize"] }}
+    logStorageSize: {{ properties["logStorageSize"] }}
+    storageClass: {{ properties["storageClass"] }}
+
+# Application Deployment
+- name: a2a-deployment
+  type: compute.v1.instanceGroupManager
+  metadata:
+    dependsOn:
+    - a2a-gke-cluster
+    - a2a-network
+    - a2a-cloudsql
+    - a2a-storage
+  properties:
+    zone: {{ properties["zone"] }}
+    targetSize: {{ properties["replicas"] }}
+    baseInstanceName: a2a-instance
+    instanceTemplate: $(ref.a2a-instance-template.selfLink)
+
+# Load Balancer
+- name: a2a-loadbalancer
+  type: templates/loadbalancer.jinja
+  metadata:
+    dependsOn:
+    - a2a-deployment
+    - a2a-network
+  properties:
+    name: $(ref.deployment.name)-lb
+    region: {{ properties["region"] }}
+    network: $(ref.a2a-network.selfLink)
+    backendServicePort: 8080
+    healthCheckPath: /health
+    healthCheckPort: 8080
+    protocol: HTTP
+    enableCdn: {{ properties["enableCdn"] }}
+    enableIap: {{ properties["enableIap"] }}
+    sslDomains: {{ properties["sslDomains"] }}
+    ipAddressName: $(ref.deployment.name)-ip
+
+# Kubernetes Resources via GKE
+- name: a2a-k8s-namespace
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces
+  metadata:
+    dependsOn:
+    - a2a-gke-cluster
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)
+    namespace:
+      metadata:
+        name: {{ properties["namespace"] }}
+        labels:
+          app: a2a-erl
+
+- name: a2a-k8s-configmap
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.configMaps
+  metadata:
+    dependsOn:
+    - a2a-k8s-namespace
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    configMap:
+      metadata:
+        name: a2a-config
+        namespace: {{ properties["namespace"] }}
+      data:
+        vm.args: |
+          +S 4:4
+          +Q 65536
+          +P 1000000
+          +K true
+          +A 64
+          +hms 233
+          +MBas aobf
+          +MBlmbcs 512
+          +MEas aobf
+        sys.config: |
+          [
+            {a2a_erl, [
+              {port, 8080},
+              {host, "0.0.0.0"},
+              {scheme, "http"}
+            ]},
+            {kernel, [
+              {logger_level, info},
+              {logger, [
+                {handler, default, logger_std_h,
+                  #{level => info,
+                    formatter => {logger_formatter, #{
+                      single_line => true,
+                      template => [time, " ", level, " ", msg, "\n"]
+                    }}
+                  }
+                }
+              ]}
+            ]},
+            {sasl, [
+              {sasl_error_logger, false}
+            ]}
+          ].
+
+- name: a2a-k8s-secret
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.secrets
+  metadata:
+    dependsOn:
+    - a2a-k8s-namespace
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    secret:
+      metadata:
+        name: a2a-secret
+        namespace: {{ properties["namespace"] }}
+      type: Opaque
+      stringData:
+        erlang-cookie: {{ properties["erlangCookie"] }}
+        db-password: $(ref.a2a-cloudsql.rootPassword)
+        db-connection: $(ref.a2a-cloudsql.connectionName)
+
+- name: a2a-k8s-serviceaccount
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.serviceAccounts
+  metadata:
+    dependsOn:
+    - a2a-k8s-namespace
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    serviceAccount:
+      metadata:
+        name: {{ properties["serviceAccountName"] }}
+        namespace: {{ properties["namespace"] }}
+        annotations:
+          iam.gke.io/gcp-service-account: $(ref.a2a-iam.serviceAccountEmail)
+
+- name: a2a-k8s-deployment
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.deployments
+  metadata:
+    dependsOn:
+    - a2a-k8s-namespace
+    - a2a-k8s-configmap
+    - a2a-k8s-secret
+    - a2a-k8s-serviceaccount
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    deployment:
+      metadata:
+        name: {{ properties["name"] }}
+        namespace: {{ properties["namespace"] }}
+        labels:
+          app: a2a-erl
+          version: {{ properties["version"] }}
+      spec:
+        replicas: {{ properties["replicas"] }}
+        selector:
+          matchLabels:
+            app: a2a-erl
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        template:
+          metadata:
+            labels:
+              app: a2a-erl
+              version: {{ properties["version"] }}
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+          spec:
+            serviceAccountName: {{ properties["serviceAccountName"] }}
+            containers:
+            - name: a2a-erl
+              image: {{ properties["image"] }}
+              imagePullPolicy: Always
+              command: ['/bin/sh', '-c']
+              args: ['export RELEASE_NODE="a2a@${POD_IP}" && cd /opt/a2a_erl && exec bin/a2a_erl foreground']
+              env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: RELEASE_COOKIE
+                valueFrom:
+                  secretKeyRef:
+                    name: a2a-secret
+                    key: erlang-cookie
+              - name: PORT
+                value: "8080"
+              - name: HOST
+                value: "0.0.0.0"
+              - name: SCHEME
+                value: "http"
+              - name: DB_CONNECTION
+                valueFrom:
+                  secretKeyRef:
+                    name: a2a-secret
+                    key: db-connection
+              - name: DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: a2a-secret
+                    key: db-password
+              ports:
+              - name: http
+                containerPort: 8080
+                protocol: TCP
+              - name: epmd
+                containerPort: 4369
+                protocol: TCP
+              resources:
+                requests:
+                  memory: {{ properties["memoryRequest"] }}
+                  cpu: {{ properties["cpuRequest"] }}
+                limits:
+                  memory: {{ properties["memoryLimit"] }}
+                  cpu: {{ properties["cpuLimit"] }}
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: http
+                initialDelaySeconds: 30
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 3
+              readinessProbe:
+                httpGet:
+                  path: /health
+                  port: http
+                initialDelaySeconds: 10
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: 3
+              startupProbe:
+                httpGet:
+                  path: /health
+                  port: http
+                initialDelaySeconds: 5
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: 12
+              volumeMounts:
+              - name: config
+                mountPath: /opt/a2a_erl/config
+                readOnly: true
+              - name: tmp
+                mountPath: /tmp
+              - name: log
+                mountPath: /opt/a2a_erl/log
+              - name: data
+                mountPath: /opt/a2a_erl/data
+            volumes:
+            - name: config
+              configMap:
+                name: a2a-config
+            - name: tmp
+              emptyDir: {}
+            - name: log
+              persistentVolumeClaim:
+                claimName: a2a-log-pvc
+            - name: data
+              persistentVolumeClaim:
+                claimName: a2a-data-pvc
+
+- name: a2a-k8s-service
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.services
+  metadata:
+    dependsOn:
+    - a2a-k8s-deployment
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    service:
+      metadata:
+        name: a2a-service
+        namespace: {{ properties["namespace"] }}
+        labels:
+          app: a2a-erl
+        annotations:
+          cloud.google.com/neg: '{"ingress": true}'
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8080"
+      spec:
+        type: {{ properties["serviceType"] }}
+        selector:
+          app: a2a-erl
+        ports:
+        - name: http
+          port: 8080
+          targetPort: http
+          protocol: TCP
+        - name: epmd
+          port: 4369
+          targetPort: epmd
+          protocol: TCP
+        sessionAffinity: None
+
+- name: a2a-k8s-hpa
+  type: gcp-types/container-v1:virtual.projects.zones.clusters.namespaces.horizontalPodAutoscalers
+  metadata:
+    dependsOn:
+    - a2a-k8s-deployment
+  properties:
+    parent: projects/{{ env["project"] }}/locations/{{ properties["zone"] }}/clusters/$(ref.a2a-gke-cluster.name)/namespaces/{{ properties["namespace"] }}
+    horizontalPodAutoscaler:
+      metadata:
+        name: a2a-hpa
+        namespace: {{ properties["namespace"] }}
+      spec:
+        scaleTargetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: {{ properties["name"] }}
+        minReplicas: {{ properties["minReplicas"] }}
+        maxReplicas: {{ properties["maxReplicas"] }}
+        metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 70
+        - type: Resource
+          resource:
+            name: memory
+            target:
+              type: Utilization
+              averageUtilization: 80
+
+outputs:
+- name: clusterName
+  value: $(ref.a2a-gke-cluster.name)
+- name: clusterEndpoint
+  value: $(ref.a2a-gke-cluster.endpoint)
+- name: loadBalancerIp
+  value: $(ref.a2a-loadbalancer.ipAddress)
+- name: databaseConnectionName
+  value: $(ref.a2a-cloudsql.connectionName)
+- name: databasePrivateIp
+  value: $(ref.a2a-cloudsql.privateIp)
+- name: serviceUrl
+  value: http://$(ref.a2a-loadbalancer.ipAddress)
+- name: namespace
+  value: {{ properties["namespace"] }}
+- name: deploymentName
+  value: {{ properties["name"] }}

@@ -1,0 +1,791 @@
+apiVersion: app.k8s.io/v1beta1
+kind: Application
+metadata:
+  name: "a2a-protocol"
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ .Release.Name }}"
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    kubernetes-engine.cloud.google.com/icon: |
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="45" fill="#4285F4"/>
+        <path d="M 30,50 L 50,30 L 70,50 L 50,70 Z" fill="white"/>
+      </svg>
+    marketplace.cloud.google.com/deploy-info: '{"partner_id": "a2a-project", "product_id": "a2a-protocol", "partner_name": "A2A Project"}'
+spec:
+  descriptor:
+    type: "A2A Protocol"
+    version: "1.0.0"
+    description: |
+      Agent2Agent (A2A) Protocol - An open protocol enabling communication and interoperability between opaque agentic applications.
+
+      The A2A protocol addresses a critical challenge in the AI landscape: enabling gen AI agents, built on diverse frameworks by different companies running on separate servers, to communicate and collaborate effectively - as agents, not just as tools.
+
+      Key Features:
+      - Standardized Communication: JSON-RPC 2.0 over HTTP(S)
+      - Agent Discovery: Via "Agent Cards" detailing capabilities and connection info
+      - Flexible Interaction: Supports synchronous request/response, streaming (SSE), and asynchronous push notifications
+      - Rich Data Exchange: Handles text, files, and structured JSON data
+      - Enterprise-Ready: Designed with security, authentication, and observability in mind
+
+      With A2A, agents can:
+      - Discover each other's capabilities
+      - Negotiate interaction modalities (text, forms, media)
+      - Securely collaborate on long-running tasks
+      - Operate without exposing their internal state, memory, or tools
+    maintainers:
+      - name: "A2A Project"
+        url: "https://a2a-protocol.org"
+        email: "info@a2a-protocol.org"
+    owners:
+      - name: "A2A Project"
+        url: "https://a2a-protocol.org"
+    keywords:
+      - "ai"
+      - "agents"
+      - "protocol"
+      - "a2a"
+      - "agent2agent"
+      - "communication"
+      - "interoperability"
+      - "json-rpc"
+      - "microservices"
+      - "distributed-systems"
+    links:
+      - description: "About A2A Protocol"
+        url: "https://a2a-protocol.org"
+      - description: "Documentation"
+        url: "https://a2a-protocol.org/latest/specification/"
+      - description: "GitHub Repository"
+        url: "https://github.com/a2aproject/A2A"
+      - description: "Python SDK"
+        url: "https://github.com/a2aproject/a2a-python"
+      - description: "Go SDK"
+        url: "https://github.com/a2aproject/a2a-go"
+      - description: "JavaScript SDK"
+        url: "https://github.com/a2aproject/a2a-js"
+      - description: "Community Discussions"
+        url: "https://github.com/a2aproject/A2A/discussions"
+    notes: |
+      ## Getting Started
+
+      After deployment, you can:
+
+      1. Access the A2A Protocol service via the LoadBalancer IP
+      2. View the deployed resources in your GKE cluster
+      3. Configure agents to communicate using the A2A protocol
+      4. Explore the API documentation at https://a2a-protocol.org
+
+      ## Configuration
+
+      The deployment includes:
+      - Highly available multi-replica deployment
+      - Persistent storage for agent state
+      - Health monitoring and readiness checks
+      - Horizontal pod autoscaling (optional)
+      - Network policies for security
+      - Service mesh integration ready
+
+      ## Support
+
+      For support and questions:
+      - Documentation: https://a2a-protocol.org
+      - GitHub Issues: https://github.com/a2aproject/A2A/issues
+      - Community Forum: https://github.com/a2aproject/A2A/discussions
+
+      ## License
+
+      The A2A Protocol is licensed under the Apache License 2.0.
+  info:
+    - name: "Application Name"
+      value: "{{ .Release.Name }}"
+    - name: "Namespace"
+      value: "{{ .Release.Namespace }}"
+    - name: "A2A Protocol Version"
+      value: "1.0.0"
+    - name: "Service Type"
+      value: "LoadBalancer"
+    - name: "Replicas"
+      type: "Reference"
+      valueFrom:
+        configMapKeyRef:
+          name: "{{ .Release.Name }}-config"
+          key: "replicas"
+    - name: "Service Endpoint"
+      type: "Reference"
+      valueFrom:
+        serviceRef:
+          name: "{{ .Release.Name }}-service"
+    - name: "Service Port"
+      value: "80"
+    - name: "Documentation"
+      value: "https://a2a-protocol.org"
+    - name: "GitHub Repository"
+      value: "https://github.com/a2aproject/A2A"
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ .Release.Name }}"
+  componentKinds:
+    - group: ""
+      kind: "Service"
+    - group: "apps"
+      kind: "Deployment"
+    - group: ""
+      kind: "ConfigMap"
+    - group: ""
+      kind: "Secret"
+    - group: ""
+      kind: "ServiceAccount"
+    - group: "rbac.authorization.k8s.io"
+      kind: "Role"
+    - group: "rbac.authorization.k8s.io"
+      kind: "RoleBinding"
+    - group: ""
+      kind: "PersistentVolumeClaim"
+    - group: "networking.k8s.io"
+      kind: "Ingress"
+    - group: "policy"
+      kind: "PodDisruptionBudget"
+    - group: "autoscaling"
+      kind: "HorizontalPodAutoscaler"
+    - group: "networking.k8s.io"
+      kind: "NetworkPolicy"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-deployer-config"
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ .Release.Name }}"
+    app.kubernetes.io/component: "deployer"
+data:
+  schema.yaml: |
+    applicationApiVersion: v1beta1
+
+    properties:
+      name:
+        type: string
+        x-google-marketplace:
+          type: NAME
+        title: Application name
+        description: The name of the A2A Protocol application instance
+        default: "a2a-protocol"
+        maxLength: 63
+        pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+      namespace:
+        type: string
+        x-google-marketplace:
+          type: NAMESPACE
+        title: Namespace
+        description: Kubernetes namespace for the A2A Protocol deployment
+        default: "default"
+
+      image.registry:
+        type: string
+        default: gcr.io
+        title: Image registry
+        description: Docker image registry for A2A Protocol
+
+      image.repository:
+        type: string
+        x-google-marketplace:
+          type: IMAGE
+          image:
+            generatedProperties:
+              splitByColon:
+                before: image.repository
+                after: image.tag
+        title: Image repository
+        description: Docker image repository and tag
+        default: "gcr.io/YOUR_PROJECT_ID/a2a:latest"
+
+      image.tag:
+        type: string
+        title: Image tag
+        description: Docker image tag
+        default: "latest"
+
+      image.pullPolicy:
+        type: string
+        title: Image pull policy
+        description: Kubernetes image pull policy
+        default: "IfNotPresent"
+        enum:
+          - "Always"
+          - "IfNotPresent"
+          - "Never"
+
+      replicaCount:
+        type: integer
+        title: Number of replicas
+        description: Number of A2A Protocol server replicas to deploy
+        default: 3
+        minimum: 1
+        maximum: 100
+
+      serviceAccount.name:
+        type: string
+        title: Service account
+        x-google-marketplace:
+          type: SERVICE_ACCOUNT
+          serviceAccount:
+            description: Service account for A2A Protocol pods
+            roles:
+              - type: Role
+                rulesType: CUSTOM
+                rules:
+                  - apiGroups: [""]
+                    resources: ["configmaps", "secrets", "services", "endpoints"]
+                    verbs: ["get", "list", "watch"]
+                  - apiGroups: [""]
+                    resources: ["pods"]
+                    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+                  - apiGroups: ["apps"]
+                    resources: ["deployments", "replicasets"]
+                    verbs: ["get", "list", "watch"]
+                  - apiGroups: [""]
+                    resources: ["events"]
+                    verbs: ["create", "patch"]
+              - type: ClusterRole
+                rulesType: CUSTOM
+                rules:
+                  - apiGroups: [""]
+                    resources: ["nodes"]
+                    verbs: ["get", "list", "watch"]
+        description: Service account with permissions for A2A Protocol operations
+
+      deployerServiceAccount:
+        type: string
+        x-google-marketplace:
+          type: DEPLOYER_IMAGE
+        title: Deployer service account
+        description: Service account used by the deployer job
+
+      resources.requests.cpu:
+        type: string
+        title: CPU request
+        description: CPU resource request per pod
+        default: "250m"
+        pattern: "^[0-9]+m?$"
+
+      resources.requests.memory:
+        type: string
+        title: Memory request
+        description: Memory resource request per pod
+        default: "512Mi"
+        pattern: "^[0-9]+[EPTGMK]i?$"
+
+      resources.limits.cpu:
+        type: string
+        title: CPU limit
+        description: CPU resource limit per pod
+        default: "1000m"
+        pattern: "^[0-9]+m?$"
+
+      resources.limits.memory:
+        type: string
+        title: Memory limit
+        description: Memory resource limit per pod
+        default: "1Gi"
+        pattern: "^[0-9]+[EPTGMK]i?$"
+
+      service.type:
+        type: string
+        title: Service type
+        description: Kubernetes service type for A2A Protocol
+        default: "LoadBalancer"
+        enum:
+          - "ClusterIP"
+          - "NodePort"
+          - "LoadBalancer"
+
+      service.port:
+        type: integer
+        title: Service port
+        description: External service port
+        default: 80
+        minimum: 1
+        maximum: 65535
+
+      service.targetPort:
+        type: integer
+        title: Target port
+        description: Container port
+        default: 8080
+        minimum: 1
+        maximum: 65535
+
+      persistence.enabled:
+        type: boolean
+        title: Enable persistence
+        description: Enable persistent storage for agent data
+        default: true
+
+      persistence.storageClass:
+        type: string
+        title: Storage class
+        x-google-marketplace:
+          type: STORAGE_CLASS
+          storageClass:
+            type: SSD
+        description: Storage class for persistent volumes
+        default: "standard-rwo"
+
+      persistence.size:
+        type: string
+        title: Storage size
+        description: Size of persistent volume
+        default: "10Gi"
+        pattern: "^[0-9]+[EPTGMK]i?$"
+
+      persistence.accessMode:
+        type: string
+        title: Access mode
+        description: Persistent volume access mode
+        default: "ReadWriteOnce"
+        enum:
+          - "ReadWriteOnce"
+          - "ReadOnlyMany"
+          - "ReadWriteMany"
+
+      autoscaling.enabled:
+        type: boolean
+        title: Enable autoscaling
+        description: Enable horizontal pod autoscaling
+        default: false
+
+      autoscaling.minReplicas:
+        type: integer
+        title: Minimum replicas
+        description: Minimum number of replicas for autoscaling
+        default: 2
+        minimum: 1
+        maximum: 100
+
+      autoscaling.maxReplicas:
+        type: integer
+        title: Maximum replicas
+        description: Maximum number of replicas for autoscaling
+        default: 10
+        minimum: 1
+        maximum: 100
+
+      autoscaling.targetCPUUtilizationPercentage:
+        type: integer
+        title: Target CPU utilization
+        description: Target CPU utilization percentage for autoscaling
+        default: 70
+        minimum: 1
+        maximum: 100
+
+      autoscaling.targetMemoryUtilizationPercentage:
+        type: integer
+        title: Target memory utilization
+        description: Target memory utilization percentage for autoscaling
+        default: 80
+        minimum: 1
+        maximum: 100
+
+      ingress.enabled:
+        type: boolean
+        title: Enable ingress
+        description: Enable ingress for external access
+        default: true
+
+      ingress.className:
+        type: string
+        title: Ingress class
+        description: Ingress class name
+        default: "gce"
+        enum:
+          - "gce"
+          - "nginx"
+          - "traefik"
+
+      ingress.ssl.enabled:
+        type: boolean
+        title: Enable SSL
+        description: Enable SSL/TLS for ingress
+        default: true
+
+      tls.enabled:
+        type: boolean
+        title: Enable TLS
+        description: Enable TLS encryption for A2A Protocol communication
+        default: false
+
+      certificate:
+        type: string
+        x-google-marketplace:
+          type: TLS_CERTIFICATE
+          tlsCertificate:
+            generatedProperties:
+              base64EncodedPrivateKey: tls.base64EncodedPrivateKey
+              base64EncodedCertificate: tls.base64EncodedCertificate
+        title: TLS certificate
+        description: TLS certificate for secure communication
+
+      monitoring.enabled:
+        type: boolean
+        title: Enable monitoring
+        description: Enable Prometheus monitoring
+        default: true
+
+      monitoring.serviceMonitor.enabled:
+        type: boolean
+        title: Enable ServiceMonitor
+        description: Create ServiceMonitor resource for Prometheus Operator
+        default: false
+
+      security.podSecurityContext.runAsNonRoot:
+        type: boolean
+        title: Run as non-root
+        description: Run containers as non-root user
+        default: true
+
+      security.podSecurityContext.runAsUser:
+        type: integer
+        title: Run as user ID
+        description: User ID to run containers as
+        default: 1000
+        minimum: 1
+        maximum: 65535
+
+      security.podSecurityContext.fsGroup:
+        type: integer
+        title: Filesystem group ID
+        description: Group ID for filesystem permissions
+        default: 1000
+        minimum: 1
+        maximum: 65535
+
+      security.securityContext.allowPrivilegeEscalation:
+        type: boolean
+        title: Allow privilege escalation
+        description: Allow containers to gain more privileges
+        default: false
+
+      networkPolicy.enabled:
+        type: boolean
+        title: Enable network policy
+        description: Enable Kubernetes network policies
+        default: false
+
+      protocol.maxMessageSize:
+        type: integer
+        title: Max message size
+        description: Maximum message size in bytes for A2A protocol
+        default: 1048576
+        minimum: 1024
+        maximum: 104857600
+
+      protocol.timeout:
+        type: integer
+        title: Protocol timeout
+        description: Default timeout for protocol operations in seconds
+        default: 30
+        minimum: 1
+        maximum: 300
+
+      protocol.retryAttempts:
+        type: integer
+        title: Retry attempts
+        description: Number of retry attempts for failed operations
+        default: 3
+        minimum: 0
+        maximum: 10
+
+      agents.discovery.enabled:
+        type: boolean
+        title: Enable agent discovery
+        description: Enable agent discovery mechanism
+        default: true
+
+      agents.registry.enabled:
+        type: boolean
+        title: Enable agent registry
+        description: Enable centralized agent registry
+        default: true
+
+      gcp.projectId:
+        type: string
+        title: GCP project ID
+        description: Google Cloud Platform project ID
+        default: ""
+
+      gcp.region:
+        type: string
+        title: GCP region
+        description: Google Cloud Platform region
+        default: "us-central1"
+        enum:
+          - "us-central1"
+          - "us-east1"
+          - "us-west1"
+          - "europe-west1"
+          - "europe-west2"
+          - "asia-east1"
+          - "asia-northeast1"
+          - "asia-southeast1"
+
+      gcp.workloadIdentity:
+        type: boolean
+        title: Enable Workload Identity
+        description: Enable GCP Workload Identity for service authentication
+        default: false
+
+      gcp.stackdriver:
+        type: boolean
+        title: Enable Stackdriver
+        description: Enable Google Cloud Stackdriver integration
+        default: true
+
+      gcp.cloudLogging:
+        type: boolean
+        title: Enable Cloud Logging
+        description: Enable Google Cloud Logging
+        default: true
+
+      gcp.cloudMonitoring:
+        type: boolean
+        title: Enable Cloud Monitoring
+        description: Enable Google Cloud Monitoring
+        default: true
+
+      logging.level:
+        type: string
+        title: Log level
+        description: Application logging level
+        default: "info"
+        enum:
+          - "debug"
+          - "info"
+          - "warn"
+          - "error"
+
+      logging.format:
+        type: string
+        title: Log format
+        description: Application log format
+        default: "json"
+        enum:
+          - "json"
+          - "text"
+
+      reportingSecret:
+        type: string
+        x-google-marketplace:
+          type: REPORTING_SECRET
+        title: Reporting secret
+        description: Secret for usage reporting to Google
+
+    required:
+      - name
+      - namespace
+      - image.repository
+      - serviceAccount.name
+      - deployerServiceAccount
+      - replicaCount
+      - service.type
+      - service.port
+
+    form:
+      - widget: help
+        description: |
+          <h3>A2A Protocol - Agent Communication Platform</h3>
+          <p>Deploy the Agent2Agent protocol infrastructure to enable seamless communication between AI agents.</p>
+
+      - widget: section
+        title: Basic Configuration
+        description: Core settings for your A2A Protocol deployment
+        properties:
+          - name
+          - namespace
+          - replicaCount
+
+      - widget: section
+        title: Container Image
+        description: Docker image configuration
+        properties:
+          - image.registry
+          - image.repository
+          - image.tag
+          - image.pullPolicy
+
+      - widget: section
+        title: Service Configuration
+        description: Kubernetes service settings
+        properties:
+          - service.type
+          - service.port
+          - service.targetPort
+
+      - widget: section
+        title: Resource Allocation
+        description: CPU and memory resources for pods
+        properties:
+          - resources.requests.cpu
+          - resources.requests.memory
+          - resources.limits.cpu
+          - resources.limits.memory
+
+      - widget: section
+        title: Storage Configuration
+        description: Persistent storage settings for agent data
+        properties:
+          - persistence.enabled
+          - persistence.storageClass
+          - persistence.size
+          - persistence.accessMode
+
+      - widget: section
+        title: Autoscaling
+        description: Horizontal pod autoscaling configuration
+        properties:
+          - autoscaling.enabled
+          - autoscaling.minReplicas
+          - autoscaling.maxReplicas
+          - autoscaling.targetCPUUtilizationPercentage
+          - autoscaling.targetMemoryUtilizationPercentage
+
+      - widget: section
+        title: Ingress & TLS
+        description: External access and TLS configuration
+        properties:
+          - ingress.enabled
+          - ingress.className
+          - ingress.ssl.enabled
+          - tls.enabled
+          - certificate
+
+      - widget: section
+        title: A2A Protocol Settings
+        description: Protocol-specific configuration
+        properties:
+          - protocol.maxMessageSize
+          - protocol.timeout
+          - protocol.retryAttempts
+          - agents.discovery.enabled
+          - agents.registry.enabled
+
+      - widget: section
+        title: Security Settings
+        description: Pod and container security configuration
+        properties:
+          - security.podSecurityContext.runAsNonRoot
+          - security.podSecurityContext.runAsUser
+          - security.podSecurityContext.fsGroup
+          - security.securityContext.allowPrivilegeEscalation
+          - networkPolicy.enabled
+
+      - widget: section
+        title: Monitoring & Logging
+        description: Observability configuration
+        properties:
+          - monitoring.enabled
+          - monitoring.serviceMonitor.enabled
+          - logging.level
+          - logging.format
+
+      - widget: section
+        title: Google Cloud Platform
+        description: GCP-specific integration settings
+        properties:
+          - gcp.projectId
+          - gcp.region
+          - gcp.workloadIdentity
+          - gcp.stackdriver
+          - gcp.cloudLogging
+          - gcp.cloudMonitoring
+
+      - widget: help
+        description: |
+          <h4>Next Steps</h4>
+          <ul>
+            <li>Configure your deployment parameters above</li>
+            <li>Review the resource requirements</li>
+            <li>Click "Deploy" to install the A2A Protocol</li>
+            <li>Access the service via the LoadBalancer IP</li>
+            <li>Visit <a href="https://a2a-protocol.org" target="_blank">a2a-protocol.org</a> for documentation</li>
+          </ul>
+
+    x-google-marketplace:
+      clusterConstraints:
+        resources:
+          - replicas: 3
+            requests:
+              cpu: 750m
+              memory: 1536Mi
+            affinity:
+              simpleNodeAffinity:
+                type: REQUIRE_MINIMUM_NODE_COUNT
+                minimumNodeCount: 3
+        istio:
+          type: OPTIONAL
+        gcp:
+          nodes:
+            requiredOauthScopes:
+              - "https://www.googleapis.com/auth/cloud-platform"
+              - "https://www.googleapis.com/auth/compute"
+              - "https://www.googleapis.com/auth/devstorage.read_only"
+              - "https://www.googleapis.com/auth/logging.write"
+              - "https://www.googleapis.com/auth/monitoring"
+
+      publishedVersion: "1.0.0"
+      publishedVersionMetadata:
+        releaseNote: >-
+          Initial release of A2A Protocol for GCP Marketplace.
+          Features include agent discovery, standardized communication,
+          flexible interaction modes, and enterprise-ready security.
+        releaseTypes:
+          - "Feature"
+        recommended: true
+
+      images:
+        "":
+          properties:
+            image.repository:
+              type: FULL
+        deployer:
+          properties:
+            deployerServiceAccount:
+              type: FULL
+
+      deployerServiceAccount:
+        description: >
+          Service account used by the Application CRD controller to deploy
+          the A2A Protocol application into the cluster.
+        roles:
+          - type: ClusterRole
+            rulesType: CUSTOM
+            rules:
+              - apiGroups: ["app.k8s.io"]
+                resources: ["applications"]
+                verbs: ["get", "list", "create", "update", "patch", "watch"]
+              - apiGroups: [""]
+                resources: ["services", "configmaps", "secrets", "serviceaccounts", "persistentvolumeclaims", "events"]
+                verbs: ["*"]
+              - apiGroups: ["apps"]
+                resources: ["deployments", "statefulsets", "replicasets"]
+                verbs: ["*"]
+              - apiGroups: ["batch"]
+                resources: ["jobs"]
+                verbs: ["*"]
+              - apiGroups: ["rbac.authorization.k8s.io"]
+                resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+                verbs: ["*"]
+              - apiGroups: ["networking.k8s.io"]
+                resources: ["ingresses", "networkpolicies"]
+                verbs: ["*"]
+              - apiGroups: ["policy"]
+                resources: ["poddisruptionbudgets"]
+                verbs: ["*"]
+              - apiGroups: ["autoscaling"]
+                resources: ["horizontalpodautoscalers"]
+                verbs: ["*"]
+              - apiGroups: ["monitoring.coreos.com"]
+                resources: ["servicemonitors", "podmonitors"]
+                verbs: ["*"]

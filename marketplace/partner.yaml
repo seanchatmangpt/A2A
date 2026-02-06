@@ -1,0 +1,294 @@
+# GCP Partner Portal Metadata for A2A Protocol
+apiVersion: v1
+kind: PartnerMetadata
+
+# Partner Information
+partner:
+  name: "A2A Protocol"
+  displayName: "Agent2Agent Protocol"
+  companyName: "Linux Foundation / Google"
+  website: "https://a2a-protocol.org"
+  contactEmail: "support@a2a-protocol.org"
+  supportUrl: "https://github.com/a2aproject/A2A/discussions"
+  documentationUrl: "https://a2a-protocol.org/latest/specification/"
+  privacyPolicyUrl: "https://a2a-protocol.org/privacy"
+  termsOfServiceUrl: "https://a2a-protocol.org/terms"
+
+# Solution Details
+solution:
+  id: "a2a-protocol"
+  name: "Agent2Agent (A2A) Protocol"
+  version: "1.0.0"
+  shortDescription: "Open protocol enabling communication and interoperability between AI agentic applications"
+  fullDescription: |
+    The Agent2Agent (A2A) protocol addresses a critical challenge in the AI landscape: enabling
+    gen AI agents, built on diverse frameworks by different companies running on separate servers,
+    to communicate and collaborate effectively - as agents, not just as tools.
+
+    A2A provides a common language for agents, fostering a more interconnected, powerful, and
+    innovative AI ecosystem. With A2A, agents can discover each other's capabilities, negotiate
+    interaction modalities (text, forms, media), securely collaborate on long-running tasks, and
+    operate without exposing their internal state, memory, or tools.
+
+    Key Benefits:
+    - Break Down Silos: Connect agents across different ecosystems
+    - Enable Complex Collaboration: Allow specialized agents to work together
+    - Promote Open Standards: Foster community-driven approach
+    - Preserve Opacity: Collaborate without sharing internal memory or proprietary logic
+
+    Features:
+    - Standardized Communication: JSON-RPC 2.0 over HTTP(S)
+    - Agent Discovery: Via "Agent Cards" detailing capabilities
+    - Flexible Interaction: Synchronous, streaming (SSE), and asynchronous push notifications
+    - Rich Data Exchange: Handles text, files, and structured JSON data
+    - Enterprise-Ready: Designed with security, authentication, and observability
+
+  logo:
+    url: "https://raw.githubusercontent.com/a2aproject/A2A/main/docs/assets/a2a-logo-black.svg"
+    altText: "A2A Protocol Logo"
+
+  screenshots:
+    - url: "https://a2a-protocol.org/assets/screenshot1.png"
+      caption: "Agent-to-Agent Communication Flow"
+    - url: "https://a2a-protocol.org/assets/screenshot2.png"
+      caption: "Agent Card Discovery"
+    - url: "https://a2a-protocol.org/assets/screenshot3.png"
+      caption: "Multi-Agent Collaboration"
+
+  videoUrl: "https://goo.gle/a2a-video"
+  demoUrl: "https://github.com/a2aproject/a2a-samples"
+
+# Categories and Tags
+categories:
+  primary: "AI and Machine Learning"
+  secondary:
+    - "Application Development"
+    - "API Management"
+    - "Networking"
+    - "Developer Tools"
+
+  tags:
+    - "AI Agents"
+    - "Agent Communication"
+    - "Multi-Agent Systems"
+    - "Protocol"
+    - "Interoperability"
+    - "JSON-RPC"
+    - "API"
+    - "Open Source"
+    - "Generative AI"
+    - "LLM"
+    - "Agent Orchestration"
+    - "Enterprise AI"
+
+# Technical Specifications
+technical:
+  protocol: "JSON-RPC 2.0"
+  transport: "HTTP/HTTPS"
+  supportedLanguages:
+    - name: "Python"
+      sdk: "a2a-sdk"
+      packageManager: "pip"
+      repository: "https://github.com/a2aproject/a2a-python"
+    - name: "Go"
+      sdk: "a2a-go"
+      packageManager: "go get"
+      repository: "https://github.com/a2aproject/a2a-go"
+    - name: "JavaScript/TypeScript"
+      sdk: "@a2a-js/sdk"
+      packageManager: "npm"
+      repository: "https://github.com/a2aproject/a2a-js"
+    - name: "Java"
+      sdk: "a2a-java"
+      packageManager: "maven"
+      repository: "https://github.com/a2aproject/a2a-java"
+    - name: ".NET"
+      sdk: "A2A"
+      packageManager: "nuget"
+      repository: "https://github.com/a2aproject/a2a-dotnet"
+    - name: "Erlang"
+      sdk: "a2a_erl"
+      packageManager: "rebar3"
+      repository: "https://github.com/a2aproject/A2A/tree/main/erlang"
+
+  gcpIntegration:
+    services:
+      - "Compute Engine"
+      - "Google Kubernetes Engine (GKE)"
+      - "Cloud Run"
+      - "Cloud Functions"
+      - "Vertex AI"
+      - "Cloud Load Balancing"
+      - "Cloud Logging"
+      - "Cloud Monitoring"
+      - "Secret Manager"
+      - "Cloud Storage"
+
+    authentication:
+      - "OAuth 2.0"
+      - "API Keys"
+      - "Service Accounts"
+      - "Workload Identity"
+
+    deployment:
+      - type: "Kubernetes"
+        helm: true
+        helmRepository: "https://github.com/a2aproject/A2A/tree/main/infrastructure/kubernetes/helm"
+      - type: "Docker"
+        container: true
+        registry: "gcr.io/a2a-protocol"
+      - type: "Cloud Run"
+        managed: true
+
+# Pricing and Licensing
+pricing:
+  model: "Free"
+  license: "Apache License 2.0"
+  type: "Open Source"
+  cost: "$0.00"
+  notes: |
+    A2A Protocol is completely free and open source. Licensed under Apache 2.0.
+    No licensing fees, subscription costs, or usage charges.
+
+# Support Information
+support:
+  tiers:
+    - name: "Community"
+      description: "Community-driven support via GitHub"
+      channels:
+        - type: "GitHub Discussions"
+          url: "https://github.com/a2aproject/A2A/discussions"
+          responseTime: "Best effort"
+        - type: "GitHub Issues"
+          url: "https://github.com/a2aproject/A2A/issues"
+          responseTime: "Best effort"
+        - type: "Documentation"
+          url: "https://a2a-protocol.org"
+          availability: "24/7"
+      cost: "Free"
+
+    - name: "Partner Program"
+      description: "Enterprise support for Google Cloud customers"
+      channels:
+        - type: "Partner Program"
+          url: "https://goo.gle/a2a-partner"
+          responseTime: "1-2 business days"
+        - type: "Private Feedback"
+          url: "https://goo.gle/a2a-feedback"
+          responseTime: "1-2 business days"
+      cost: "Available for GCP customers"
+      features:
+        - "Priority support"
+        - "Architecture guidance"
+        - "Integration assistance"
+        - "Custom development support"
+
+  contactMethods:
+    - type: "Email"
+      value: "support@a2a-protocol.org"
+      availability: "Business hours (9 AM - 5 PM PT)"
+    - type: "GitHub"
+      value: "https://github.com/a2aproject/A2A"
+      availability: "24/7"
+    - type: "Documentation"
+      value: "https://a2a-protocol.org"
+      availability: "24/7"
+
+# Compliance and Security
+compliance:
+  certifications: []
+  dataResidency: "Customer-controlled"
+  encryption:
+    inTransit: true
+    atRest: "Customer-controlled"
+  securityFeatures:
+    - "OAuth 2.0 authentication"
+    - "API key management"
+    - "TLS/HTTPS transport"
+    - "Secure agent discovery"
+    - "Opacity-preserving design"
+    - "No internal state exposure"
+
+  privacyFeatures:
+    - "No telemetry by default"
+    - "No data collection"
+    - "Customer-controlled deployments"
+    - "Agent memory isolation"
+
+# Use Cases
+useCases:
+  - title: "Multi-Agent Workflow Orchestration"
+    description: |
+      Coordinate multiple specialized AI agents to complete complex tasks requiring
+      diverse capabilities across different domains and organizations.
+    industries: ["Technology", "Finance", "Healthcare", "Retail"]
+
+  - title: "Cross-Platform Agent Integration"
+    description: |
+      Enable agents built on different frameworks (LangChain, AutoGPT, etc.) to
+      communicate and collaborate seamlessly.
+    industries: ["Technology", "SaaS", "Enterprise Software"]
+
+  - title: "Enterprise AI Agent Ecosystem"
+    description: |
+      Build internal agent networks where specialized agents handle different business
+      functions while maintaining security and compliance.
+    industries: ["Enterprise", "Finance", "Healthcare", "Government"]
+
+  - title: "Third-Party Agent Marketplace"
+    description: |
+      Create ecosystems where agents from different vendors can discover and interact
+      with each other to provide enhanced services.
+    industries: ["Technology", "SaaS", "Cloud Services"]
+
+  - title: "AI Agent Development Platform"
+    description: |
+      Build development platforms that enable developers to create interoperable
+      agents using standardized protocols.
+    industries: ["Developer Tools", "Cloud Services", "Technology"]
+
+# Resources
+resources:
+  documentation:
+    - title: "Protocol Specification"
+      url: "https://a2a-protocol.org/latest/specification/"
+      type: "Technical Documentation"
+    - title: "Getting Started Guide"
+      url: "https://a2a-protocol.org/getting-started/"
+      type: "Tutorial"
+    - title: "SDK Documentation"
+      url: "https://a2a-protocol.org/sdks/"
+      type: "API Reference"
+
+  samples:
+    - title: "A2A Samples Repository"
+      url: "https://github.com/a2aproject/a2a-samples"
+      description: "Example implementations and use cases"
+    - title: "Python SDK Examples"
+      url: "https://github.com/a2aproject/a2a-python/tree/main/examples"
+      description: "Python implementation examples"
+    - title: "Kubernetes Deployment"
+      url: "https://github.com/a2aproject/A2A/tree/main/infrastructure/kubernetes/helm"
+      description: "Helm charts for Kubernetes deployment"
+
+  community:
+    - title: "GitHub Organization"
+      url: "https://github.com/a2aproject"
+      type: "Source Code"
+    - title: "Discussion Forum"
+      url: "https://github.com/a2aproject/A2A/discussions"
+      type: "Community"
+    - title: "Issue Tracker"
+      url: "https://github.com/a2aproject/A2A/issues"
+      type: "Support"
+
+# Metadata
+metadata:
+  lastUpdated: "2026-02-06"
+  version: "1.0.0"
+  status: "Active"
+  publishDate: "2024-01-01"
+  gcpMarketplace:
+    eligible: true
+    listingType: "Free"
+    deploymentType: "Self-Managed"

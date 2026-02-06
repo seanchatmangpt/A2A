@@ -1,0 +1,421 @@
+version: "1.0"
+metadata:
+  name: marketplace-metering-config
+  description: Usage metrics and consumption tracking for marketplace billing
+  created: 2026-02-06
+  revision: 1
+
+metering:
+  enabled: true
+  billing_mode: consumption
+  currency: USD
+  timezone: UTC
+
+usage_metrics:
+  compute:
+    - name: cpu_hours
+      unit: vcpu_hours
+      description: Virtual CPU hours consumed
+      type: gauge
+      aggregation: sum
+      precision: 4
+      billing_factor: 1.0
+      minimum_charge: 0.01
+
+    - name: memory_gb_hours
+      unit: gb_hours
+      description: Memory gigabyte-hours consumed
+      type: gauge
+      aggregation: sum
+      precision: 4
+      billing_factor: 1.0
+      minimum_charge: 0.001
+
+    - name: gpu_hours
+      unit: gpu_hours
+      description: GPU hours consumed
+      type: gauge
+      aggregation: sum
+      precision: 4
+      billing_factor: 5.0
+      minimum_charge: 0.1
+
+  storage:
+    - name: block_storage_gb
+      unit: gb
+      description: Block storage in gigabytes
+      type: gauge
+      aggregation: average
+      precision: 2
+      billing_factor: 0.1
+      minimum_charge: 0.01
+
+    - name: object_storage_gb
+      unit: gb
+      description: Object storage in gigabytes
+      type: gauge
+      aggregation: average
+      precision: 2
+      billing_factor: 0.05
+      minimum_charge: 0.01
+
+    - name: backup_storage_gb
+      unit: gb
+      description: Backup storage in gigabytes
+      type: gauge
+      aggregation: average
+      precision: 2
+      billing_factor: 0.03
+      minimum_charge: 0.01
+
+  network:
+    - name: data_transfer_gb
+      unit: gb
+      description: Data transfer in gigabytes
+      type: counter
+      aggregation: sum
+      precision: 3
+      billing_factor: 0.12
+      minimum_charge: 0.01
+
+    - name: bandwidth_mbps
+      unit: mbps
+      description: Network bandwidth in megabits per second
+      type: gauge
+      aggregation: peak
+      precision: 2
+      billing_factor: 0.05
+      minimum_charge: 0.0
+
+  api:
+    - name: api_requests
+      unit: requests
+      description: Total API requests
+      type: counter
+      aggregation: sum
+      precision: 0
+      billing_factor: 0.0001
+      minimum_charge: 0.0
+      free_tier: 10000
+
+    - name: api_requests_authenticated
+      unit: requests
+      description: Authenticated API requests
+      type: counter
+      aggregation: sum
+      precision: 0
+      billing_factor: 0.0002
+      minimum_charge: 0.0
+
+  transactions:
+    - name: database_operations
+      unit: operations
+      description: Database read/write operations
+      type: counter
+      aggregation: sum
+      precision: 0
+      billing_factor: 0.00001
+      minimum_charge: 0.0
+      free_tier: 100000
+
+    - name: message_queue_operations
+      unit: messages
+      description: Message queue operations
+      type: counter
+      aggregation: sum
+      precision: 0
+      billing_factor: 0.00002
+      minimum_charge: 0.0
+
+  custom:
+    - name: function_invocations
+      unit: invocations
+      description: Serverless function invocations
+      type: counter
+      aggregation: sum
+      precision: 0
+      billing_factor: 0.0003
+      minimum_charge: 0.0
+      free_tier: 1000
+
+    - name: container_instances
+      unit: instances
+      description: Container instances running
+      type: gauge
+      aggregation: average
+      precision: 2
+      billing_factor: 0.5
+      minimum_charge: 0.0
+
+reporting_intervals:
+  collection:
+    frequency: 60
+    unit: seconds
+    batch_size: 1000
+    retry_attempts: 3
+    retry_delay: 30
+
+  aggregation:
+    frequency: 300
+    unit: seconds
+    window_size: 3600
+    overlap: 0
+
+  reporting:
+    frequency: hourly
+    schedules:
+      - name: hourly
+        interval: 3600
+        unit: seconds
+        enabled: true
+        format: json
+
+      - name: daily
+        interval: 86400
+        unit: seconds
+        enabled: true
+        format: json
+        rollup: true
+
+      - name: monthly
+        interval: monthly
+        unit: calendar
+        enabled: true
+        format: json
+        rollup: true
+        finalization_delay: 86400
+
+  delivery:
+    method: push
+    endpoint: /api/v1/metering/reports
+    authentication: bearer_token
+    retry_policy:
+      max_attempts: 5
+      backoff_strategy: exponential
+      initial_delay: 60
+      max_delay: 3600
+
+consumption_tracking:
+  persistence:
+    enabled: true
+    storage_backend: postgresql
+    retention_days: 395
+    compression: true
+    encryption: true
+
+  audit:
+    enabled: true
+    log_level: info
+    include_metadata: true
+    sample_rate: 1.0
+
+  quotas:
+    enabled: true
+    enforcement: soft
+    notification_thresholds:
+      - percentage: 75
+        action: notify
+        channels:
+          - email
+          - webhook
+
+      - percentage: 90
+        action: notify
+        channels:
+          - email
+          - webhook
+          - sms
+
+      - percentage: 100
+        action: throttle
+        channels:
+          - email
+          - webhook
+          - sms
+
+  billing_cycles:
+    - name: default
+      period: monthly
+      start_day: 1
+      timezone: UTC
+      proration: enabled
+      grace_period_hours: 24
+
+    - name: annual
+      period: yearly
+      start_month: 1
+      start_day: 1
+      timezone: UTC
+      proration: enabled
+      grace_period_hours: 72
+
+  cost_allocation:
+    enabled: true
+    tag_based: true
+    required_tags:
+      - environment
+      - project
+      - cost_center
+    optional_tags:
+      - team
+      - application
+      - owner
+    default_allocation: untagged
+
+  usage_limits:
+    cpu_hours:
+      soft_limit: 1000
+      hard_limit: 1500
+      unit: hours
+      period: monthly
+
+    memory_gb_hours:
+      soft_limit: 2000
+      hard_limit: 3000
+      unit: gb_hours
+      period: monthly
+
+    data_transfer_gb:
+      soft_limit: 5000
+      hard_limit: 10000
+      unit: gb
+      period: monthly
+
+    api_requests:
+      soft_limit: 1000000
+      hard_limit: 2000000
+      unit: requests
+      period: monthly
+
+  tier_tracking:
+    enabled: true
+    tiers:
+      - name: free
+        limits:
+          cpu_hours: 100
+          memory_gb_hours: 200
+          storage_gb: 50
+          api_requests: 10000
+
+      - name: basic
+        limits:
+          cpu_hours: 1000
+          memory_gb_hours: 2000
+          storage_gb: 500
+          api_requests: 100000
+
+      - name: standard
+        limits:
+          cpu_hours: 5000
+          memory_gb_hours: 10000
+          storage_gb: 2000
+          api_requests: 1000000
+
+      - name: premium
+        limits:
+          cpu_hours: unlimited
+          memory_gb_hours: unlimited
+          storage_gb: unlimited
+          api_requests: unlimited
+
+pricing:
+  model: pay_as_you_go
+  commitment_discount: false
+  volume_discounts:
+    enabled: true
+    tiers:
+      - threshold: 10000
+        discount_percentage: 5
+
+      - threshold: 50000
+        discount_percentage: 10
+
+      - threshold: 100000
+        discount_percentage: 15
+
+  reserved_capacity:
+    enabled: true
+    discount_percentage: 30
+    commitment_months: 12
+
+  spot_pricing:
+    enabled: false
+    discount_range:
+      min: 40
+      max: 90
+
+notifications:
+  enabled: true
+  channels:
+    email:
+      enabled: true
+      recipients:
+        - billing@example.com
+      templates:
+        - usage_alert
+        - quota_exceeded
+        - billing_report
+
+    webhook:
+      enabled: true
+      endpoints:
+        - url: https://api.example.com/webhooks/metering
+          authentication: bearer
+          retry: true
+
+    sms:
+      enabled: false
+
+  events:
+    - name: quota_threshold_reached
+      severity: warning
+      enabled: true
+
+    - name: quota_exceeded
+      severity: critical
+      enabled: true
+
+    - name: unusual_usage_detected
+      severity: info
+      enabled: true
+
+    - name: billing_failure
+      severity: critical
+      enabled: true
+
+anomaly_detection:
+  enabled: true
+  algorithms:
+    - statistical
+    - machine_learning
+  sensitivity: medium
+  lookback_period_days: 30
+  alert_threshold: 2.5
+
+compliance:
+  enabled: true
+  standards:
+    - SOC2
+    - GDPR
+    - HIPAA
+  data_residency: multi_region
+  audit_logging: comprehensive
+
+integration:
+  billing_system:
+    enabled: true
+    provider: stripe
+    api_version: v1
+    sync_interval: 3600
+
+  monitoring:
+    enabled: true
+    provider: prometheus
+    export_interval: 60
+    metrics_prefix: marketplace_metering
+
+  analytics:
+    enabled: true
+    provider: custom
+    data_warehouse: bigquery
+    sync_interval: 3600

@@ -1,0 +1,111 @@
+applicationApiVersion: v1beta1
+
+properties:
+  name:
+    type: string
+    x-google-marketplace:
+      type: NAME
+    description: Name of the A2A application instance
+    default: a2a
+
+  namespace:
+    type: string
+    x-google-marketplace:
+      type: NAMESPACE
+    description: Kubernetes namespace for A2A deployment
+    default: default
+
+  image.registry:
+    type: string
+    default: gcr.io
+    description: Container image registry
+
+  image.repository:
+    type: string
+    default: a2a-ai/a2a
+    description: Container image repository
+
+  image.tag:
+    type: string
+    default: latest
+    description: Container image tag
+    x-google-marketplace:
+      type: TAG
+
+  replicaCount:
+    type: integer
+    default: 3
+    minimum: 1
+    maximum: 10
+    description: Number of A2A replicas to deploy
+
+  serviceAccount:
+    type: string
+    x-google-marketplace:
+      type: SERVICE_ACCOUNT
+      serviceAccount:
+        description: Service account for A2A pods
+        roles:
+        - type: ClusterRole
+          rulesType: PREDEFINED
+          rulesFromRoleName: edit
+
+  service.type:
+    type: string
+    default: LoadBalancer
+    enum:
+    - ClusterIP
+    - LoadBalancer
+    - NodePort
+    description: Kubernetes service type
+
+  service.port:
+    type: integer
+    default: 8080
+    description: Service port
+
+  resources.requests.cpu:
+    type: string
+    default: 100m
+    description: CPU resource request
+
+  resources.requests.memory:
+    type: string
+    default: 256Mi
+    description: Memory resource request
+
+  resources.limits.cpu:
+    type: string
+    default: 1000m
+    description: CPU resource limit
+
+  resources.limits.memory:
+    type: string
+    default: 1Gi
+    description: Memory resource limit
+
+  persistence.enabled:
+    type: boolean
+    default: false
+    description: Enable persistent storage
+
+  persistence.size:
+    type: string
+    default: 10Gi
+    description: Persistent volume size
+
+  certificate:
+    type: string
+    x-google-marketplace:
+      type: TLS_CERTIFICATE
+      tlsCertificate:
+        generatedProperties:
+          base64EncodedPrivateKey: tls.base64EncodedPrivateKey
+          base64EncodedCertificate: tls.base64EncodedCertificate
+    description: TLS certificate for HTTPS
+
+required:
+- name
+- namespace
+- image.tag
+- serviceAccount

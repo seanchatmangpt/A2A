@@ -1,0 +1,534 @@
+version: "1.0"
+marketplace:
+  name: "A2A Platform"
+  description: "Agent-to-Agent Communication Platform"
+  currency: "USD"
+  billing_cycle: "monthly"
+
+pricing_models:
+  usage_based:
+    enabled: true
+    billing_type: "consumption"
+    minimum_charge: 0.00
+    overage_allowed: true
+    proration: true
+
+  tiered:
+    enabled: true
+    type: "graduated"
+
+  hybrid:
+    enabled: true
+    base_fee: true
+    usage_charges: true
+
+skus:
+  - id: "sku-agent-compute-001"
+    name: "Agent Compute Units"
+    description: "Processing power for agent operations"
+    category: "compute"
+    unit: "compute_hour"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 100
+        unit_price: 0.50
+      - tier: 2
+        from: 101
+        to: 1000
+        unit_price: 0.40
+      - tier: 3
+        from: 1001
+        to: null
+        unit_price: 0.30
+    metering_metric: "agent_compute_time"
+    aggregation: "sum"
+
+  - id: "sku-message-transfer-001"
+    name: "Message Transfer"
+    description: "Inter-agent message delivery"
+    category: "messaging"
+    unit: "message"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 10000
+        unit_price: 0.001
+      - tier: 2
+        from: 10001
+        to: 100000
+        unit_price: 0.0008
+      - tier: 3
+        from: 100001
+        to: null
+        unit_price: 0.0005
+    metering_metric: "messages_sent"
+    aggregation: "count"
+
+  - id: "sku-storage-001"
+    name: "Agent State Storage"
+    description: "Persistent storage for agent state and data"
+    category: "storage"
+    unit: "gb_month"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 100
+        unit_price: 0.10
+      - tier: 2
+        from: 101
+        to: 1000
+        unit_price: 0.08
+      - tier: 3
+        from: 1001
+        to: null
+        unit_price: 0.06
+    metering_metric: "storage_used"
+    aggregation: "average"
+
+  - id: "sku-api-calls-001"
+    name: "API Requests"
+    description: "REST and GraphQL API calls"
+    category: "api"
+    unit: "request"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 1000000
+        unit_price: 0.00001
+      - tier: 2
+        from: 1000001
+        to: 10000000
+        unit_price: 0.000008
+      - tier: 3
+        from: 10000001
+        to: null
+        unit_price: 0.000005
+    metering_metric: "api_requests"
+    aggregation: "count"
+
+  - id: "sku-bandwidth-001"
+    name: "Network Bandwidth"
+    description: "Data transfer and network usage"
+    category: "network"
+    unit: "gb"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 1000
+        unit_price: 0.05
+      - tier: 2
+        from: 1001
+        to: 10000
+        unit_price: 0.04
+      - tier: 3
+        from: 10001
+        to: null
+        unit_price: 0.03
+    metering_metric: "bandwidth_used"
+    aggregation: "sum"
+
+  - id: "sku-agent-instance-001"
+    name: "Active Agent Instances"
+    description: "Number of concurrent active agents"
+    category: "compute"
+    unit: "agent_hour"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 10
+        unit_price: 0.25
+      - tier: 2
+        from: 11
+        to: 100
+        unit_price: 0.20
+      - tier: 3
+        from: 101
+        to: null
+        unit_price: 0.15
+    metering_metric: "active_agents"
+    aggregation: "max"
+
+  - id: "sku-ml-inference-001"
+    name: "ML Model Inference"
+    description: "Machine learning model execution"
+    category: "ml"
+    unit: "inference"
+    pricing:
+      - tier: 1
+        from: 0
+        to: 100000
+        unit_price: 0.002
+      - tier: 2
+        from: 100001
+        to: 1000000
+        unit_price: 0.0015
+      - tier: 3
+        from: 1000001
+        to: null
+        unit_price: 0.001
+    metering_metric: "ml_inferences"
+    aggregation: "count"
+
+metering_metrics:
+  - id: "agent_compute_time"
+    name: "Agent Compute Time"
+    description: "Total compute hours used by agents"
+    unit: "compute_hour"
+    type: "usage"
+    collection_method: "push"
+    collection_interval: 60
+    retention_days: 90
+    dimensions:
+      - agent_id
+      - agent_type
+      - region
+      - environment
+
+  - id: "messages_sent"
+    name: "Messages Sent"
+    description: "Number of messages sent between agents"
+    unit: "message"
+    type: "counter"
+    collection_method: "push"
+    collection_interval: 300
+    retention_days: 90
+    dimensions:
+      - sender_agent_id
+      - receiver_agent_id
+      - message_type
+      - protocol
+
+  - id: "storage_used"
+    name: "Storage Used"
+    description: "Storage consumption in gigabytes"
+    unit: "gb"
+    type: "gauge"
+    collection_method: "pull"
+    collection_interval: 3600
+    retention_days: 90
+    dimensions:
+      - agent_id
+      - storage_type
+      - region
+
+  - id: "api_requests"
+    name: "API Requests"
+    description: "Number of API calls made"
+    unit: "request"
+    type: "counter"
+    collection_method: "push"
+    collection_interval: 60
+    retention_days: 90
+    dimensions:
+      - endpoint
+      - method
+      - status_code
+      - api_version
+
+  - id: "bandwidth_used"
+    name: "Bandwidth Used"
+    description: "Network data transfer in gigabytes"
+    unit: "gb"
+    type: "usage"
+    collection_method: "push"
+    collection_interval: 300
+    retention_days: 90
+    dimensions:
+      - direction
+      - region
+      - protocol
+
+  - id: "active_agents"
+    name: "Active Agent Instances"
+    description: "Number of running agent instances"
+    unit: "agent"
+    type: "gauge"
+    collection_method: "pull"
+    collection_interval: 300
+    retention_days: 90
+    dimensions:
+      - agent_type
+      - region
+      - status
+
+  - id: "ml_inferences"
+    name: "ML Inferences"
+    description: "Number of ML model inference calls"
+    unit: "inference"
+    type: "counter"
+    collection_method: "push"
+    collection_interval: 60
+    retention_days: 90
+    dimensions:
+      - model_id
+      - model_version
+      - agent_id
+
+billing_integration:
+  provider: "stripe"
+  mode: "production"
+
+  stripe:
+    api_version: "2023-10-16"
+    webhook_secret: "${STRIPE_WEBHOOK_SECRET}"
+    public_key: "${STRIPE_PUBLIC_KEY}"
+    secret_key: "${STRIPE_SECRET_KEY}"
+
+    products:
+      - sku_id: "sku-agent-compute-001"
+        stripe_product_id: "prod_agent_compute"
+        stripe_price_id: "price_agent_compute_tiered"
+
+      - sku_id: "sku-message-transfer-001"
+        stripe_product_id: "prod_message_transfer"
+        stripe_price_id: "price_message_tiered"
+
+      - sku_id: "sku-storage-001"
+        stripe_product_id: "prod_storage"
+        stripe_price_id: "price_storage_tiered"
+
+      - sku_id: "sku-api-calls-001"
+        stripe_product_id: "prod_api_calls"
+        stripe_price_id: "price_api_tiered"
+
+      - sku_id: "sku-bandwidth-001"
+        stripe_product_id: "prod_bandwidth"
+        stripe_price_id: "price_bandwidth_tiered"
+
+      - sku_id: "sku-agent-instance-001"
+        stripe_product_id: "prod_agent_instance"
+        stripe_price_id: "price_agent_instance_tiered"
+
+      - sku_id: "sku-ml-inference-001"
+        stripe_product_id: "prod_ml_inference"
+        stripe_price_id: "price_ml_inference_tiered"
+
+    metering:
+      enabled: true
+      reporting_interval: 3600
+      batch_size: 1000
+      retry_attempts: 3
+
+    invoicing:
+      auto_advance: true
+      days_until_due: 30
+      collection_method: "charge_automatically"
+
+    webhooks:
+      - event: "invoice.payment_succeeded"
+        endpoint: "/api/webhooks/stripe/payment-succeeded"
+
+      - event: "invoice.payment_failed"
+        endpoint: "/api/webhooks/stripe/payment-failed"
+
+      - event: "customer.subscription.created"
+        endpoint: "/api/webhooks/stripe/subscription-created"
+
+      - event: "customer.subscription.updated"
+        endpoint: "/api/webhooks/stripe/subscription-updated"
+
+      - event: "customer.subscription.deleted"
+        endpoint: "/api/webhooks/stripe/subscription-deleted"
+
+      - event: "usage_record.created"
+        endpoint: "/api/webhooks/stripe/usage-record-created"
+
+  alternative_providers:
+    - name: "aws_marketplace"
+      enabled: false
+      config:
+        product_code: "${AWS_MARKETPLACE_PRODUCT_CODE}"
+        region: "us-east-1"
+
+    - name: "azure_marketplace"
+      enabled: false
+      config:
+        offer_id: "${AZURE_OFFER_ID}"
+        plan_id: "${AZURE_PLAN_ID}"
+
+    - name: "gcp_marketplace"
+      enabled: false
+      config:
+        product_name: "${GCP_PRODUCT_NAME}"
+        service_account: "${GCP_SERVICE_ACCOUNT}"
+
+metering_service:
+  enabled: true
+
+  collection:
+    method: "hybrid"
+    push_endpoint: "/api/metering/push"
+    pull_interval: 300
+    buffer_size: 10000
+    flush_interval: 60
+
+  aggregation:
+    window_size: 3600
+    windows:
+      - name: "hourly"
+        duration: 3600
+
+      - name: "daily"
+        duration: 86400
+
+      - name: "monthly"
+        duration: 2592000
+
+  storage:
+    backend: "timeseries_db"
+    retention_policy:
+      raw_data: 90
+      hourly_aggregates: 365
+      daily_aggregates: 1095
+      monthly_aggregates: 3650
+
+  validation:
+    enabled: true
+    rules:
+      - metric: "agent_compute_time"
+        min_value: 0
+        max_value: 1000
+
+      - metric: "messages_sent"
+        min_value: 0
+        max_value: 1000000
+
+      - metric: "storage_used"
+        min_value: 0
+        max_value: 100000
+
+billing_rules:
+  proration:
+    enabled: true
+    method: "per_second"
+
+  discounts:
+    - id: "volume_discount_001"
+      name: "High Volume Discount"
+      type: "percentage"
+      value: 10
+      conditions:
+        - metric: "messages_sent"
+          operator: "greater_than"
+          threshold: 1000000
+
+    - id: "commitment_discount_001"
+      name: "Annual Commitment Discount"
+      type: "percentage"
+      value: 15
+      conditions:
+        - commitment_term: "annual"
+          min_spend: 10000
+
+  credits:
+    enabled: true
+    types:
+      - promotional
+      - migration
+      - service_level
+
+  minimum_charge:
+    enabled: false
+    amount: 0.00
+
+  invoice_generation:
+    schedule: "end_of_month"
+    send_email: true
+    payment_due_days: 30
+    late_fee_percentage: 2.0
+
+  payment_methods:
+    - credit_card
+    - ach_transfer
+    - wire_transfer
+    - invoice
+
+alerts_notifications:
+  usage_alerts:
+    - id: "high_usage_alert"
+      metric: "agent_compute_time"
+      threshold: 80
+      threshold_type: "percentage_of_budget"
+      notification_channels:
+        - email
+        - webhook
+
+    - id: "approaching_limit_alert"
+      metric: "messages_sent"
+      threshold: 90
+      threshold_type: "percentage_of_quota"
+      notification_channels:
+        - email
+        - sms
+
+  billing_alerts:
+    - id: "payment_failed_alert"
+      event: "payment_failed"
+      notification_channels:
+        - email
+        - webhook
+
+    - id: "invoice_generated_alert"
+      event: "invoice_generated"
+      notification_channels:
+        - email
+
+reporting:
+  enabled: true
+
+  dashboards:
+    - name: "usage_dashboard"
+      metrics:
+        - agent_compute_time
+        - messages_sent
+        - storage_used
+        - api_requests
+      refresh_interval: 300
+
+    - name: "cost_dashboard"
+      metrics:
+        - total_cost
+        - cost_by_sku
+        - cost_by_agent
+      refresh_interval: 3600
+
+  exports:
+    formats:
+      - csv
+      - json
+      - pdf
+
+    schedules:
+      - name: "monthly_usage_report"
+        frequency: "monthly"
+        recipients:
+          - billing@example.com
+          - finance@example.com
+
+      - name: "weekly_summary"
+        frequency: "weekly"
+        recipients:
+          - ops@example.com
+
+compliance:
+  tax_calculation:
+    enabled: true
+    provider: "stripe_tax"
+
+  data_residency:
+    enabled: true
+    regions:
+      - us-east-1
+      - eu-west-1
+      - ap-southeast-1
+
+  audit_logging:
+    enabled: true
+    retention_days: 2555
+    events:
+      - usage_reported
+      - invoice_generated
+      - payment_processed
+      - usage_modified
+      - credit_applied
