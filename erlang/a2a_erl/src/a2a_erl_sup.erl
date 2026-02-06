@@ -167,6 +167,16 @@ init([]) ->
             modules => [yawl_metrics]
         },
 
+        %% Y Combinator Demo Logger - for Y Combinator demo logging and telemetry
+        #{
+            id => y_combinator_logger,
+            start => {y_combinator_logger, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [y_combinator_logger]
+        },
+
         %% YAWL Workflow Instance Supervisor - depends on orchestrator and persistence
         #{
             id => yawl_workflow_instance_sup,

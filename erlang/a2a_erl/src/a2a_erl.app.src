@@ -107,7 +107,12 @@
       yawl_resource_patterns_sim_tests,
       %% YAWL-A2A Integration Tests
       yawl_a2a_integration_tests,
-      test_yawl_a2a_bridge
+      test_yawl_a2a_bridge,
+      %% YAWL Combinatoric Testing
+      yawl_combinatoric_test,
+      yawl_scenario_generator,
+      y_combinator_demo,
+      y_combinator_logger
   ]},
   {licenses, ["Apache-2.0"]},
   {links, [

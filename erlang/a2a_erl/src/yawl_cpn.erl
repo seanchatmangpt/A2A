@@ -765,7 +765,7 @@ convert_cpn_to_pm4py_local(CPNJSON) ->
     PM4PyPlaces = [
         #{
             id => maps:get(<<"id">>, P),
-            name => maps:get(<<"name">>, P),
+            name => maps:get(<<"name">>, P, maps:get(<<"id">>, P)),
             initial_tokens => maps:get(<<"initialTokens">>, P, 0)
         }
         || P <- Places
@@ -775,7 +775,7 @@ convert_cpn_to_pm4py_local(CPNJSON) ->
     PM4PyTransitions = [
         #{
             id => maps:get(<<"id">>, T),
-            name => maps:get(<<"name">>, T),
+            name => maps:get(<<"name">>, T, maps:get(<<"id">>, T)),
             guard => maps:get(<<"guard">>, T, null)
         }
         || T <- Transitions

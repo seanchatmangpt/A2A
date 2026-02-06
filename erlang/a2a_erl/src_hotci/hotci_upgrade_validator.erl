@@ -37,7 +37,7 @@
     timestamp :: integer()
 }).
 
--record.validation_metrics, {
+-record(validation_metrics, {
     total_tests :: integer(),
     passed_tests :: integer(),
     failed_tests :: integer(),
@@ -46,15 +46,21 @@
     upgrade_time :: integer(),
     rollback_time :: integer(),
     consistency_score :: float()
-}.
+}).
 
 %% State record
 -record(state, {
-    scenarios = #{} :: map(),             #{binary() => upgrade_scenario()},
-    results = [] :: [validation_result()],
-    metrics = [] :: [validation_metrics()],
+    scenarios = #{} :: #{binary() => #upgrade_scenario{}},
+    results = [] :: [#validation_result{}],
+    metrics = [] :: [#validation_metrics{}],
     next_scenario_id = 1 :: integer()
 }).
+
+%% Type definitions (must come after records)
+-type cluster_id() :: binary().
+-type validation_result() :: #validation_result{}.
+-type validation_metrics() :: #validation_metrics{}.
+-type upgrade_scenario() :: #upgrade_scenario{}.
 
 -define(SERVER, ?MODULE).
 -define(TEST_TIMEOUT, 30000).  % 30 seconds per test
@@ -140,16 +146,18 @@ handle_call(get_upgrade_metrics, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+%% @private
 -spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast({validation_completed, ScenarioId, Results}, State) ->
     %% Update scenario with completion status
-    UpdatedScenario = case lists:any(fun(Result) -> Result#validation_result.status =:= failed end, Results) of
+    OldScenario = maps:get(ScenarioId, State#state.scenarios, #upgrade_scenario{}),
+    UpdatedScenarios = case lists:any(fun(Result) -> Result#validation_result.status =:= failed end, Results) of
         true ->
             logger:warning("Upgrade validation ~p failed", [ScenarioId]),
-            State#state.scenarios#{ScenarioId => (State#state.scenarios#{ScenarioId})#upgrade_scenario{status = failed}};
+            maps:put(ScenarioId, OldScenario#upgrade_scenario{status = failed}, State#state.scenarios);
         false ->
             logger:info("Upgrade validation ~p completed successfully", [ScenarioId]),
-            State#state.scenarios#{ScenarioId => (State#state.scenarios#{ScenarioId})#upgrade_scenario{status = completed}}
+            maps:put(ScenarioId, OldScenario#upgrade_scenario{status = completed}, State#state.scenarios)
     end,
 
     %% Add results to results list
@@ -159,7 +167,7 @@ handle_cast({validation_completed, ScenarioId, Results}, State) ->
     Metrics = calculate_validation_metrics(Results, ScenarioId),
 
     NewState = State#state{
-        scenarios = UpdatedScenario,
+        scenarios = UpdatedScenarios,
         results = NewResults,
         metrics = Metrics ++ State#state.metrics
     },
@@ -175,9 +183,9 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 -spec terminate(term(), #state{}) -> ok.
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
     %% Save state before shutdown
-    save_validation_state(_State),
+    save_validation_state(State),
     ok.
 
 -spec code_change(term(), #state{}, term()) -> {ok, #state{}}.

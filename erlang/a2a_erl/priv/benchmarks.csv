@@ -1,0 +1,3 @@
+Benchmark,Count,Duration_ms,Throughput,Memory_Bytes,CPU_Percent,Timestamp
+sample_benchmark,35,5.2,6730.77,102400,15.5,1707192000000
+sample_benchmark_v2,35,4.8,7291.67,98304,14.2,1707192100000

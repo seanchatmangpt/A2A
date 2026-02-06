@@ -24,28 +24,28 @@
 %% Sample CPN JSON for testing
 test_cpn_json() ->
     #{
-        version => <<"1.0">>,
-        format => <<"cpn-json">>,
-        places => [
-            #{id => <<"p1">>, name => <<"Start">>, initialTokens => 1, type => <<"place">>},
-            #{id => <<"p2">>, name => <<"Process">>, initialTokens => 0, type => <<"place">>},
-            #{id => <<"p3">>, name => <<"End">>, initialTokens => 0, type => <<"place">>}
+        <<"version">> => <<"1.0">>,
+        <<"format">> => <<"cpn-json">>,
+        <<"places">> => [
+            #{<<"id">> => <<"p1">>, <<"name">> => <<"Start">>, <<"initialTokens">> => 1, <<"type">> => <<"place">>},
+            #{<<"id">> => <<"p2">>, <<"name">> => <<"Process">>, <<"initialTokens">> => 0, <<"type">> => <<"place">>},
+            #{<<"id">> => <<"p3">>, <<"name">> => <<"End">>, <<"initialTokens">> => 0, <<"type">> => <<"place">>}
         ],
-        transitions => [
-            #{id => <<"t1">>, name => <<"StartProcess">>, guard => null, type => <<"transition">>},
-            #{id => <<"t2">>, name => <<"CompleteProcess">>, guard => null, type => <<"transition">>}
+        <<"transitions">> => [
+            #{<<"id">> => <<"t1">>, <<"name">> => <<"StartProcess">>, <<"guard">> => null, <<"type">> => <<"transition">>},
+            #{<<"id">> => <<"t2">>, <<"name">> => <<"CompleteProcess">>, <<"guard">> => null, <<"type">> => <<"transition">>}
         ],
-        arcs => [
-            #{source => <<"p1">>, target => <<"t1">>, type => <<"place_to_transition">>},
-            #{source => <<"t1">>, target => <<"p2">>, type => <<"transition_to_place">>},
-            #{source => <<"p2">>, target => <<"t2">>, type => <<"place_to_transition">>},
-            #{source => <<"t2">>, target => <<"p3">>, type => <<"transition_to_place">>}
+        <<"arcs">> => [
+            #{<<"source">> => <<"p1">>, <<"target">> => <<"t1">>, <<"type">> => <<"place_to_transition">>},
+            #{<<"source">> => <<"t1">>, <<"target">> => <<"p2">>, <<"type">> => <<"transition_to_place">>},
+            #{<<"source">> => <<"p2">>, <<"target">> => <<"t2">>, <<"type">> => <<"place_to_transition">>},
+            #{<<"source">> => <<"t2">>, <<"target">> => <<"p3">>, <<"type">> => <<"transition_to_place">>}
         ],
-        colorSets => #{
-            <<"any">> => #{type => <<"any">>},
-            <<"boolean">> => #{type => <<"boolean">>},
-            <<"integer">> => #{type => <<"integer">>},
-            <<"string">> => #{type => <<"string">>}
+        <<"colorSets">> => #{
+            <<"any">> => #{<<"type">> => <<"any">>},
+            <<"boolean">> => #{<<"type">> => <<"boolean">>},
+            <<"integer">> => #{<<"type">> => <<"integer">>},
+            <<"string">> => #{<<"type">> => <<"string">>}
         }
     }.
 
@@ -87,9 +87,6 @@ test_state_no_bridge() ->
 
 test_model() ->
     #{model_id => <<"test_model">>, type => petri_net}.
-
-test_model_name() ->
-    test_workflow.
 
 %%====================================================================
 %% do_call_pm4py Tests - CHICAGO TDD: TESTS FIRST
@@ -162,9 +159,9 @@ to_pm4py_petri_net_minimal_test_() ->
      fun(_) -> [
          ?_test(begin
              MinimalCPN = #{
-                 places => [#{id => <<"p1">>, name => <<"Place1">>}],
-                 transitions => [#{id => <<"t1">>, name => <<"Trans1">>}],
-                 arcs => []
+                 <<"places">> => [#{<<"id">> => <<"p1">>, <<"name">> => <<"Place1">>}],
+                 <<"transitions">> => [#{<<"id">> => <<"t1">>, <<"name">> => <<"Trans1">>}],
+                 <<"arcs">> => []
              },
              Result = yawl_cpn:to_pm4py_petri_net_test(MinimalCPN),
              ?assertMatch({ok, _}, Result)

@@ -16,36 +16,41 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+%% Type definitions
+-type cluster_id() :: binary().
+-type node_id() :: binary().
+
 %% Records
--record.consistency_report, {
+-record(consistency_report, {
     cluster_id :: binary(),
     check_time :: integer(),
-    node_results = #{} :: map(),   #{node_id() => boolean()},
+    node_results = #{} :: #{node_id() => boolean()},
     consistency_score :: float(),
     issues = [] :: [term()],
     recommendations = [] :: [term()]
-}.
+}).
 
--record.consistency_metrics, {
-    total_checks :: integer(),
-    passed_checks :: integer(),
-    failed_checks :: integer(),
-    average_latency :: float(),
-    consistency_score :: float(),
-    last_check_time :: integer() | undefined
-}.
+-record(consistency_metrics, {
+    total_checks = 0 :: integer(),
+    passed_checks = 0 :: integer(),
+    failed_checks = 0 :: integer(),
+    average_latency = 0.0 :: float(),
+    consistency_score = 100.0 :: float(),
+    last_check_time = undefined :: integer() | undefined
+}).
 
 %% State record
--record.state, {
-    clusters = #{} :: map(),         #{cluster_id() => #consistency_report{}},
-    metrics = #{} :: map(),           #{cluster_id() => #consistency_metrics{}},
+-record(state, {
+    clusters = #{} :: #{cluster_id() => #consistency_report{}},
+    metrics = #{} :: #{cluster_id() => #consistency_metrics{}},
     listeners = [] :: [pid()],
     check_interval = 30000 :: integer(),  % 30 seconds
     consistency_threshold = 0.95 :: float()  % 95% minimum consistency
-}.
+}).
 
 -define(SERVER, ?MODULE).
 -define(DEFAULT_CHECK_TIMEOUT, 10000).
+-define(CHECK_INTERVAL, 30000).  % 30 seconds
 
 %%% ============================================================================
 %%% API Functions
@@ -281,7 +286,7 @@ check_process_nodes(Nodes) ->
     end.
 
 %% @doc Check state machine consistency
--spec check_state_nodes([binary()) -> boolean().
+-spec check_state_nodes([binary()]) -> boolean().
 check_state_nodes(Nodes) ->
     %% This would check task state machines across nodes
     %% For now, simulate with high success rate
@@ -352,13 +357,13 @@ update_consistency_metrics(ClusterId, Report, State) ->
         last_check_time = Report#consistency_report.check_time
     },
 
-    UpdateState = State#state{
+    UpdatedState = State#state{
         clusters = maps:put(ClusterId, Report, State#state.clusters),
         metrics = maps:put(ClusterId, NewMetrics, State#state.metrics)
     },
 
-    save_state(UpdateState),
-    UpdateState.
+    save_state(UpdatedState),
+    UpdatedState.
 
 %% @doc Build metrics response
 -spec build_metrics_response(#state{}) -> [map()].

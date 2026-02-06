@@ -59,8 +59,8 @@ get_memory_usage_uses_erlang_memory_test() ->
     SystemMemory = case erlang:memory() of
         MemMap when is_map(MemMap) ->
             maps:get(total, MemMap, 0);
-        MemTuple when is_tuple(MemTuple) ->
-            element(2, element(1, MemTuple))
+        MemList when is_list(MemList) ->
+            proplists:get_value(total, MemList, 0)
     end,
     %% Results should be in the same order of magnitude
     ?assert(Result > 0),

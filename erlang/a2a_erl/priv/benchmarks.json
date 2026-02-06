@@ -1,0 +1,30 @@
+{
+  "combo_1707192000000": {
+    "name": "sample_benchmark",
+    "timestamp": 1707192000000,
+    "duration_ms": 5.2,
+    "count": 35,
+    "throughput": 6730.77,
+    "memory_bytes": 102400,
+    "cpu_percent": 15.5,
+    "details": {
+      "patterns": ["basic_sequential", "parallel_split"],
+      "requested_count": 50,
+      "actual_count": 35
+    }
+  },
+  "combo_1707192100000": {
+    "name": "sample_benchmark_v2",
+    "timestamp": 1707192100000,
+    "duration_ms": 4.8,
+    "count": 35,
+    "throughput": 7291.67,
+    "memory_bytes": 98304,
+    "cpu_percent": 14.2,
+    "details": {
+      "patterns": ["basic_sequential", "parallel_split"],
+      "requested_count": 50,
+      "actual_count": 35
+    }
+  }
+}

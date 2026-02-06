@@ -30,15 +30,15 @@
 
 -record(cluster_info, {
     id :: binary(),
-    nodes = [] :: [hotci_node_orchestrator:node_info()],
+    nodes = [] :: [#node_info{}],
     created_at :: integer(),
     version :: binary()
 }).
 
 %% State record
 -record(state, {
-    clusters = #{} :: map(),  #{cluster_id() => cluster_info()},
-    nodes = #{} :: map(),     #{node_id() => node_info()},
+    clusters = #{} :: #{cluster_id() => #cluster_info{}},
+    nodes = #{} :: #{node_id() => #node_info{}},
     next_cluster_id = 1 :: integer(),
     next_node_id = 1 :: integer()
 }).
@@ -238,7 +238,7 @@ do_destroy_cluster(ClusterId, State) ->
             %% Remove from state
             NewState = State#state{
                 clusters = maps:remove(ClusterId, State#state.clusters),
-                nodes = maps:remove_keys(
+                nodes = maps_remove_keys(
                     lists:map(fun(#node_info{id = Id}) -> Id end, ClusterInfo#cluster_info.nodes),
                     State#state.nodes
                 )
@@ -396,14 +396,14 @@ handle_node_event_type({status_changed, NewStatus}, NodeInfo) ->
 handle_node_event_type({upgrade_started, Version}, NodeInfo) ->
     NodeInfo#node_info{status = upgrading, version = Version};
 
-handle_node_eventType({upgrade_completed, Version}, NodeInfo) ->
+handle_node_event_type({upgrade_completed, Version}, NodeInfo) ->
     NodeInfo#node_info{status = running, version = Version};
 
-handle_node_eventType({upgrade_failed, Reason}, NodeInfo) ->
+handle_node_event_type({upgrade_failed, Reason}, NodeInfo) ->
     logger:warning("Node ~p upgrade failed: ~p", [NodeInfo#node_info.id, Reason]),
     NodeInfo#node_info{status = failed};
 
-handle_node_eventType(Event, NodeInfo) ->
+handle_node_event_type(Event, NodeInfo) ->
     logger:debug("Unhandled node event: ~p", [Event]),
     NodeInfo.
 

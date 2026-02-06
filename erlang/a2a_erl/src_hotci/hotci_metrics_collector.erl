@@ -454,6 +454,12 @@ get_cpu_usage(_ClusterId) ->
         {ok, BusyPercent} when is_number(BusyPercent) ->
             BusyPercent;
         {error, _Reason} ->
+            get_cpu_usage_fallback();
+        %% Handle the case when OS_Mon is not started - returns {all,0,0,[]}
+        {all, _Busy, _Idle, _} ->
+            get_cpu_usage_fallback();
+        %% Catch-all for unexpected responses
+        _ ->
             get_cpu_usage_fallback()
     end.
 
@@ -490,10 +496,11 @@ get_memory_usage(_ClusterId) ->
             %% Also include system memory for complete picture
             System = maps:get(system, MemMap, 0),
             Total + System;
-        MemTuple when is_tuple(MemTuple) ->
-            %% Older OTP versions return a list/tuple
-            %% Extract total memory
-            element(2, element(1, MemTuple))
+        MemList when is_list(MemList) ->
+            %% Older OTP versions return a proplist
+            Total = proplists:get_value(total, MemList, 0),
+            System = proplists:get_value(system, MemList, 0),
+            Total + System
     end.
 
 %% @doc Get process count using erlang:system_info/1
@@ -591,7 +598,7 @@ get_health_status(_ClusterId) ->
     MemMap = erlang:memory(),
     TotalMem = case MemMap of
         Map when is_map(Map) -> maps:get(total, Map, 0);
-        Tuple when is_tuple(Tuple) -> element(2, element(1, Tuple))
+        List when is_list(List) -> proplists:get_value(total, List, 0)
     end,
     %% Assume 2GB as "high memory" threshold for health calculation
     MemHealth = min(1.0, TotalMem / (2 * 1024 * 1024 * 1024)),
