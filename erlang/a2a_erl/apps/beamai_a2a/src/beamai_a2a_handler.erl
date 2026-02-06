@@ -1,441 +1,600 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Request Handler
+%%% @doc A2A JSON-RPC 方法处理器
 %%%
-%%% Dispatches JSON-RPC method calls to the appropriate internal
-%%% functions, bridging between the BeamAI A2A server and the
-%%% existing a2a_erl task infrastructure (a2a_task_statem,
-%%% a2a_task_store, a2a_push_notifier).
+%%% 处理 A2A 协议定义的所有 JSON-RPC 方法。
+%%% 此模块从 beamai_a2a_server 中分离出来，专注于方法级别的业务逻辑。
 %%%
-%%% Supported methods:
-%%%   tasks/send                  - Send a message / create a task
-%%%   tasks/get                   - Get task state
-%%%   tasks/cancel                - Cancel a running task
-%%%   tasks/sendSubscribe         - Send and subscribe to updates
-%%%   tasks/resubscribe           - Resubscribe to a task
-%%%   tasks/pushNotification/set  - Register push notifications
-%%%   tasks/pushNotification/get  - Get push notification config
+%%% == 支持的方法 ==
+%%%
+%%% 1. 消息发送
+%%%    - message/send: 发送消息，创建或继续任务
+%%%
+%%% 2. 任务管理
+%%%    - tasks/get: 获取任务状态
+%%%    - tasks/cancel: 取消任务
+%%%
+%%% 3. Push 通知配置
+%%%    - tasks/pushNotificationConfig/set: 设置 webhook 配置
+%%%    - tasks/pushNotificationConfig/get: 获取 webhook 配置
+%%%    - tasks/pushNotificationConfig/delete: 删除 webhook 配置
+%%%
+%%% == 设计原则 ==
+%%%
+%%% 1. 方法处理器不持有状态，通过参数接收和返回状态
+%%% 2. 返回统一的 {ok, Response, State} 或 {error, Reason, State} 格式
+%%% 3. 所有错误都以 JSON-RPC 格式返回
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_handler).
 
--include("a2a.hrl").
-
-%% API
+%% API 导出
 -export([
-    handle/3,
-    handle_send/3,
-    handle_get/2,
-    handle_cancel/2,
-    handle_subscribe/3,
-    handle_resubscribe/3,
-    handle_push_set/2,
-    handle_push_get/2
+    %% 请求分发
+    dispatch/3,
+
+    %% 消息发送
+    handle_message_send/3,
+
+    %% 任务管理
+    handle_tasks_get/3,
+    handle_tasks_cancel/3,
+
+    %% Push 通知配置
+    handle_push_config_set/3,
+    handle_push_config_get/3,
+    handle_push_config_delete/3
 ]).
 
-%%====================================================================
-%% Main dispatch
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Dispatch a JSON-RPC request to the appropriate handler.
-%%
-%% `Method' is the JSON-RPC method string.
-%% `Params' is the params map from the request.
-%% `Context' is the middleware-enriched context map.
-%%
-%% Returns `{ok, Result}' on success, or `{error, ErrorMap}' for
-%% JSON-RPC error responses.
-%% @end
-%%--------------------------------------------------------------------
--spec handle(binary(), map(), map()) ->
-    {ok, term()} | {error, map()} | {subscribe, pid(), binary()}.
-handle(<<"tasks/send">>, Params, Context) ->
-    handle_send(Params, Context, false);
-handle(<<"tasks/get">>, Params, Context) ->
-    handle_get(Params, Context);
-handle(<<"tasks/cancel">>, Params, Context) ->
-    handle_cancel(Params, Context);
-handle(<<"tasks/sendSubscribe">>, Params, Context) ->
-    handle_subscribe(Params, Context, send);
-handle(<<"tasks/resubscribe">>, Params, Context) ->
-    handle_resubscribe(Params, Context, resub);
-handle(<<"tasks/pushNotification/set">>, Params, Context) ->
-    handle_push_set(Params, Context);
-handle(<<"tasks/pushNotification/get">>, Params, Context) ->
-    handle_push_get(Params, Context);
-handle(Method, _Params, _Context) ->
-    {error, beamai_a2a_jsonrpc:method_not_found(Method)}.
+-include_lib("beamai_core/include/beamai_common.hrl").
 
 %%====================================================================
-%% tasks/send
+%% 请求分发
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/send: create or continue a task.
+%% @doc 分发 JSON-RPC 请求到对应的处理器
 %%
-%% If the message contains a `taskId', the message is sent to the
-%% existing task.  Otherwise a new task is created.
+%% @param Method 方法名（binary）
+%% @param Params 参数 map
+%% @param Context 请求上下文 #{id, tasks, contexts, agent_config}
+%% @returns {ok, Response, NewContext} | {error, Reason, NewContext}
+-spec dispatch(binary(), map(), map()) -> {ok, map(), map()} | {error, term(), map()}.
+dispatch(Method, Params, Context) ->
+    Id = maps:get(id, Context, null),
+    case Method of
+        <<"message/send">> ->
+            handle_message_send(Id, Params, Context);
+        <<"tasks/get">> ->
+            handle_tasks_get(Id, Params, Context);
+        <<"tasks/cancel">> ->
+            handle_tasks_cancel(Id, Params, Context);
+        <<"tasks/pushNotificationConfig/set">> ->
+            handle_push_config_set(Id, Params, Context);
+        <<"tasks/pushNotificationConfig/get">> ->
+            handle_push_config_get(Id, Params, Context);
+        <<"tasks/pushNotificationConfig/delete">> ->
+            handle_push_config_delete(Id, Params, Context);
+        _ ->
+            %% 方法不存在
+            Response = make_error_response(Id, -32601, <<"Method not found">>,
+                                          #{<<"method">> => Method}),
+            {ok, Response, Context}
+    end.
+
+%%====================================================================
+%% message/send 处理
+%%====================================================================
+
+%% @doc 处理 message/send 方法
 %%
-%% When `Subscribe' is true (called from tasks/sendSubscribe),
-%% returns `{subscribe, Pid, TaskId}' so the caller can set up SSE.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_send(map(), map(), boolean()) ->
-    {ok, map()} | {error, map()} | {subscribe, pid(), binary()}.
-handle_send(Params, _Context, Subscribe) ->
-    case decode_send_params(Params) of
-        {ok, Message, Config} ->
-            TaskId = Message#message.task_id,
-            Result = case TaskId of
-                undefined ->
-                    create_new_task(Message, Config);
+%% 根据参数决定：
+%% - 创建新任务（无 taskId 和 contextId）
+%% - 在上下文中继续任务（有 contextId，无 taskId）
+%% - 继续指定任务（有 taskId）
+%%
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数
+%% @param Context 请求上下文
+%% @returns {ok, Response, NewContext}
+-spec handle_message_send(term(), map(), map()) -> {ok, map(), map()}.
+handle_message_send(Id, Params, Context) ->
+    Message = maps:get(<<"message">>, Params, #{}),
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
+    ContextId = maps:get(<<"contextId">>, Params, undefined),
+
+    case {TaskId, ContextId} of
+        {undefined, undefined} ->
+            %% 创建新任务（无上下文）
+            create_and_execute_task(Id, Message, undefined, Context);
+        {undefined, _} ->
+            %% 有 contextId，检查是否存在待继续的任务
+            case find_input_required_task(ContextId, Context) of
+                {ok, ExistingTaskId, TaskPid} ->
+                    %% 继续 input_required 状态的任务
+                    continue_input_required_task(Id, ExistingTaskId, TaskPid, Message, Context);
+                not_found ->
+                    %% 在现有上下文中创建新任务
+                    create_and_execute_task(Id, Message, ContextId, Context)
+            end;
+        {_, _} ->
+            %% 有 taskId，继续现有任务
+            continue_task(Id, TaskId, Message, Context)
+    end.
+
+%% @private 创建并执行新任务
+create_and_execute_task(Id, Message, ContextId, Context) ->
+    Tasks = maps:get(tasks, Context, #{}),
+    Contexts = maps:get(contexts, Context, #{}),
+    AgentConfig = maps:get(agent_config, Context, #{}),
+
+    %% 创建 Task 进程
+    TaskOpts = #{
+        message => beamai_a2a_convert:normalize_message(Message),
+        context_id => ContextId
+    },
+    {ok, TaskPid} = beamai_a2a_task:start_link(TaskOpts),
+
+    %% 监控 Task 进程（由调用者负责）
+    erlang:monitor(process, TaskPid),
+
+    %% 获取 Task ID
+    {ok, TaskId} = beamai_a2a_task:get_id(TaskPid),
+
+    %% 更新状态映射
+    NewTasks = maps:put(TaskId, TaskPid, Tasks),
+    NewContexts = case ContextId of
+        undefined -> Contexts;
+        _ ->
+            ExistingTasks = maps:get(ContextId, Contexts, []),
+            maps:put(ContextId, [TaskId | ExistingTasks], Contexts)
+    end,
+
+    %% 异步执行任务
+    spawn_link(fun() -> execute_task(TaskPid, AgentConfig) end),
+
+    %% 立即返回 Task
+    {ok, Task} = beamai_a2a_task:get(TaskPid),
+
+    Response = make_success_response(Id, beamai_a2a_convert:task_to_json(Task)),
+    NewContext = Context#{tasks => NewTasks, contexts => NewContexts},
+
+    {ok, Response, NewContext}.
+
+%% @private 继续现有任务
+continue_task(Id, TaskId, Message, Context) ->
+    Tasks = maps:get(tasks, Context, #{}),
+
+    case maps:get(TaskId, Tasks, undefined) of
+        undefined ->
+            %% 任务不存在
+            Response = make_error_response(Id, -32001, <<"Task not found">>,
+                                          #{<<"taskId">> => TaskId}),
+            {ok, Response, Context};
+        TaskPid ->
+            %% 检查任务状态是否允许继续
+            {ok, CurrentTask} = beamai_a2a_task:get(TaskPid),
+            CurrentStatus = maps:get(state, maps:get(status, CurrentTask, #{}), undefined),
+
+            case CurrentStatus of
+                input_required ->
+                    continue_input_required_task(Id, TaskId, TaskPid, Message, Context);
+                working ->
+                    %% 任务正在执行，不能继续
+                    Response = make_error_response(Id, -32004, <<"Task is still running">>,
+                                                  #{<<"taskId">> => TaskId, <<"status">> => <<"working">>}),
+                    {ok, Response, Context};
+                Terminal when Terminal =:= completed; Terminal =:= failed; Terminal =:= canceled ->
+                    %% 任务已终止，不能继续
+                    Response = make_error_response(Id, -32003, <<"Task already terminated">>,
+                                                  #{<<"taskId">> => TaskId, <<"status">> => atom_to_binary(Terminal, utf8)}),
+                    {ok, Response, Context};
                 _ ->
-                    continue_existing_task(TaskId, Message)
-            end,
-            case {Result, Subscribe} of
-                {{ok, Task, Pid}, true} ->
-                    {subscribe, Pid, Task#task.id};
-                {{ok, Task, _Pid}, false} ->
-                    TaskMap = beamai_a2a_convert:task_to_map(Task),
-                    {ok, TaskMap};
-                {{ok, Task}, false} ->
-                    TaskMap = beamai_a2a_convert:task_to_map(Task),
-                    {ok, TaskMap};
-                {{error, task_not_found}, _} ->
-                    {error, beamai_a2a_jsonrpc:task_not_found()};
-                {{error, task_terminal}, _} ->
-                    {error, beamai_a2a_jsonrpc:task_not_cancelable()};
-                {{error, Reason}, _} ->
-                    {error, beamai_a2a_jsonrpc:internal_error(
-                        beamai_a2a_utils:to_binary(Reason))}
-            end;
-        {error, Reason} ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                beamai_a2a_utils:to_binary(Reason))}
-    end.
-
-%%====================================================================
-%% tasks/get
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/get: retrieve current task state.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_get(map(), map()) -> {ok, map()} | {error, map()}.
-handle_get(Params, _Context) ->
-    TaskId = maps:get(<<"id">>, Params, undefined),
-    HistoryLength = maps:get(<<"historyLength">>, Params, undefined),
-    case TaskId of
-        undefined ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                <<"Missing required field: id">>)};
-        _ ->
-            case a2a_task_store:get_task(TaskId) of
-                {ok, Task} ->
-                    FinalTask = apply_history_limit(Task, HistoryLength),
-                    {ok, beamai_a2a_convert:task_to_map(FinalTask)};
-                {error, not_found} ->
-                    {error, beamai_a2a_jsonrpc:task_not_found(TaskId)}
+                    %% 其他状态（submitted），可以继续
+                    do_continue_task(Id, TaskPid, Message, Context)
             end
     end.
 
-%%====================================================================
-%% tasks/cancel
-%%====================================================================
+%% @private 查找上下文中处于 input_required 状态的任务
+find_input_required_task(ContextId, Context) ->
+    Contexts = maps:get(contexts, Context, #{}),
+    Tasks = maps:get(tasks, Context, #{}),
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/cancel: cancel a running task.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_cancel(map(), map()) -> {ok, map()} | {error, map()}.
-handle_cancel(Params, _Context) ->
-    TaskId = maps:get(<<"id">>, Params, undefined),
-    case TaskId of
+    case maps:get(ContextId, Contexts, []) of
+        [] ->
+            not_found;
+        TaskIds ->
+            %% 遍历上下文中的任务，找到 input_required 状态的
+            find_input_required_in_list(TaskIds, Tasks)
+    end.
+
+%% @private 在任务列表中查找 input_required 状态的任务
+find_input_required_in_list([], _Tasks) ->
+    not_found;
+find_input_required_in_list([TaskId | Rest], Tasks) ->
+    case maps:get(TaskId, Tasks, undefined) of
         undefined ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                <<"Missing required field: id">>)};
-        _ ->
-            case a2a_task_store:get_task_pid(TaskId) of
-                {ok, Pid} ->
-                    case a2a_task_statem:cancel_task(Pid) of
-                        {ok, Task} ->
-                            {ok, beamai_a2a_convert:task_to_map(Task)};
-                        {error, task_terminal} ->
-                            {error, beamai_a2a_jsonrpc:task_not_cancelable()}
-                    end;
-                {error, not_found} ->
-                    {error, beamai_a2a_jsonrpc:task_not_found(TaskId)}
+            find_input_required_in_list(Rest, Tasks);
+        TaskPid ->
+            {ok, Task} = beamai_a2a_task:get(TaskPid),
+            Status = maps:get(state, maps:get(status, Task, #{}), undefined),
+            case Status of
+                input_required ->
+                    {ok, TaskId, TaskPid};
+                _ ->
+                    find_input_required_in_list(Rest, Tasks)
             end
     end.
 
+%% @private 继续 input_required 状态的任务
+continue_input_required_task(Id, _TaskId, TaskPid, Message, Context) ->
+    AgentConfig = maps:get(agent_config, Context, #{}),
+
+    %% 添加用户消息
+    ok = beamai_a2a_task:add_message(TaskPid, beamai_a2a_convert:normalize_message(Message)),
+
+    %% 更新状态为 working
+    ok = beamai_a2a_task:update_status(TaskPid, working),
+
+    %% 异步继续执行
+    spawn_link(fun() -> execute_task(TaskPid, AgentConfig) end),
+
+    %% 返回更新后的 Task
+    {ok, Task} = beamai_a2a_task:get(TaskPid),
+
+    Response = make_success_response(Id, beamai_a2a_convert:task_to_json(Task)),
+    {ok, Response, Context}.
+
+%% @private 执行任务继续
+do_continue_task(Id, TaskPid, Message, Context) ->
+    AgentConfig = maps:get(agent_config, Context, #{}),
+
+    %% 添加消息并继续执行
+    ok = beamai_a2a_task:add_message(TaskPid, beamai_a2a_convert:normalize_message(Message)),
+
+    %% 更新状态为 working
+    ok = beamai_a2a_task:update_status(TaskPid, working),
+
+    %% 异步继续执行
+    spawn_link(fun() -> execute_task(TaskPid, AgentConfig) end),
+
+    %% 返回更新后的 Task
+    {ok, Task} = beamai_a2a_task:get(TaskPid),
+
+    Response = make_success_response(Id, beamai_a2a_convert:task_to_json(Task)),
+    {ok, Response, Context}.
+
 %%====================================================================
-%% tasks/sendSubscribe
+%% tasks/get 处理
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/sendSubscribe: send a message and subscribe to
-%% task updates.
+%% @doc 处理 tasks/get 方法
 %%
-%% Returns `{subscribe, Pid, TaskId}' so the server/cowboy handler
-%% can set up an SSE stream.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_subscribe(map(), map(), atom()) ->
-    {subscribe, pid(), binary()} | {error, map()}.
-handle_subscribe(Params, Context, _Mode) ->
-    case handle_send(Params, Context, true) of
-        {subscribe, Pid, TaskId} ->
-            {subscribe, Pid, TaskId};
-        {ok, _Result} ->
-            %% Fallback: get the task pid for subscription
-            TaskId = extract_task_id_from_params(Params),
-            case a2a_task_store:get_task_pid(TaskId) of
-                {ok, Pid} ->
-                    {subscribe, Pid, TaskId};
-                {error, _} ->
-                    {error, beamai_a2a_jsonrpc:task_not_found()}
-            end;
-        {error, _} = Error ->
-            Error
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数（需要 taskId）
+%% @param Context 请求上下文
+%% @returns {ok, Response, Context}
+-spec handle_tasks_get(term(), map(), map()) -> {ok, map(), map()}.
+handle_tasks_get(Id, Params, Context) ->
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
+    Tasks = maps:get(tasks, Context, #{}),
+
+    case TaskId of
+        undefined ->
+            Response = make_error_response(Id, -32602, <<"Missing required parameter: taskId">>, #{}),
+            {ok, Response, Context};
+        _ ->
+            case maps:get(TaskId, Tasks, undefined) of
+                undefined ->
+                    Response = make_error_response(Id, -32001, <<"Task not found">>,
+                                                  #{<<"taskId">> => TaskId}),
+                    {ok, Response, Context};
+                TaskPid ->
+                    {ok, Task} = beamai_a2a_task:get(TaskPid),
+                    Response = make_success_response(Id, beamai_a2a_convert:task_to_json(Task)),
+                    {ok, Response, Context}
+            end
     end.
 
 %%====================================================================
-%% tasks/resubscribe
+%% tasks/cancel 处理
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/resubscribe: resubscribe to an existing task.
+%% @doc 处理 tasks/cancel 方法
 %%
-%% Used when a client's SSE connection was dropped and they want to
-%% reconnect to receive further updates.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_resubscribe(map(), map(), atom()) ->
-    {subscribe, pid(), binary()} | {error, map()}.
-handle_resubscribe(Params, _Context, _Mode) ->
-    TaskId = maps:get(<<"id">>, Params, undefined),
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数（需要 taskId）
+%% @param Context 请求上下文
+%% @returns {ok, Response, Context}
+-spec handle_tasks_cancel(term(), map(), map()) -> {ok, map(), map()}.
+handle_tasks_cancel(Id, Params, Context) ->
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
+    Tasks = maps:get(tasks, Context, #{}),
+
     case TaskId of
         undefined ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                <<"Missing required field: id">>)};
+            Response = make_error_response(Id, -32602, <<"Missing required parameter: taskId">>, #{}),
+            {ok, Response, Context};
         _ ->
-            case a2a_task_store:get_task(TaskId) of
-                {ok, Task} ->
-                    State = (Task#task.status)#task_status.state,
-                    case beamai_a2a_types:is_terminal(State) of
-                        true ->
-                            {error, beamai_a2a_jsonrpc:unsupported_operation()};
-                        false ->
-                            case a2a_task_store:get_task_pid(TaskId) of
-                                {ok, Pid} ->
-                                    {subscribe, Pid, TaskId};
-                                {error, not_found} ->
-                                    {error, beamai_a2a_jsonrpc:task_not_found(TaskId)}
-                            end
-                    end;
-                {error, not_found} ->
-                    {error, beamai_a2a_jsonrpc:task_not_found(TaskId)}
+            case maps:get(TaskId, Tasks, undefined) of
+                undefined ->
+                    Response = make_error_response(Id, -32001, <<"Task not found">>,
+                                                  #{<<"taskId">> => TaskId}),
+                    {ok, Response, Context};
+                TaskPid ->
+                    case beamai_a2a_task:cancel(TaskPid) of
+                        ok ->
+                            {ok, Task} = beamai_a2a_task:get(TaskPid),
+                            Response = make_success_response(Id, beamai_a2a_convert:task_to_json(Task)),
+                            {ok, Response, Context};
+                        {error, Reason} ->
+                            Response = make_error_response(Id, -32003, <<"Cannot cancel task">>,
+                                                          #{<<"reason">> => format_error(Reason)}),
+                            {ok, Response, Context}
+                    end
             end
     end.
 
 %%====================================================================
-%% tasks/pushNotification/set
+%% Push 通知配置处理
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/pushNotification/set: register a push endpoint.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_push_set(map(), map()) -> {ok, map()} | {error, map()}.
-handle_push_set(Params, _Context) ->
-    TaskId = maps:get(<<"id">>, Params,
-                      maps:get(<<"taskId">>, Params, undefined)),
-    PushConfig = maps:get(<<"pushNotificationConfig">>, Params, #{}),
+%% @doc 处理 tasks/pushNotificationConfig/set 方法
+%%
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数（需要 taskId 和 pushNotificationConfig）
+%% @param Context 请求上下文
+%% @returns {ok, Response, Context}
+-spec handle_push_config_set(term(), map(), map()) -> {ok, map(), map()}.
+handle_push_config_set(Id, Params, Context) ->
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
+    WebhookConfig = maps:get(<<"pushNotificationConfig">>, Params, #{}),
+    Tasks = maps:get(tasks, Context, #{}),
+
     case TaskId of
         undefined ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                <<"Missing required field: id">>)};
+            Response = make_error_response(Id, -32602, <<"Missing required parameter: taskId">>, #{}),
+            {ok, Response, Context};
         _ ->
-            ConfigId = maps:get(<<"id">>, PushConfig,
-                                beamai_a2a_utils:generate_id()),
-            case beamai_a2a_push:register(TaskId, ConfigId, PushConfig) of
-                ok ->
-                    {ok, #{
-                        <<"id">>     => ConfigId,
-                        <<"taskId">> => TaskId
-                    }};
-                {error, Reason} ->
-                    {error, beamai_a2a_jsonrpc:invalid_params(
-                        beamai_a2a_utils:to_binary(Reason))}
+            %% 验证任务存在
+            case maps:get(TaskId, Tasks, undefined) of
+                undefined ->
+                    Response = make_error_response(Id, -32001, <<"Task not found">>,
+                                                  #{<<"taskId">> => TaskId}),
+                    {ok, Response, Context};
+                _ ->
+                    %% 注册 webhook
+                    Config = normalize_webhook_config(WebhookConfig),
+                    case beamai_a2a_push:register(TaskId, Config) of
+                        ok ->
+                            Response = make_success_response(Id, #{
+                                <<"taskId">> => TaskId,
+                                <<"pushNotificationConfig">> => webhook_config_to_json(Config)
+                            }),
+                            {ok, Response, Context};
+                        {error, Reason} ->
+                            Response = make_error_response(Id, -32005, <<"Failed to set push notification config">>,
+                                                          #{<<"reason">> => format_error(Reason)}),
+                            {ok, Response, Context}
+                    end
             end
     end.
 
-%%====================================================================
-%% tasks/pushNotification/get
-%%====================================================================
+%% @doc 处理 tasks/pushNotificationConfig/get 方法
+%%
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数（需要 taskId）
+%% @param Context 请求上下文
+%% @returns {ok, Response, Context}
+-spec handle_push_config_get(term(), map(), map()) -> {ok, map(), map()}.
+handle_push_config_get(Id, Params, Context) ->
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
 
-%%--------------------------------------------------------------------
-%% @doc Handle tasks/pushNotification/get: retrieve push config.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_push_get(map(), map()) -> {ok, map()} | {error, map()}.
-handle_push_get(Params, _Context) ->
-    TaskId = maps:get(<<"id">>, Params,
-                      maps:get(<<"taskId">>, Params, undefined)),
     case TaskId of
         undefined ->
-            {error, beamai_a2a_jsonrpc:invalid_params(
-                <<"Missing required field: id">>)};
+            Response = make_error_response(Id, -32602, <<"Missing required parameter: taskId">>, #{}),
+            {ok, Response, Context};
         _ ->
             case beamai_a2a_push:get_config(TaskId) of
-                {ok, Configs} ->
-                    {ok, #{
-                        <<"taskId">>  => TaskId,
-                        <<"configs">> => Configs
-                    }}
+                {ok, Config} ->
+                    Response = make_success_response(Id, #{
+                        <<"taskId">> => TaskId,
+                        <<"pushNotificationConfig">> => Config
+                    }),
+                    {ok, Response, Context};
+                {error, not_found} ->
+                    Response = make_error_response(Id, -32006, <<"Push notification config not found">>,
+                                                  #{<<"taskId">> => TaskId}),
+                    {ok, Response, Context}
+            end
+    end.
+
+%% @doc 处理 tasks/pushNotificationConfig/delete 方法
+%%
+%% @param Id JSON-RPC 请求 ID
+%% @param Params 请求参数（需要 taskId）
+%% @param Context 请求上下文
+%% @returns {ok, Response, Context}
+-spec handle_push_config_delete(term(), map(), map()) -> {ok, map(), map()}.
+handle_push_config_delete(Id, Params, Context) ->
+    TaskId = maps:get(<<"taskId">>, Params, undefined),
+
+    case TaskId of
+        undefined ->
+            Response = make_error_response(Id, -32602, <<"Missing required parameter: taskId">>, #{}),
+            {ok, Response, Context};
+        _ ->
+            case beamai_a2a_push:unregister(TaskId) of
+                ok ->
+                    Response = make_success_response(Id, #{
+                        <<"taskId">> => TaskId,
+                        <<"deleted">> => true
+                    }),
+                    {ok, Response, Context};
+                {error, not_found} ->
+                    Response = make_error_response(Id, -32006, <<"Push notification config not found">>,
+                                                  #{<<"taskId">> => TaskId}),
+                    {ok, Response, Context}
             end
     end.
 
 %%====================================================================
-%% Internal functions
+%% 任务执行
 %%====================================================================
 
-%% @doc Decode the params for a tasks/send request into a Message
-%% record and optional configuration.
--spec decode_send_params(map()) ->
-    {ok, #message{}, #send_message_configuration{} | undefined} |
-    {error, term()}.
-decode_send_params(Params) ->
-    case maps:get(<<"message">>, Params, undefined) of
-        undefined ->
-            {error, missing_message};
-        MessageMap ->
-            case a2a_json:decode_message(MessageMap) of
-                {ok, Message} ->
-                    Config = case maps:get(<<"configuration">>, Params,
-                                           undefined) of
-                        undefined -> undefined;
-                        CMap -> decode_config(CMap)
-                    end,
-                    {ok, Message, Config};
+%% @private 执行任务
+execute_task(TaskPid, AgentConfig) ->
+    %% 更新状态为 working
+    ok = beamai_a2a_task:update_status(TaskPid, working),
+
+    %% 获取任务 ID 和发送 working 通知
+    {ok, TaskId} = beamai_a2a_task:get_id(TaskPid),
+    {ok, WorkingTask} = beamai_a2a_task:get(TaskPid),
+    notify_task_update(TaskId, WorkingTask),
+
+    %% 获取任务消息
+    Messages = maps:get(messages, WorkingTask, []),
+
+    %% 提取用户输入
+    UserInput = extract_user_input(Messages),
+
+    %% 使用 beamai_agent 执行
+    case execute_with_agent(UserInput, AgentConfig) of
+        {ok, Result} ->
+            %% 创建 Artifact
+            Artifact = #{
+                name => <<"response">>,
+                parts => [#{kind => text, text => Result}]
+            },
+            ok = beamai_a2a_task:add_artifact(TaskPid, Artifact),
+            ok = beamai_a2a_task:update_status(TaskPid, completed),
+            %% 发送 completed 通知
+            {ok, CompletedTask} = beamai_a2a_task:get(TaskPid),
+            notify_task_update(TaskId, CompletedTask);
+        {error, Reason} ->
+            ErrorMsg = #{
+                role => agent,
+                parts => [#{kind => text, text => format_error(Reason)}]
+            },
+            ok = beamai_a2a_task:update_status(TaskPid, {failed, ErrorMsg}),
+            %% 发送 failed 通知
+            {ok, FailedTask} = beamai_a2a_task:get(TaskPid),
+            notify_task_update(TaskId, FailedTask)
+    end.
+
+%% @private 从消息列表提取用户输入
+extract_user_input([]) -> <<>>;
+extract_user_input(Messages) ->
+    %% 获取最后一条用户消息
+    UserMessages = [M || M <- Messages, maps:get(role, M, undefined) =:= user],
+    case UserMessages of
+        [] -> <<>>;
+        _ ->
+            LastMsg = lists:last(UserMessages),
+            Parts = maps:get(parts, LastMsg, []),
+            extract_text_from_parts(Parts)
+    end.
+
+%% @private 从 Parts 提取文本
+extract_text_from_parts([]) -> <<>>;
+extract_text_from_parts([#{kind := text, text := Text} | _]) -> Text;
+extract_text_from_parts([_ | Rest]) -> extract_text_from_parts(Rest).
+
+%% @private 使用 Agent 执行任务
+execute_with_agent(Input, AgentConfig) ->
+    case beamai_agent:new(AgentConfig) of
+        {ok, Agent} ->
+            case beamai_agent:run(Agent, Input) of
+                {ok, #{content := Content}, _NewAgent} ->
+                    {ok, Content};
+                {ok, Result, _NewAgent} when is_map(Result) ->
+                    case maps:get(content, Result, undefined) of
+                        undefined -> {ok, jsx:encode(Result, [])};
+                        Resp -> {ok, Resp}
+                    end;
+                {interrupt, _InterruptInfo, _NewAgent} ->
+                    {ok, <<"Agent execution interrupted, awaiting input.">>};
                 {error, Reason} ->
                     {error, Reason}
-            end
+            end;
+        {error, Reason} ->
+            {error, {agent_create_failed, Reason}}
     end.
 
-%% @doc Decode send message configuration from a map.
--spec decode_config(map()) -> #send_message_configuration{}.
-decode_config(CMap) ->
-    #send_message_configuration{
-        accepted_output_modes =
-            maps:get(<<"acceptedOutputModes">>, CMap, []),
-        push_notification_config =
-            case maps:get(<<"pushNotificationConfig">>, CMap, undefined) of
-                undefined -> undefined;
-                PMap -> decode_push_config(PMap)
-            end,
-        history_length =
-            maps:get(<<"historyLength">>, CMap, undefined),
-        blocking =
-            maps:get(<<"blocking">>, CMap, false)
+%% @private 发送任务状态通知
+notify_task_update(TaskId, Task) ->
+    %% 异步发送通知，不阻塞主流程
+    spawn(fun() ->
+        beamai_a2a_push:notify_async(TaskId, Task)
+    end),
+    ok.
+
+%%====================================================================
+%% 响应构建
+%%====================================================================
+
+%% @private 构建成功响应
+make_success_response(Id, Result) ->
+    #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"id">> => Id,
+        <<"result">> => Result
     }.
 
-%% @doc Decode a push notification config from a map.
--spec decode_push_config(map()) -> #push_notification_config{}.
-decode_push_config(M) ->
-    #push_notification_config{
-        id = maps:get(<<"id">>, M, undefined),
-        url = maps:get(<<"url">>, M),
-        token = maps:get(<<"token">>, M, undefined),
-        authentication = case maps:get(<<"authentication">>, M, undefined) of
-            undefined -> undefined;
-            AMap ->
-                #authentication_info{
-                    scheme = maps:get(<<"scheme">>, AMap, <<"Bearer">>),
-                    credentials = maps:get(<<"credentials">>, AMap, undefined)
-                }
-        end
+%% @private 构建错误响应
+make_error_response(Id, Code, Message, Data) ->
+    Error = case maps:size(Data) of
+        0 -> #{<<"code">> => Code, <<"message">> => Message};
+        _ -> #{<<"code">> => Code, <<"message">> => Message, <<"data">> => Data}
+    end,
+    #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"id">> => Id,
+        <<"error">> => Error
     }.
 
-%% @doc Create a new task via the existing a2a_task_statem.
--spec create_new_task(#message{}, #send_message_configuration{} | undefined) ->
-    {ok, #task{}, pid()} | {error, term()}.
-create_new_task(Message, Config) ->
-    Opts = case Config of
-        undefined -> #{};
-        #send_message_configuration{blocking = Blocking} ->
-            #{blocking => Blocking}
+%%====================================================================
+%% 工具函数（使用公共模块）
+%%====================================================================
+
+%% @private 格式化错误（委托给公共模块）
+format_error(Reason) ->
+    beamai_a2a_utils:format_error(Reason).
+
+%% @private 规范化 webhook 配置
+normalize_webhook_config(Config) ->
+    #{
+        url => maps:get(<<"url">>, Config, undefined),
+        token => maps:get(<<"token">>, Config, undefined),
+        events => normalize_webhook_events(maps:get(<<"events">>, Config, all)),
+        retry_count => maps:get(<<"retryCount">>, Config, 3)
+    }.
+
+%% @private 规范化 webhook 事件列表（安全版本）
+%%
+%% 使用 beamai_a2a_types 的安全转换函数，防止 atom 表耗尽攻击。
+%% 无效事件会被过滤掉。
+normalize_webhook_events(all) -> all;
+normalize_webhook_events(<<"all">>) -> all;
+normalize_webhook_events(Events) when is_list(Events) ->
+    ValidEvents = [beamai_a2a_types:binary_to_push_event(E) || E <- Events, is_binary(E)],
+    %% 过滤掉 undefined（无效事件）
+    [E || E <- ValidEvents, E =/= undefined];
+normalize_webhook_events(_) -> all.
+
+%% @private 将 webhook 配置转换为 JSON
+webhook_config_to_json(Config) ->
+    Base = #{
+        <<"url">> => maps:get(url, Config),
+        <<"retryCount">> => maps:get(retry_count, Config, 3)
+    },
+    %% 隐藏 token
+    WithToken = case maps:get(token, Config, undefined) of
+        undefined -> Base;
+        _ -> Base#{<<"token">> => <<"***">>}
     end,
-    HandlerModule = application:get_env(beamai_a2a, handler_module, undefined),
-    Opts2 = case HandlerModule of
-        undefined -> Opts;
-        Mod -> Opts#{handler_module => Mod}
-    end,
-    case a2a_task_statem:start_link(Message, Opts2) of
-        {ok, Pid} ->
-            case a2a_task_statem:get_task(Pid) of
-                {ok, Task} ->
-                    %% Register push notification if configured
-                    maybe_register_push(Task#task.id, Config),
-                    {ok, Task, Pid};
-                Error -> Error
-            end;
-        Error -> Error
-    end.
-
-%% @doc Continue an existing task with a new message.
--spec continue_existing_task(binary(), #message{}) ->
-    {ok, #task{}} | {error, term()}.
-continue_existing_task(TaskId, Message) ->
-    case a2a_task_store:get_task_pid(TaskId) of
-        {ok, Pid} ->
-            a2a_task_statem:send_message(Pid, Message);
-        {error, not_found} ->
-            {error, task_not_found}
-    end.
-
-%% @doc Apply a history length limit to a task record.
--spec apply_history_limit(#task{}, integer() | undefined) -> #task{}.
-apply_history_limit(Task, undefined) ->
-    Task;
-apply_history_limit(Task, 0) ->
-    Task#task{history = []};
-apply_history_limit(Task, N) when is_integer(N), N > 0 ->
-    History = Task#task.history,
-    Len = length(History),
-    case Len =< N of
-        true -> Task;
-        false -> Task#task{history = lists:nthtail(Len - N, History)}
-    end;
-apply_history_limit(Task, _) ->
-    Task.
-
-%% @doc Register push notification from send config if present.
--spec maybe_register_push(binary(),
-                          #send_message_configuration{} | undefined) -> ok.
-maybe_register_push(_TaskId, undefined) ->
-    ok;
-maybe_register_push(_TaskId, #send_message_configuration{
-    push_notification_config = undefined}) ->
-    ok;
-maybe_register_push(TaskId, #send_message_configuration{
-    push_notification_config = PNConfig}) ->
-    ConfigId = case PNConfig#push_notification_config.id of
-        undefined -> beamai_a2a_utils:generate_id();
-        Id -> Id
-    end,
-    PushMap = beamai_a2a_convert:push_config_to_map(PNConfig),
-    beamai_a2a_push:register(TaskId, ConfigId, PushMap).
-
-%% @doc Extract a task id from params, checking message.taskId as well.
--spec extract_task_id_from_params(map()) -> binary() | undefined.
-extract_task_id_from_params(Params) ->
-    case maps:get(<<"id">>, Params, undefined) of
-        undefined ->
-            case maps:get(<<"message">>, Params, undefined) of
-                undefined -> undefined;
-                MsgMap -> maps:get(<<"taskId">>, MsgMap, undefined)
-            end;
-        Id -> Id
+    %% 添加事件
+    Events = maps:get(events, Config, all),
+    case Events of
+        all -> WithToken#{<<"events">> => <<"all">>};
+        _ -> WithToken#{<<"events">> => [atom_to_binary(E, utf8) || E <- Events]}
     end.

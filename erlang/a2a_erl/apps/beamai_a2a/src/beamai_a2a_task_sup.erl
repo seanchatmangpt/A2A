@@ -1,66 +1,58 @@
-%%% @doc BeamAI A2A Task Supervisor
+%%%-------------------------------------------------------------------
+%%% @doc A2A Task Supervisor
 %%%
-%%% A simple_one_for_one supervisor that dynamically manages beamai_a2a_task
-%%% gen_server processes. Each child is a beamai_a2a_task process started
-%%% with an options map.
+%%% 管理 Task 进程的动态创建和监督。
+%%% 使用 simple_one_for_one 策略。
 %%%
-%%% Usage:
-%%%   {ok, _} = beamai_a2a_task_sup:start_link().
-%%%   {ok, Pid} = beamai_a2a_task_sup:start_task(#{id => <<"task-1">>}).
 %%% @end
+%%%-------------------------------------------------------------------
 -module(beamai_a2a_task_sup).
+
 -behaviour(supervisor).
 
-%% API
--export([
-    start_link/0,
-    start_task/1
-]).
+%% API 导出
+-export([start_link/0, start_task/1]).
 
-%% Supervisor callbacks
+%% supervisor 回调
 -export([init/1]).
 
--define(SERVER, ?MODULE).
+%%====================================================================
+%% API
+%%====================================================================
 
-%%% ============================================================================
-%%% API Functions
-%%% ============================================================================
-
-%% @doc Start the task supervisor.
+%% @doc 启动 Supervisor
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%% @doc Start a new beamai_a2a_task child process under this supervisor.
-%% Opts is a map passed to beamai_a2a_task:start_link/1. It may contain:
-%%   id        - binary task ID
-%%   status    - initial status atom
-%%   messages  - initial messages
-%%   artifacts - initial artifacts
-%%   metadata  - metadata map
+%% @doc 启动一个新的 Task 进程
+%%
+%% @param Opts Task 配置选项
+%% @returns {ok, Pid} | {error, Reason}
 -spec start_task(map()) -> {ok, pid()} | {error, term()}.
-start_task(Opts) when is_map(Opts) ->
-    supervisor:start_child(?SERVER, [Opts]).
+start_task(Opts) ->
+    supervisor:start_child(?MODULE, [Opts]).
 
-%%% ============================================================================
-%%% Supervisor Callbacks
-%%% ============================================================================
+%%====================================================================
+%% supervisor 回调
+%%====================================================================
 
--spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
+%% @doc 初始化 Supervisor
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
-        intensity => 100,
+        intensity => 10,
         period => 60
     },
 
-    ChildSpec = #{
+    %% Task 子进程规范
+    TaskSpec = #{
         id => beamai_a2a_task,
         start => {beamai_a2a_task, start_link, []},
-        restart => temporary,
+        restart => temporary,  %% Task 完成后不重启
         shutdown => 5000,
         type => worker,
         modules => [beamai_a2a_task]
     },
 
-    {ok, {SupFlags, [ChildSpec]}}.
+    {ok, {SupFlags, [TaskSpec]}}.

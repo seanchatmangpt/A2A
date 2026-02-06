@@ -1,364 +1,201 @@
-%%%-------------------------------------------------------------------
-%%% @doc BeamAI Chat Completion Module.
-%%%
-%%% Provides a unified interface for sending chat messages to LLM
-%%% providers with support for:
-%%% - Multiple providers (Anthropic, OpenAI, etc.)
-%%% - Streaming responses via SSE
-%%% - Tool use / function calling
-%%% - Automatic retry with exponential backoff on transient failures
-%%% - Configurable temperature, max tokens, and model selection
-%%%
-%%% @end
-%%%-------------------------------------------------------------------
 -module(beamai_chat_completion).
 
--behaviour(gen_server).
+%% @doc Chat Completion Service
+%%
+%% Provides LLM chat completion with:
+%% - Multi-provider routing (openai, anthropic, zhipu, ollama, deepseek, bailian)
+%% - Request building (messages, tools, tool_choice, stream)
+%% - Retry logic with exponential backoff
+%% - Streaming support with token callbacks
 
-%% API
--export([
-    start_link/0,
-    start_link/1,
-    complete/2,
-    complete/3,
-    stream/2,
-    stream/3,
-    with_tools/3
-]).
+-behaviour(beamai_llm_behaviour).
 
-%% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+-include_lib("beamai_core/include/beamai_common.hrl").
 
--define(SERVER, ?MODULE).
+%% Config API
+-export([create/2]).
 
-%%====================================================================
-%% Records
-%%====================================================================
+%% Chat API
+-export([chat/2, chat/3]).
+-export([stream_chat/3, stream_chat/4]).
 
--record(completion_request, {
-    provider    :: atom(),
-    model       :: binary(),
-    messages    :: list(),
-    tools = []  :: list(),
-    temperature = 0.7  :: float(),
-    max_tokens  = 4096 :: integer(),
-    stream = false     :: boolean()
-}).
+%% Types
+-export_type([config/0, provider/0]).
 
--record(state, {
-    providers      = #{} :: #{atom() => module()},
-    default_provider     :: atom(),
-    retry_max      = 3   :: non_neg_integer(),
-    retry_base_ms  = 1000 :: non_neg_integer(),
-    stream_timeout = 60000 :: non_neg_integer(),
-    request_count  = 0   :: non_neg_integer(),
-    error_count    = 0   :: non_neg_integer()
-}).
-
--type completion_opts() :: #{
-    provider => atom(),
-    model => binary(),
-    temperature => float(),
-    max_tokens => integer(),
-    system_prompt => binary(),
-    stop_sequences => [binary()],
-    metadata => map()
+-type provider() :: openai | anthropic | ollama | zhipu | bailian | deepseek | mock | {custom, module()}.
+-type config() :: #{
+    provider := provider(),
+    '__llm_config__' := true,
+    atom() => term()
 }.
 
--type stream_callback() :: fun((map() | eof | {error, term()}) -> ok).
-
--export_type([completion_opts/0, stream_callback/0]).
-
 %%====================================================================
-%% API Functions
+%% Config API
 %%====================================================================
 
-%% @doc Start the chat completion server with default options.
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    start_link(#{}).
-
-%% @doc Start the chat completion server with custom options.
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
-start_link(Opts) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Opts, []).
-
-%% @doc Send a chat completion request with default options.
-%% Messages is a list of #{role => binary(), content => binary()} maps,
-%% or a single binary prompt string.
--spec complete(atom(), list() | binary()) ->
-    {ok, map()} | {error, term()}.
-complete(Provider, Messages) ->
-    complete(Provider, Messages, #{}).
-
-%% @doc Send a chat completion request with options.
--spec complete(atom(), list() | binary(), completion_opts()) ->
-    {ok, map()} | {error, term()}.
-complete(Provider, Messages, Opts) ->
-    gen_server:call(?SERVER, {complete, Provider, Messages, Opts}, 120000).
-
-%% @doc Stream a chat completion with default options.
-%% Callback receives chunks as maps, then 'eof' when done.
--spec stream(atom(), list() | binary()) ->
-    {ok, reference()} | {error, term()}.
-stream(Provider, Messages) ->
-    stream(Provider, Messages, #{}).
-
-%% @doc Stream a chat completion with options.
--spec stream(atom(), list() | binary(), completion_opts()) ->
-    {ok, reference()} | {error, term()}.
-stream(Provider, Messages, Opts) ->
-    Caller = self(),
-    gen_server:call(?SERVER, {stream, Provider, Messages, Opts, Caller}, 120000).
-
-%% @doc Send a chat completion request with tool definitions.
-%% Tools is a list of tool definition maps compatible with the
-%% provider's function calling API.
--spec with_tools(atom(), list() | binary(), list()) ->
-    {ok, map()} | {error, term()}.
-with_tools(Provider, Messages, Tools) ->
-    gen_server:call(?SERVER, {with_tools, Provider, Messages, Tools}, 120000).
-
-%%====================================================================
-%% gen_server Callbacks
-%%====================================================================
-
-%% @private
-init(Opts) ->
-    DefaultProvider = get_env(default_provider, maps:get(default_provider, Opts, anthropic)),
-    RetryMax = get_env(retry_max_attempts, maps:get(retry_max, Opts, 3)),
-    RetryBase = get_env(retry_base_delay_ms, maps:get(retry_base_ms, Opts, 1000)),
-    StreamTimeout = get_env(stream_timeout_ms, maps:get(stream_timeout, Opts, 60000)),
-
-    %% Register built-in providers
-    Providers = #{
-        anthropic => beamai_llm_anthropic,
-        openai    => beamai_llm_openai
+%% @doc Create a chat completion config for a given provider.
+%%
+%% Example:
+%%   Config = beamai_chat_completion:create(anthropic, #{
+%%       model => <<"claude-sonnet-4-20250514">>,
+%%       api_key => <<"sk-...">>
+%%   })
+-spec create(provider(), map()) -> config().
+create(Provider, Opts) ->
+    Module = provider_module(Provider),
+    DefaultConfig = Module:default_config(),
+    BaseConfig = #{
+        provider => Provider,
+        '__llm_config__' => true
     },
-
-    %% Merge any custom providers from opts
-    CustomProviders = maps:get(providers, Opts, #{}),
-    AllProviders = maps:merge(Providers, CustomProviders),
-
-    logger:info("BeamAI chat completion started with default provider: ~p", [DefaultProvider]),
-
-    {ok, #state{
-        providers = AllProviders,
-        default_provider = DefaultProvider,
-        retry_max = RetryMax,
-        retry_base_ms = RetryBase,
-        stream_timeout = StreamTimeout
-    }}.
-
-%% @private
-handle_call({complete, Provider, Messages, Opts}, _From, State) ->
-    Result = do_complete(Provider, Messages, Opts, State),
-    NewState = update_counters(Result, State),
-    {reply, Result, NewState};
-
-handle_call({stream, Provider, Messages, Opts, Caller}, _From, State) ->
-    Result = do_stream(Provider, Messages, Opts, Caller, State),
-    NewState = update_counters(Result, State),
-    {reply, Result, NewState};
-
-handle_call({with_tools, Provider, Messages, Tools}, _From, State) ->
-    Opts = #{tools => Tools},
-    Result = do_complete(Provider, Messages, Opts, State),
-    NewState = update_counters(Result, State),
-    {reply, Result, NewState};
-
-handle_call(_Request, _From, State) ->
-    {reply, {error, unknown_request}, State}.
-
-%% @private
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @private
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @private
-terminate(_Reason, _State) ->
-    ok.
-
-%% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+    maps:merge(maps:merge(DefaultConfig, BaseConfig), Opts).
 
 %%====================================================================
-%% Internal Functions
+%% Chat API
 %%====================================================================
 
-%% @private
-%% Execute a completion request with retry logic.
--spec do_complete(atom(), list() | binary(), map(), #state{}) ->
+%% @doc Send chat completion request
+-spec chat(config(), [map()]) -> {ok, map()} | {error, term()}.
+chat(Config, Messages) ->
+    chat(Config, Messages, #{}).
+
+%% @doc Send chat completion request with options
+%%
+%% Options:
+%%   tools => [tool_spec()]     - tool definitions
+%%   tool_choice => auto | none | required
+%%   max_retries => integer()   - retry count (default 3)
+%%   retry_delay => integer()   - base retry delay ms (default 1000)
+%%   on_retry => fun(RetryState) - retry callback
+-spec chat(config(), [map()], map()) -> {ok, map()} | {error, term()}.
+chat(Config, Messages, Opts) ->
+    Request = build_request(Messages, Opts),
+    RetryOpts = get_retry_opts(Opts),
+    do_chat(Config, Request, RetryOpts).
+
+%% @doc Send streaming chat request
+-spec stream_chat(config(), [map()], fun((term()) -> ok)) ->
     {ok, map()} | {error, term()}.
-do_complete(Provider, Messages, Opts, State) ->
-    case resolve_provider(Provider, State) of
-        {ok, Module} ->
-            NormalizedMsgs = normalize_messages(Messages),
-            Request = build_request(Provider, NormalizedMsgs, Opts, State),
-            execute_with_retry(Module, Request, State#state.retry_max, State#state.retry_base_ms);
-        {error, _} = Err ->
-            Err
-    end.
+stream_chat(Config, Messages, Callback) ->
+    stream_chat(Config, Messages, Callback, #{}).
 
-%% @private
-%% Execute a streaming request.
--spec do_stream(atom(), list() | binary(), map(), pid(), #state{}) ->
-    {ok, reference()} | {error, term()}.
-do_stream(Provider, Messages, Opts, Caller, State) ->
-    case resolve_provider(Provider, State) of
-        {ok, Module} ->
-            NormalizedMsgs = normalize_messages(Messages),
-            Request = build_request(Provider, NormalizedMsgs, Opts#{stream => true}, State),
-            StreamRef = make_ref(),
-            spawn_link(fun() ->
-                stream_worker(Module, Request, Caller, StreamRef, State#state.stream_timeout)
-            end),
-            {ok, StreamRef};
-        {error, _} = Err ->
-            Err
-    end.
+%% @doc Send streaming chat request with options
+-spec stream_chat(config(), [map()], fun((term()) -> ok), map()) ->
+    {ok, map()} | {error, term()}.
+stream_chat(Config, Messages, Callback, Opts) ->
+    Module = provider_module(maps:get(provider, Config)),
+    Request = build_request(Messages, Opts#{stream => true}),
+    WrappedCallback = wrap_stream_callback(Callback, Opts),
+    Module:stream_chat(Config, Request, WrappedCallback).
 
-%% @private
-%% Look up the module implementing the provider.
--spec resolve_provider(atom(), #state{}) -> {ok, module()} | {error, term()}.
-resolve_provider(Provider, #state{providers = Providers, default_provider = Default}) ->
-    ResolvedProvider = case Provider of
-        undefined -> Default;
-        default   -> Default;
-        P         -> P
-    end,
-    case maps:find(ResolvedProvider, Providers) of
-        {ok, Module} -> {ok, Module};
-        error -> {error, {unknown_provider, ResolvedProvider}}
-    end.
+%%====================================================================
+%% Internal - Provider Routing
+%%====================================================================
 
-%% @private
-%% Build a completion_request record from user inputs.
--spec build_request(atom(), list(), map(), #state{}) -> #completion_request{}.
-build_request(Provider, Messages, Opts, _State) ->
-    DefaultTemp = get_env(default_temperature, 0.7),
-    DefaultMaxTokens = get_env(default_max_tokens, 4096),
+provider_module(openai) -> llm_provider_openai;
+provider_module(anthropic) -> llm_provider_anthropic;
+provider_module(ollama) -> llm_provider_ollama;
+provider_module(zhipu) -> llm_provider_zhipu;
+provider_module(bailian) -> llm_provider_bailian;
+provider_module(deepseek) -> llm_provider_deepseek;
+provider_module(mock) -> llm_provider_mock;
+provider_module({custom, Module}) -> Module.
 
-    %% Add system prompt as first message if provided
-    SystemMessages = case maps:get(system_prompt, Opts, undefined) of
-        undefined -> [];
-        SysPrompt -> [#{role => <<"system">>, content => SysPrompt}]
-    end,
+%%====================================================================
+%% Internal - Request Building
+%%====================================================================
 
-    #completion_request{
-        provider    = Provider,
-        model       = maps:get(model, Opts, undefined),
-        messages    = SystemMessages ++ Messages,
-        tools       = maps:get(tools, Opts, []),
-        temperature = maps:get(temperature, Opts, DefaultTemp),
-        max_tokens  = maps:get(max_tokens, Opts, DefaultMaxTokens),
-        stream      = maps:get(stream, Opts, false)
+build_request(Messages, Opts) ->
+    Base = #{messages => Messages},
+    Fields = [tools, tool_choice, stream],
+    lists:foldl(fun(F, Acc) ->
+        case maps:get(F, Opts, undefined) of
+            undefined -> Acc;
+            Value -> Acc#{F => Value}
+        end
+    end, Base, Fields).
+
+%%====================================================================
+%% Internal - Retry Logic
+%%====================================================================
+
+get_retry_opts(Opts) ->
+    #{
+        max_retries => maps:get(max_retries, Opts, ?DEFAULT_MAX_RETRIES),
+        retry_delay => maps:get(retry_delay, Opts, ?DEFAULT_RETRY_DELAY),
+        on_retry => maps:get(on_retry, Opts, undefined)
     }.
 
-%% @private
-%% Normalize various message input formats to a canonical list of maps.
--spec normalize_messages(list() | binary()) -> list().
-normalize_messages(Prompt) when is_binary(Prompt) ->
-    [#{role => <<"user">>, content => Prompt}];
-normalize_messages(Messages) when is_list(Messages) ->
-    lists:map(fun normalize_single_message/1, Messages);
-normalize_messages(Other) ->
-    [#{role => <<"user">>, content => ensure_binary(Other)}].
+do_chat(Config, Request, RetryOpts) ->
+    Module = provider_module(maps:get(provider, Config)),
+    do_chat_with_retry(Module, Config, Request, RetryOpts, 0).
 
-%% @private
-normalize_single_message(#{role := _Role, content := _Content} = Msg) ->
-    Msg;
-normalize_single_message(#{<<"role">> := Role, <<"content">> := Content} = Msg) ->
-    Base = #{role => Role, content => Content},
-    case maps:find(<<"name">>, Msg) of
-        {ok, Name} -> Base#{name => Name};
-        error -> Base
+do_chat_with_retry(Module, Config, Request, #{max_retries := Max}, Attempt) when Attempt >= Max ->
+    Module:chat(Config, Request);
+do_chat_with_retry(Module, Config, Request, RetryOpts, Attempt) ->
+    case Module:chat(Config, Request) of
+        {ok, _} = Success ->
+            Success;
+        {error, Reason} = Error ->
+            case is_retryable(Reason) of
+                true ->
+                    Delay = maps:get(retry_delay, RetryOpts) * (Attempt + 1),
+                    invoke_retry_callback(RetryOpts, #{
+                        attempt => Attempt + 1,
+                        max_retries => maps:get(max_retries, RetryOpts),
+                        error => Reason,
+                        delay => Delay
+                    }),
+                    timer:sleep(Delay),
+                    do_chat_with_retry(Module, Config, Request, RetryOpts, Attempt + 1);
+                false ->
+                    Error
+            end
+    end.
+
+is_retryable({http_error, Code, _}) when Code >= 500 -> true;
+is_retryable({http_error, 429, _}) -> true;
+is_retryable({request_failed, timeout}) -> true;
+is_retryable({request_failed, {closed, _}}) -> true;
+is_retryable(_) -> false.
+
+invoke_retry_callback(#{on_retry := undefined}, _) -> ok;
+invoke_retry_callback(#{on_retry := Callback}, RetryState) when is_function(Callback) ->
+    try Callback(RetryState)
+    catch _:_ -> ok
     end;
-normalize_single_message(Bin) when is_binary(Bin) ->
-    #{role => <<"user">>, content => Bin};
-normalize_single_message(Other) ->
-    #{role => <<"user">>, content => ensure_binary(Other)}.
+invoke_retry_callback(_, _) -> ok.
 
-%% @private
-%% Execute with exponential backoff retry on transient errors.
--spec execute_with_retry(module(), #completion_request{}, non_neg_integer(), non_neg_integer()) ->
-    {ok, map()} | {error, term()}.
-execute_with_retry(Module, Request, MaxRetries, BaseDelay) ->
-    execute_with_retry(Module, Request, 0, MaxRetries, BaseDelay).
+%%====================================================================
+%% Internal - Streaming
+%%====================================================================
 
-execute_with_retry(Module, Request, Attempt, MaxRetries, BaseDelay) ->
-    case catch Module:chat(Request, #{}) of
-        {ok, Response} ->
-            {ok, Response};
-        {error, {transient, Reason}} when Attempt < MaxRetries ->
-            Delay = BaseDelay * (1 bsl Attempt),
-            Jitter = rand:uniform(Delay div 2),
-            timer:sleep(Delay + Jitter),
-            logger:warning("Retrying LLM request (attempt ~p/~p): ~p",
-                          [Attempt + 1, MaxRetries, Reason]),
-            execute_with_retry(Module, Request, Attempt + 1, MaxRetries, BaseDelay);
-        {error, Reason} ->
-            {error, Reason};
-        {'EXIT', Reason} ->
-            {error, {provider_crash, Reason}};
-        Other ->
-            {error, {unexpected_response, Other}}
+wrap_stream_callback(Callback, Opts) ->
+    OnNewToken = maps:get(on_llm_new_token, Opts, undefined),
+    Meta = maps:get(callback_meta, Opts, #{}),
+    fun(Event) ->
+        invoke_new_token_callback(Event, OnNewToken, Meta),
+        Callback(Event)
     end.
 
-%% @private
-%% Worker process for streaming responses back to caller.
--spec stream_worker(module(), #completion_request{}, pid(), reference(), non_neg_integer()) -> ok.
-stream_worker(Module, Request, Caller, StreamRef, Timeout) ->
-    CallbackFun = fun(Chunk) ->
-        Caller ! {beamai_stream, StreamRef, Chunk}
-    end,
-    try
-        case Module:stream(Request, #{callback => CallbackFun, timeout => Timeout}) of
-            {ok, _FinalResponse} ->
-                Caller ! {beamai_stream, StreamRef, eof},
-                ok;
-            {error, Reason} ->
-                Caller ! {beamai_stream, StreamRef, {error, Reason}},
-                ok
-        end
-    catch
-        Class:Error:_Stack ->
-            Caller ! {beamai_stream, StreamRef, {error, {Class, Error}}},
-            ok
-    end.
+invoke_new_token_callback(_Event, undefined, _Meta) -> ok;
+invoke_new_token_callback(Event, Callback, Meta) when is_function(Callback) ->
+    case extract_token_from_event(Event) of
+        <<>> -> ok;
+        Token ->
+            try Callback(Token, Meta)
+            catch _:_ -> ok
+            end
+    end;
+invoke_new_token_callback(_, _, _) -> ok.
 
-%% @private
--spec update_counters({ok, term()} | {error, term()}, #state{}) -> #state{}.
-update_counters({ok, _}, State) ->
-    State#state{request_count = State#state.request_count + 1};
-update_counters({error, _}, State) ->
-    State#state{
-        request_count = State#state.request_count + 1,
-        error_count = State#state.error_count + 1
-    };
-update_counters(_, State) ->
-    State#state{request_count = State#state.request_count + 1}.
-
-%% @private
--spec get_env(atom(), term()) -> term().
-get_env(Key, Default) ->
-    application:get_env(beamai_llm, Key, Default).
-
-%% @private
--spec ensure_binary(term()) -> binary().
-ensure_binary(V) when is_binary(V) -> V;
-ensure_binary(V) when is_atom(V)   -> atom_to_binary(V, utf8);
-ensure_binary(V) when is_list(V)   -> list_to_binary(V);
-ensure_binary(V) when is_integer(V) -> integer_to_binary(V);
-ensure_binary(V) -> list_to_binary(io_lib:format("~p", [V])).
+extract_token_from_event(#{<<"choices">> := [#{<<"delta">> := Delta} | _]}) ->
+    maps:get(<<"content">>, Delta, <<>>);
+extract_token_from_event(#{<<"delta">> := #{<<"text">> := Text}}) ->
+    Text;
+extract_token_from_event(#{<<"response">> := Response}) when is_binary(Response) ->
+    Response;
+extract_token_from_event(#{<<"message">> := #{<<"content">> := Content}}) ->
+    Content;
+extract_token_from_event(_) ->
+    <<>>.

@@ -1,433 +1,260 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI Process Agent
+%%% @doc Process-native Agent
 %%%
-%%% A process-based agent for executing multi-step workflows.
-%%% Supports branching, parallel step execution, and result
-%%% aggregation. Each process agent manages a pipeline of steps
-%%% that can be sequential, parallel, or conditional.
+%%% 基于 Process Framework 实现的 Agent，与 beamai_agent 并存。
+%%% 核心区别：Tool 调用通过 Process 事件路由，对外可见可控。
+%%%
+%%% == 何时使用 ==
+%%%   - 需要在 tool 调用间插入审批、日志等步骤
+%%%   - 需要 Process 级别的 snapshot/restore
+%%%   - 需要与其他 Process step 组合编排
+%%%   - 需要细粒度的 tool 执行监控
+%%%
+%%% == 何时使用 beamai_agent ==
+%%%   - 简单的单次或多轮对话
+%%%   - 不需要外部介入 tool loop
+%%%   - 需要最小启动开销（无需 Process 基础设施）
+%%%
+%%% == 内部结构 ==
+%%% 自动构建包含两个 step 和循环 binding 的 Process：
+%%% ```
+%%%   user_message -> [llm_step] --tool_request--> [tool_step]
+%%%                       ^                             |
+%%%                       |________tool_results_________|
+%%%                       |
+%%%                   agent_done --> (output)
+%%% ```
+%%%
+%%% == 使用示例 ==
+%%% ```
+%%% Config = #{
+%%%     system_prompt => <<"你是一个助手"/utf8>>,
+%%%     llm => {anthropic, #{model => <<"glm-4.7">>, base_url => <<"https://open.bigmodel.cn/api/anthropic">>}},
+%%%     plugins => [my_tools_plugin]
+%%% },
+%%% {ok, Result} = beamai_process_agent:run_sync(Config, <<"你好"/utf8>>).
+%%% io:format("~s~n", [maps:get(response, Result)]).
+%%% ```
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_process_agent).
 
--behaviour(gen_server).
-
-%% API
 -export([
-    new/1,
-    execute/2,
-    step/2,
-    get_result/1,
-    get_status/1,
-    cancel/1,
-    stop/1
+    %% 构建 API
+    build/1,
+
+    %% 运行 API
+    start/1,
+    start/2,
+    send_message/2,
+    run_sync/2,
+    run_sync/3,
+
+    %% 控制 API
+    resume/2,
+    stop/1,
+    get_status/1
 ]).
 
-%% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
--define(DEFAULT_STEP_TIMEOUT, 60000).
-
--type step_type() :: sequential | parallel | conditional | tool_call | llm_call.
-
--record(process_step, {
-    id          :: binary(),
-    type        :: step_type(),
-    name        :: binary(),
-    handler     :: fun() | {module(), atom()} | binary(),
-    args        :: map(),
-    depends_on  :: [binary()],
-    condition   :: fun() | undefined,
-    timeout     :: pos_integer(),
-    status      :: pending | running | completed | failed | skipped,
-    result      :: term(),
-    error       :: term() | undefined,
-    started_at  :: integer() | undefined,
-    completed_at :: integer() | undefined
-}).
-
--record(state, {
-    id          :: binary(),
-    name        :: binary(),
-    steps       :: [#process_step{}],
-    step_index  :: #{binary() => non_neg_integer()},
-    current_step :: non_neg_integer(),
-    kernel_ref  :: atom() | pid(),
-    status      :: idle | running | completed | failed | cancelled,
-    results     :: #{binary() => term()},
-    config      :: map(),
-    metadata    :: map()
-}).
-
 %%====================================================================
-%% API
+%% 构建 API
 %%====================================================================
 
-%% @doc Create a new process agent.
-%% Config:
-%%   name - Process name
-%%   steps - List of step definitions (maps)
-%%   kernel_ref - BeamAI kernel reference
--spec new(map()) -> {ok, pid()} | {error, term()}.
-new(Config) ->
-    gen_server:start_link(?MODULE, Config, []).
-
-%% @doc Execute the process with initial input data.
--spec execute(pid(), map()) -> {ok, map()} | {error, term()}.
-execute(Agent, Input) ->
-    gen_server:call(Agent, {execute, Input}, infinity).
-
-%% @doc Execute a single step by ID.
--spec step(pid(), binary()) -> {ok, term()} | {error, term()}.
-step(Agent, StepId) ->
-    gen_server:call(Agent, {step, StepId}, ?DEFAULT_STEP_TIMEOUT).
-
-%% @doc Get the final result of the process execution.
--spec get_result(pid()) -> {ok, map()} | {error, term()}.
-get_result(Agent) ->
-    gen_server:call(Agent, get_result).
-
-%% @doc Get the current process status.
--spec get_status(pid()) -> map().
-get_status(Agent) ->
-    gen_server:call(Agent, get_status).
-
-%% @doc Cancel the running process.
--spec cancel(pid()) -> ok.
-cancel(Agent) ->
-    gen_server:cast(Agent, cancel).
-
-%% @doc Stop the process agent.
--spec stop(pid()) -> ok.
-stop(Agent) ->
-    gen_server:stop(Agent, normal, 5000).
-
-%%====================================================================
-%% gen_server callbacks
-%%====================================================================
-
-%% @private
-init(Config) ->
-    Id = maps:get(id, Config, generate_process_id()),
-    Name = maps:get(name, Config, <<"unnamed_process">>),
-    KernelRef = maps:get(kernel_ref, Config, beamai_kernel),
-    StepDefs = maps:get(steps, Config, []),
-
-    {Steps, StepIndex} = build_steps(StepDefs),
-
-    State = #state{
-        id = Id,
-        name = Name,
-        steps = Steps,
-        step_index = StepIndex,
-        current_step = 0,
-        kernel_ref = KernelRef,
-        status = idle,
-        results = #{},
-        config = Config,
-        metadata = #{created_at => erlang:system_time(millisecond)}
-    },
-    {ok, State}.
-
-%% @private
-handle_call({execute, Input}, _From, #state{status = idle} = State) ->
-    NewState = State#state{
-        status = running,
-        results = #{<<"_input">> => Input}
-    },
-    case execute_steps(NewState) of
-        {ok, FinalState} ->
-            FinalResults = FinalState#state.results,
-            {reply, {ok, FinalResults}, FinalState#state{status = completed}};
-        {error, Reason, ErrState} ->
-            {reply, {error, Reason}, ErrState#state{status = failed}}
-    end;
-
-handle_call({execute, _Input}, _From, #state{status = Status} = State) ->
-    {reply, {error, {invalid_status, Status}}, State};
-
-handle_call({step, StepId}, _From, State) ->
-    #state{step_index = Index, steps = Steps, kernel_ref = KernelRef, results = Results} = State,
-    case maps:find(StepId, Index) of
-        {ok, Idx} ->
-            Step = lists:nth(Idx + 1, Steps),
-            case execute_single_step(Step, Results, KernelRef) of
-                {ok, Result, UpdatedStep} ->
-                    NewSteps = replace_step(Steps, Idx, UpdatedStep),
-                    NewResults = maps:put(StepId, Result, Results),
-                    NewState = State#state{steps = NewSteps, results = NewResults},
-                    {reply, {ok, Result}, NewState};
-                {error, Reason, UpdatedStep} ->
-                    NewSteps = replace_step(Steps, Idx, UpdatedStep),
-                    {reply, {error, Reason}, State#state{steps = NewSteps}}
-            end;
-        error ->
-            {reply, {error, {step_not_found, StepId}}, State}
-    end;
-
-handle_call(get_result, _From, #state{results = Results, status = Status} = State) ->
-    case Status of
-        completed -> {reply, {ok, Results}, State};
-        failed -> {reply, {error, {process_failed, Results}}, State};
-        _ -> {reply, {error, {process_not_complete, Status}}, State}
-    end;
-
-handle_call(get_status, _From, State) ->
-    #state{id = Id, name = Name, status = Status, steps = Steps,
-           current_step = CurrentStep} = State,
-    StepStatuses = lists:map(fun(#process_step{id = SId, name = SName, status = SStatus}) ->
-        #{id => SId, name => SName, status => SStatus}
-    end, Steps),
-    StatusMap = #{
-        id => Id,
-        name => Name,
-        status => Status,
-        current_step => CurrentStep,
-        total_steps => length(Steps),
-        steps => StepStatuses
-    },
-    {reply, StatusMap, State};
-
-handle_call(_Request, _From, State) ->
-    {reply, {error, unknown_request}, State}.
-
-%% @private
-handle_cast(cancel, State) ->
-    logger:info("Process agent ~s cancelled", [State#state.id]),
-    {noreply, State#state{status = cancelled}};
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @private
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @private
-terminate(_Reason, _State) ->
-    ok.
-
-%% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
-
-%% @private Build step records from step definition maps.
--spec build_steps([map()]) -> {[#process_step{}], #{binary() => non_neg_integer()}}.
-build_steps(StepDefs) ->
-    {Steps, Index, _} = lists:foldl(fun(Def, {Acc, Idx, N}) ->
-        StepId = maps:get(id, Def, generate_step_id(N)),
-        Step = #process_step{
-            id = StepId,
-            type = maps:get(type, Def, sequential),
-            name = maps:get(name, Def, <<"step_", (integer_to_binary(N))/binary>>),
-            handler = maps:get(handler, Def, fun(_) -> {ok, done} end),
-            args = maps:get(args, Def, #{}),
-            depends_on = maps:get(depends_on, Def, []),
-            condition = maps:get(condition, Def, undefined),
-            timeout = maps:get(timeout, Def, ?DEFAULT_STEP_TIMEOUT),
-            status = pending,
-            result = undefined,
-            error = undefined,
-            started_at = undefined,
-            completed_at = undefined
-        },
-        {Acc ++ [Step], maps:put(StepId, N, Idx), N + 1}
-    end, {[], #{}, 0}, StepDefs),
-    {Steps, Index}.
-
-%% @private Execute all steps in sequence, handling dependencies.
--spec execute_steps(#state{}) -> {ok, #state{}} | {error, term(), #state{}}.
-execute_steps(#state{steps = Steps, kernel_ref = KernelRef, status = cancelled} = State) ->
-    {error, cancelled, State};
-execute_steps(#state{steps = Steps, kernel_ref = KernelRef, results = Results} = State) ->
-    execute_steps_loop(Steps, 0, Results, KernelRef, State).
-
-%% @private Loop through steps.
--spec execute_steps_loop([#process_step{}], non_neg_integer(), map(),
-                         atom() | pid(), #state{}) ->
-    {ok, #state{}} | {error, term(), #state{}}.
-execute_steps_loop([], _Idx, Results, _KernelRef, State) ->
-    {ok, State#state{results = Results}};
-execute_steps_loop([Step | Rest], Idx, Results, KernelRef, State) ->
-    case State#state.status of
-        cancelled ->
-            {error, cancelled, State};
-        _ ->
-            %% Check if dependencies are met
-            case check_dependencies(Step, Results) of
-                true ->
-                    %% Check condition
-                    case check_condition(Step, Results) of
-                        true ->
-                            case execute_single_step(Step, Results, KernelRef) of
-                                {ok, Result, UpdatedStep} ->
-                                    NewResults = maps:put(Step#process_step.id, Result, Results),
-                                    NewSteps = replace_step(State#state.steps, Idx, UpdatedStep),
-                                    NewState = State#state{
-                                        steps = NewSteps,
-                                        results = NewResults,
-                                        current_step = Idx + 1
-                                    },
-                                    execute_steps_loop(Rest, Idx + 1, NewResults, KernelRef, NewState);
-                                {error, Reason, UpdatedStep} ->
-                                    NewSteps = replace_step(State#state.steps, Idx, UpdatedStep),
-                                    {error, {step_failed, Step#process_step.id, Reason},
-                                     State#state{steps = NewSteps}}
-                            end;
-                        false ->
-                            %% Condition not met, skip step
-                            SkippedStep = Step#process_step{status = skipped},
-                            NewSteps = replace_step(State#state.steps, Idx, SkippedStep),
-                            NewState = State#state{steps = NewSteps, current_step = Idx + 1},
-                            execute_steps_loop(Rest, Idx + 1, Results, KernelRef, NewState)
-                    end;
-                false ->
-                    {error, {unmet_dependencies, Step#process_step.id, Step#process_step.depends_on},
-                     State}
-            end
-    end.
-
-%% @private Execute a single process step.
--spec execute_single_step(#process_step{}, map(), atom() | pid()) ->
-    {ok, term(), #process_step{}} | {error, term(), #process_step{}}.
-execute_single_step(#process_step{type = Type, handler = Handler, args = Args} = Step,
-                    Results, KernelRef) ->
-    Now = erlang:system_time(millisecond),
-    RunningStep = Step#process_step{status = running, started_at = Now},
+%% @doc 从配置构建 Process 定义
+%%
+%% 自动创建 LLM step + Tool step + 循环 bindings。
+%%
+%% Config 选项：
+%%   system_prompt — 系统提示词
+%%   kernel — 预构建的 kernel（与 llm/plugins 互斥）
+%%   llm — LLM 配置（{Provider, Opts} 或 config map）
+%%   plugins — 插件模块列表
+%%   middlewares — 中间件列表
+%%   max_tool_iterations — 最大 tool 迭代次数（默认 10）
+%%   output_event — 完成事件名（默认 agent_done）
+%%   on_tool_call — tool 调用钩子 fun((Name, Args) -> ok | {pause, Reason})
+%%   extra_steps — 额外的 step 定义列表 [{StepId, Module, Config}]
+%%   extra_bindings — 额外的 event bindings
+%%
+%% @param Config 配置 map
+%% @returns {ok, {ProcessSpec, Context}} | {error, Reason}
+-spec build(map()) -> {ok, {beamai_process_builder:process_spec(), beamai_context:t()}} | {error, term()}.
+build(Config) ->
     try
-        %% Merge results into args for access to previous step outputs
-        MergedArgs = maps:merge(Args, #{<<"_results">> => Results}),
-        Result = case Type of
-            tool_call ->
-                ToolName = maps:get(tool_name, Args, maps:get(<<"tool_name">>, Args, <<>>)),
-                ToolArgs = maps:get(tool_args, Args, maps:get(<<"tool_args">>, Args, #{})),
-                beamai_kernel:invoke_tool(KernelRef, ToolName, ToolArgs, #{});
-            llm_call ->
-                Prompt = maps:get(prompt, Args, maps:get(<<"prompt">>, Args, <<>>)),
-                beamai_kernel:chat(KernelRef, Prompt, #{});
-            parallel ->
-                execute_parallel_substeps(Handler, MergedArgs, KernelRef);
-            _ ->
-                execute_handler(Handler, MergedArgs, KernelRef)
-        end,
-        CompletedAt = erlang:system_time(millisecond),
-        case Result of
-            {ok, Value} ->
-                CompletedStep = RunningStep#process_step{
-                    status = completed,
-                    result = Value,
-                    completed_at = CompletedAt
-                },
-                {ok, Value, CompletedStep};
-            {error, Reason} ->
-                FailedStep = RunningStep#process_step{
-                    status = failed,
-                    error = Reason,
-                    completed_at = CompletedAt
-                },
-                {error, Reason, FailedStep};
-            Other ->
-                CompletedStep = RunningStep#process_step{
-                    status = completed,
-                    result = Other,
-                    completed_at = CompletedAt
-                },
-                {ok, Other, CompletedStep}
+        %% 1. 构建 Kernel
+        Kernel = beamai_agent_state:build_kernel(Config),
+
+        %% 2. 构建 Context（携带 Kernel）
+        Context = beamai_context:with_kernel(beamai_context:new(), Kernel),
+
+        %% 3. 提取配置
+        SystemPrompt = maps:get(system_prompt, Config, undefined),
+        MaxIter = maps:get(max_tool_iterations, Config, 10),
+        OutputEvent = maps:get(output_event, Config, agent_done),
+        OnToolCall = maps:get(on_tool_call, Config, undefined),
+
+        %% 4. 构建 Process
+        LlmStepConfig = #{
+            system_prompt => SystemPrompt,
+            max_tool_iterations => MaxIter,
+            output_event => OutputEvent,
+            required_inputs => []  %% 由 can_activate 决定激活条件
+        },
+        ToolStepConfig = #{
+            on_tool_call => OnToolCall,
+            required_inputs => [tool_request]
+        },
+
+        B0 = beamai_process:builder(process_agent),
+        B1 = beamai_process:add_step(B0, llm_step, beamai_process_agent_llm_step, LlmStepConfig),
+        B2 = beamai_process:add_step(B1, tool_step, beamai_process_agent_tool_step, ToolStepConfig),
+
+        %% 5. 核心 bindings: user_message -> llm, tool_request -> tool, tool_results -> llm
+        B3 = beamai_process:on_event(B2, user_message, llm_step, user_message),
+        B4 = beamai_process:on_event(B3, tool_request, tool_step, tool_request),
+        B5 = beamai_process:on_event(B4, tool_results, llm_step, tool_results),
+
+        %% 6. 添加额外 steps 和 bindings
+        B6 = add_extra_steps(B5, maps:get(extra_steps, Config, [])),
+        B7 = add_extra_bindings(B6, maps:get(extra_bindings, Config, [])),
+
+        %% 7. 编译
+        case beamai_process:build(B7) of
+            {ok, ProcessSpec} ->
+                {ok, {ProcessSpec, Context}};
+            {error, Errors} ->
+                {error, {build_failed, Errors}}
         end
     catch
-        Class:Reason:_Stack ->
-            FailedStep = RunningStep#process_step{
-                status = failed,
-                error = {Class, Reason},
-                completed_at = erlang:system_time(millisecond)
+        error:Reason:Stack ->
+            {error, {build_exception, Reason, Stack}}
+    end.
+
+%%====================================================================
+%% 运行 API
+%%====================================================================
+
+%% @doc 启动 Process Agent
+%%
+%% 构建并启动 Process，返回运行时 PID。
+%% 启动后需调用 send_message/2 发送用户消息。
+-spec start(map()) -> {ok, pid()} | {error, term()}.
+start(Config) ->
+    start(Config, #{}).
+
+-spec start(map(), map()) -> {ok, pid()} | {error, term()}.
+start(Config, Opts) ->
+    case build(Config) of
+        {ok, {ProcessSpec, Context}} ->
+            RuntimeOpts = Opts#{context => Context},
+            beamai_process:start(ProcessSpec, RuntimeOpts);
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @doc 向运行中的 Process Agent 发送用户消息
+-spec send_message(pid(), binary()) -> ok.
+send_message(Pid, Message) ->
+    Event = beamai_process_event:new(user_message, Message),
+    beamai_process:send_event(Pid, Event).
+
+%% @doc 同步执行：构建、启动、发送消息、等待完成
+%%
+%% 最简单的使用方式，适合不需要交互控制的场景。
+%%
+%% @param Config Agent 配置
+%% @param UserMessage 用户消息
+%% @returns {ok, Result} | {error, Reason}
+%%   Result 包含 response, tool_calls_made, turn_count 等字段
+-spec run_sync(map(), binary()) -> {ok, map()} | {error, term()}.
+run_sync(Config, UserMessage) ->
+    run_sync(Config, UserMessage, #{}).
+
+-spec run_sync(map(), binary(), map()) -> {ok, map()} | {error, term()}.
+run_sync(Config, UserMessage, Opts) ->
+    Timeout = maps:get(timeout, Opts, 60000),
+    case build(Config) of
+        {ok, {ProcessSpec, Context}} ->
+            %% 设置初始事件为 user_message
+            InitEvent = beamai_process_event:new(user_message, UserMessage),
+            ProcessSpecWithInit = ProcessSpec#{
+                initial_events => [InitEvent]
             },
-            {error, {Class, Reason}, FailedStep}
+            RuntimeOpts = #{context => Context, caller => self()},
+            case beamai_process:start(ProcessSpecWithInit, RuntimeOpts) of
+                {ok, Pid} ->
+                    MonRef = monitor(process, Pid),
+                    receive
+                        {process_completed, Pid, StepsState} ->
+                            demonitor(MonRef, [flush]),
+                            extract_result(StepsState);
+                        {process_failed, Pid, Reason} ->
+                            demonitor(MonRef, [flush]),
+                            {error, Reason};
+                        {'DOWN', MonRef, process, Pid, Reason} ->
+                            {error, {process_died, Reason}}
+                    after Timeout ->
+                        demonitor(MonRef, [flush]),
+                        beamai_process:stop(Pid),
+                        {error, timeout}
+                    end;
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
-%% @private Execute a step handler.
--spec execute_handler(fun() | {module(), atom()} | binary(), map(), atom() | pid()) -> term().
-execute_handler(Fun, Args, _KernelRef) when is_function(Fun, 1) ->
-    Fun(Args);
-execute_handler(Fun, Args, KernelRef) when is_function(Fun, 2) ->
-    Fun(Args, KernelRef);
-execute_handler({Module, Function}, Args, _KernelRef) ->
-    Module:Function(Args);
-execute_handler(ToolName, Args, KernelRef) when is_binary(ToolName) ->
-    beamai_kernel:invoke_tool(KernelRef, ToolName, Args, #{}).
+%%====================================================================
+%% 控制 API
+%%====================================================================
 
-%% @private Execute parallel substeps.
--spec execute_parallel_substeps(term(), map(), atom() | pid()) -> {ok, [term()]}.
-execute_parallel_substeps(SubHandlers, Args, KernelRef) when is_list(SubHandlers) ->
-    Parent = self(),
-    Refs = lists:map(fun(Handler) ->
-        Ref = make_ref(),
-        spawn_link(fun() ->
-            Result = execute_handler(Handler, Args, KernelRef),
-            Parent ! {parallel_result, Ref, Result}
-        end),
-        Ref
-    end, SubHandlers),
-    Results = collect_parallel_results(Refs, []),
-    {ok, Results};
-execute_parallel_substeps(_Handler, Args, KernelRef) ->
-    %% Not a list of handlers, execute as single
-    execute_handler(fun(_) -> ok end, Args, KernelRef).
+%% @doc 恢复暂停的 Process Agent
+-spec resume(pid(), term()) -> ok | {error, term()}.
+resume(Pid, Data) ->
+    beamai_process:resume(Pid, Data).
 
-%% @private Collect results from parallel step execution.
--spec collect_parallel_results([reference()], [term()]) -> [term()].
-collect_parallel_results([], Acc) ->
-    lists:reverse(Acc);
-collect_parallel_results([Ref | Rest], Acc) ->
-    receive
-        {parallel_result, Ref, Result} ->
-            collect_parallel_results(Rest, [Result | Acc])
-    after ?DEFAULT_STEP_TIMEOUT ->
-        collect_parallel_results(Rest, [{error, timeout} | Acc])
+%% @doc 停止 Process Agent
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    beamai_process:stop(Pid).
+
+%% @doc 获取 Process Agent 状态
+-spec get_status(pid()) -> {ok, map()}.
+get_status(Pid) ->
+    beamai_process:get_status(Pid).
+
+%%====================================================================
+%% 内部函数
+%%====================================================================
+
+add_extra_steps(Builder, []) -> Builder;
+add_extra_steps(Builder, [{StepId, Module, Config} | Rest]) ->
+    B1 = beamai_process:add_step(Builder, StepId, Module, Config),
+    add_extra_steps(B1, Rest);
+add_extra_steps(Builder, [{StepId, Module} | Rest]) ->
+    B1 = beamai_process:add_step(Builder, StepId, Module),
+    add_extra_steps(B1, Rest).
+
+add_extra_bindings(Builder, []) -> Builder;
+add_extra_bindings(Builder, [Binding | Rest]) ->
+    B1 = beamai_process_builder:add_binding(Builder, Binding),
+    add_extra_bindings(B1, Rest).
+
+%% @private 从 Process 完成状态中提取 Agent 结果
+extract_result(StepsState) ->
+    %% 从 llm_step 的 state 中提取结果
+    case maps:find(llm_step, StepsState) of
+        {ok, #{state := LlmState}} ->
+            #{turn_count := TurnCount,
+              all_tool_calls := AllToolCalls} = LlmState,
+            Response = maps:get(last_response, LlmState, <<>>),
+            {ok, #{
+                response => Response,
+                tool_calls_made => AllToolCalls,
+                turn_count => TurnCount
+            }};
+        error ->
+            {error, no_llm_step_state}
     end.
-
-%% @private Check if all dependencies for a step are met.
--spec check_dependencies(#process_step{}, map()) -> boolean().
-check_dependencies(#process_step{depends_on = []}, _Results) ->
-    true;
-check_dependencies(#process_step{depends_on = Deps}, Results) ->
-    lists:all(fun(DepId) -> maps:is_key(DepId, Results) end, Deps).
-
-%% @private Check if a step's condition is met.
--spec check_condition(#process_step{}, map()) -> boolean().
-check_condition(#process_step{condition = undefined}, _Results) ->
-    true;
-check_condition(#process_step{condition = CondFun}, Results) when is_function(CondFun, 1) ->
-    try CondFun(Results)
-    catch _:_ -> false
-    end;
-check_condition(_, _) ->
-    true.
-
-%% @private Replace a step in the step list by index.
--spec replace_step([#process_step{}], non_neg_integer(), #process_step{}) -> [#process_step{}].
-replace_step(Steps, Idx, NewStep) ->
-    {Before, [_ | After]} = lists:split(Idx, Steps),
-    Before ++ [NewStep | After].
-
-%% @private Generate a unique process identifier.
--spec generate_process_id() -> binary().
-generate_process_id() ->
-    Bytes = crypto:strong_rand_bytes(8),
-    Hex = binary:encode_hex(Bytes),
-    <<"proc-", Hex/binary>>.
-
-%% @private Generate a step identifier.
--spec generate_step_id(non_neg_integer()) -> binary().
-generate_step_id(N) ->
-    <<"step-", (integer_to_binary(N))/binary>>.

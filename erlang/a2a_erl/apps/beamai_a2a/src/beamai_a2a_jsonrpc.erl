@@ -1,289 +1,235 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A JSON-RPC 2.0 Protocol Implementation
+%%% @doc A2A JSON-RPC 模块
 %%%
-%%% Implements the JSON-RPC 2.0 specification for the A2A protocol,
-%%% including request parsing (single and batch), structural
-%%% validation, and response/error construction.
+%%% 为 A2A 协议提供 JSON-RPC 2.0 支持。
+%%% 基于 beamai_jsonrpc 通用模块，添加 A2A 特定的错误类型。
 %%%
-%%% Standard error codes:
-%%%   -32700  Parse error
-%%%   -32600  Invalid request
-%%%   -32601  Method not found
-%%%   -32602  Invalid params
-%%%   -32603  Internal error
+%%% == 通用功能 ==
 %%%
-%%% A2A-specific error codes:
-%%%   -32001  Task not found
-%%%   -32002  Task not cancelable (already terminal)
-%%%   -32003  Unsupported operation
-%%%   -32004  Authentication required
+%%% 编解码功能委托给 beamai_jsonrpc 模块：
+%%% - encode_request/3, encode_notification/2, encode_response/2
+%%% - encode_error/3, encode_error/4
+%%% - decode/1, decode_request/1
+%%% - is_request/1, is_notification/1, is_response/1, is_error/1
+%%%
+%%% == A2A 特定错误 ==
+%%%
+%%% A2A 定义的自定义错误码（-32000 到 -32099）：
+%%% - task_not_found (-32001)
+%%% - task_already_completed (-32002)
+%%% - invalid_state_transition (-32003)
+%%% - authentication_required (-32004)
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_jsonrpc).
 
-%% API
+%% A2A 自定义错误码 (从 -32000 到 -32099)
+-define(TASK_NOT_FOUND, -32001).
+-define(TASK_ALREADY_COMPLETED, -32002).
+-define(INVALID_STATE_TRANSITION, -32003).
+-define(AUTHENTICATION_REQUIRED, -32004).
+
+%%====================================================================
+%% API 导出 - 委托给 beamai_jsonrpc
+%%====================================================================
+
+%% 编码 API
+-export([
+    encode_request/3,
+    encode_notification/2,
+    encode_response/2,
+    encode_error/3,
+    encode_error/4
+]).
+
+%% 解码 API
 -export([
     decode/1,
-    encode_result/2,
-    encode_error/3,
-    encode_error/4,
-    validate/1,
-    batch/1
+    decode_request/1
 ]).
 
-%% Error helpers
+%% 类型检查
 -export([
-    parse_error/0,
-    parse_error/1,
-    invalid_request/0,
-    invalid_request/1,
-    method_not_found/0,
-    method_not_found/1,
-    invalid_params/0,
-    invalid_params/1,
-    internal_error/0,
-    internal_error/1,
-    task_not_found/0,
-    task_not_found/1,
-    task_not_cancelable/0,
-    unsupported_operation/0,
-    auth_required/0
+    is_request/1,
+    is_notification/1,
+    is_response/1,
+    is_error/1,
+    is_batch/1
 ]).
 
-%% Standard JSON-RPC error codes
--define(PARSE_ERROR,      -32700).
--define(INVALID_REQUEST,  -32600).
--define(METHOD_NOT_FOUND, -32601).
--define(INVALID_PARAMS,   -32602).
--define(INTERNAL_ERROR,   -32603).
-
-%% A2A-specific error codes
--define(TASK_NOT_FOUND,        -32001).
--define(TASK_NOT_CANCELABLE,   -32002).
--define(UNSUPPORTED_OPERATION, -32003).
--define(AUTH_REQUIRED,         -32004).
+%% 标准错误
+-export([
+    parse_error/1,
+    invalid_request/1,
+    method_not_found/2,
+    invalid_params/2,
+    internal_error/1
+]).
 
 %%====================================================================
-%% Core API
+%% API 导出 - A2A 特定
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Decode a JSON-RPC request from a binary payload.
-%%
-%% Returns `{ok, Request}' for a single request, `{batch, Requests}'
-%% for a batch (JSON array), or `{error, ErrorMap}' on parse failure.
-%%
-%% Each successfully decoded request is returned as a map with keys:
-%%   jsonrpc, method, params, id
-%% @end
-%%--------------------------------------------------------------------
--spec decode(binary()) ->
-    {ok, map()} | {batch, [map() | {error, map()}]} | {error, map()}.
-decode(Json) when is_binary(Json) ->
-    try json:decode(Json) of
-        List when is_list(List) ->
-            %% Batch request
-            Decoded = [decode_single(Item) || Item <- List],
-            {batch, Decoded};
-        Map when is_map(Map) ->
-            decode_single(Map);
-        _Other ->
-            {error, make_error_obj(?INVALID_REQUEST, <<"Invalid Request">>)}
-    catch
-        _:_ ->
-            {error, make_error_obj(?PARSE_ERROR, <<"Parse error">>)}
-    end;
-decode(_) ->
-    {error, make_error_obj(?PARSE_ERROR, <<"Parse error">>)}.
+%% A2A 特定错误构造函数
+-export([
+    task_not_found/2,
+    task_already_completed/2,
+    invalid_state_transition/3,
+    authentication_required/1
+]).
 
-%%--------------------------------------------------------------------
-%% @doc Encode a successful JSON-RPC result response as a binary.
-%%
-%% `Id' is the request id (binary, integer, or null).
-%% `Result' is the result value (any JSON-encodable term).
-%% @end
-%%--------------------------------------------------------------------
--spec encode_result(term(), term()) -> binary().
-encode_result(Id, Result) ->
-    iolist_to_binary(json:encode(#{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"result">> => Result,
-        <<"id">> => Id
-    })).
+%%====================================================================
+%% 委托实现 - 编码 API
+%%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Encode a JSON-RPC error response as a binary.
-%%
-%% `Id' may be null for responses to unparseable requests.
-%% @end
-%%--------------------------------------------------------------------
+%% @doc 编码 JSON-RPC 请求
+-spec encode_request(term(), binary(), map()) -> binary().
+encode_request(Id, Method, Params) ->
+    beamai_jsonrpc:encode_request(Id, Method, Params).
+
+%% @doc 编码 JSON-RPC 通知
+-spec encode_notification(binary(), map()) -> binary().
+encode_notification(Method, Params) ->
+    beamai_jsonrpc:encode_notification(Method, Params).
+
+%% @doc 编码 JSON-RPC 成功响应
+-spec encode_response(term(), term()) -> binary().
+encode_response(Id, Result) ->
+    beamai_jsonrpc:encode_response(Id, Result).
+
+%% @doc 编码 JSON-RPC 错误响应
 -spec encode_error(term(), integer(), binary()) -> binary().
 encode_error(Id, Code, Message) ->
-    encode_error(Id, Code, Message, undefined).
+    beamai_jsonrpc:encode_error(Id, Code, Message).
 
-%%--------------------------------------------------------------------
-%% @doc Encode a JSON-RPC error response with optional data field.
-%% @end
-%%--------------------------------------------------------------------
+%% @doc 编码 JSON-RPC 错误响应（带额外数据）
 -spec encode_error(term(), integer(), binary(), term()) -> binary().
 encode_error(Id, Code, Message, Data) ->
-    ErrorObj = make_error_obj(Code, Message, Data),
-    iolist_to_binary(json:encode(#{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"error">> => ErrorObj,
-        <<"id">> => Id
-    })).
+    beamai_jsonrpc:encode_error(Id, Code, Message, Data).
 
-%%--------------------------------------------------------------------
-%% @doc Validate the structural correctness of a decoded JSON-RPC
-%% request map.
+%%====================================================================
+%% 委托实现 - 解码 API
+%%====================================================================
+
+%% @doc 解码 JSON-RPC 消息
+-spec decode(binary()) -> {ok, map() | {batch, [map()]}} | {error, term()}.
+decode(JsonBin) ->
+    beamai_jsonrpc:decode(JsonBin).
+
+%% @doc 解码 JSON-RPC 请求
+-spec decode_request(binary()) -> {ok, {term(), binary(), map()}} | {error, term()}.
+decode_request(JsonBin) ->
+    beamai_jsonrpc:decode_request(JsonBin).
+
+%%====================================================================
+%% 委托实现 - 类型检查
+%%====================================================================
+
+%% @doc 检查是否为请求
+-spec is_request(map()) -> boolean().
+is_request(Msg) ->
+    beamai_jsonrpc:is_request(Msg).
+
+%% @doc 检查是否为通知
+-spec is_notification(map()) -> boolean().
+is_notification(Msg) ->
+    beamai_jsonrpc:is_notification(Msg).
+
+%% @doc 检查是否为成功响应
+-spec is_response(map()) -> boolean().
+is_response(Msg) ->
+    beamai_jsonrpc:is_response(Msg).
+
+%% @doc 检查是否为错误响应
+-spec is_error(map()) -> boolean().
+is_error(Msg) ->
+    beamai_jsonrpc:is_error(Msg).
+
+%% @doc 检查是否为批处理
+-spec is_batch(term()) -> boolean().
+is_batch(Msg) ->
+    beamai_jsonrpc:is_batch(Msg).
+
+%%====================================================================
+%% 委托实现 - 标准错误（返回编码后的 binary）
+%%====================================================================
+
+%% @doc 构造解析错误
+-spec parse_error(term()) -> binary().
+parse_error(Id) ->
+    jsx:encode(beamai_jsonrpc:parse_error(Id), []).
+
+%% @doc 构造无效请求错误
+-spec invalid_request(term()) -> binary().
+invalid_request(Id) ->
+    jsx:encode(beamai_jsonrpc:invalid_request(Id), []).
+
+%% @doc 构造方法未找到错误
+-spec method_not_found(term(), binary()) -> binary().
+method_not_found(Id, Method) ->
+    jsx:encode(beamai_jsonrpc:method_not_found(Id, Method), []).
+
+%% @doc 构造无效参数错误
+-spec invalid_params(term(), binary()) -> binary().
+invalid_params(Id, Details) ->
+    jsx:encode(beamai_jsonrpc:invalid_params(Id, Details), []).
+
+%% @doc 构造内部错误
+-spec internal_error(term()) -> binary().
+internal_error(Id) ->
+    jsx:encode(beamai_jsonrpc:internal_error(Id), []).
+
+%%====================================================================
+%% A2A 特定错误构造函数（返回编码后的 binary）
+%%====================================================================
+
+%% @doc 构造任务未找到错误
 %%
-%% Checks:
-%%   - `jsonrpc' is `<<"2.0">>'
-%%   - `method' is a non-empty binary
-%%   - `params', if present, is a map or list
-%%   - `id', if present, is a binary, integer, or null
+%% 错误码: -32001
 %%
-%% Returns `ok' or `{error, Reason}'.
-%% @end
-%%--------------------------------------------------------------------
--spec validate(map()) -> ok | {error, binary()}.
-validate(#{<<"jsonrpc">> := Version}) when Version =/= <<"2.0">> ->
-    {error, <<"Invalid jsonrpc version">>};
-validate(#{<<"method">> := Method}) when not is_binary(Method);
-                                         byte_size(Method) =:= 0 ->
-    {error, <<"Method must be a non-empty string">>};
-validate(#{<<"params">> := Params})
-  when not is_map(Params), not is_list(Params) ->
-    {error, <<"Params must be an object or array">>};
-validate(#{<<"id">> := Id})
-  when not is_binary(Id), not is_integer(Id), Id =/= null ->
-    {error, <<"Id must be a string, number, or null">>};
-validate(#{<<"method">> := _}) ->
-    ok;
-validate(_) ->
-    {error, <<"Missing required field: method">>}.
+%% @param Id 请求 ID
+%% @param TaskId 未找到的任务 ID
+%% @returns JSON 编码的错误响应
+-spec task_not_found(term(), binary()) -> binary().
+task_not_found(Id, TaskId) ->
+    jsx:encode(beamai_jsonrpc:custom_error(Id, ?TASK_NOT_FOUND, <<"Task not found">>,
+                                          #{<<"taskId">> => TaskId}), []).
 
-%%--------------------------------------------------------------------
-%% @doc Encode a batch of JSON-RPC responses as a single JSON array.
+%% @doc 构造任务已完成错误
 %%
-%% `Responses' is a list of already-encoded binaries. Notifications
-%% (requests without id) should not produce a response; pass an empty
-%% list to get `<<"[]">>' back.
-%% @end
-%%--------------------------------------------------------------------
--spec batch([binary()]) -> binary().
-batch([]) ->
-    <<"[]">>;
-batch(Responses) when is_list(Responses) ->
-    %% Each element is an already-encoded JSON binary; wrap in array
-    Inner = lists:join(<<",">>, Responses),
-    iolist_to_binary([<<"[">>, Inner, <<"]">>]).
+%% 错误码: -32002
+%%
+%% @param Id 请求 ID
+%% @param TaskId 已完成的任务 ID
+%% @returns JSON 编码的错误响应
+-spec task_already_completed(term(), binary()) -> binary().
+task_already_completed(Id, TaskId) ->
+    jsx:encode(beamai_jsonrpc:custom_error(Id, ?TASK_ALREADY_COMPLETED, <<"Task already completed">>,
+                                          #{<<"taskId">> => TaskId}), []).
 
-%%====================================================================
-%% Convenience error constructors
-%%====================================================================
+%% @doc 构造无效状态转换错误
+%%
+%% 错误码: -32003
+%%
+%% @param Id 请求 ID
+%% @param FromState 原状态
+%% @param ToState 目标状态
+%% @returns JSON 编码的错误响应
+-spec invalid_state_transition(term(), atom(), atom()) -> binary().
+invalid_state_transition(Id, FromState, ToState) ->
+    jsx:encode(beamai_jsonrpc:custom_error(Id, ?INVALID_STATE_TRANSITION, <<"Invalid state transition">>,
+                                          #{
+                                              <<"from">> => beamai_a2a_types:task_state_to_binary(FromState),
+                                              <<"to">> => beamai_a2a_types:task_state_to_binary(ToState)
+                                          }), []).
 
-%% @doc Parse error: invalid JSON.
--spec parse_error() -> map().
-parse_error() ->
-    make_error_obj(?PARSE_ERROR, <<"Parse error">>).
-
--spec parse_error(term()) -> map().
-parse_error(Data) ->
-    make_error_obj(?PARSE_ERROR, <<"Parse error">>, Data).
-
-%% @doc Invalid request: not a valid JSON-RPC request object.
--spec invalid_request() -> map().
-invalid_request() ->
-    make_error_obj(?INVALID_REQUEST, <<"Invalid Request">>).
-
--spec invalid_request(term()) -> map().
-invalid_request(Data) ->
-    make_error_obj(?INVALID_REQUEST, <<"Invalid Request">>, Data).
-
-%% @doc Method not found.
--spec method_not_found() -> map().
-method_not_found() ->
-    make_error_obj(?METHOD_NOT_FOUND, <<"Method not found">>).
-
--spec method_not_found(binary()) -> map().
-method_not_found(Method) ->
-    make_error_obj(?METHOD_NOT_FOUND,
-                   <<"Method not found: ", Method/binary>>).
-
-%% @doc Invalid params.
--spec invalid_params() -> map().
-invalid_params() ->
-    make_error_obj(?INVALID_PARAMS, <<"Invalid params">>).
-
--spec invalid_params(term()) -> map().
-invalid_params(Data) ->
-    make_error_obj(?INVALID_PARAMS, <<"Invalid params">>, Data).
-
-%% @doc Internal error.
--spec internal_error() -> map().
-internal_error() ->
-    make_error_obj(?INTERNAL_ERROR, <<"Internal error">>).
-
--spec internal_error(term()) -> map().
-internal_error(Data) ->
-    make_error_obj(?INTERNAL_ERROR, <<"Internal error">>, Data).
-
-%% @doc A2A: Task not found.
--spec task_not_found() -> map().
-task_not_found() ->
-    make_error_obj(?TASK_NOT_FOUND, <<"Task not found">>).
-
--spec task_not_found(binary()) -> map().
-task_not_found(TaskId) ->
-    make_error_obj(?TASK_NOT_FOUND,
-                   <<"Task not found: ", TaskId/binary>>).
-
-%% @doc A2A: Task already in terminal state.
--spec task_not_cancelable() -> map().
-task_not_cancelable() ->
-    make_error_obj(?TASK_NOT_CANCELABLE,
-                   <<"Task already in terminal state">>).
-
-%% @doc A2A: Operation not supported.
--spec unsupported_operation() -> map().
-unsupported_operation() ->
-    make_error_obj(?UNSUPPORTED_OPERATION,
-                   <<"Unsupported operation">>).
-
-%% @doc A2A: Authentication required.
--spec auth_required() -> map().
-auth_required() ->
-    make_error_obj(?AUTH_REQUIRED, <<"Authentication required">>).
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
-
-%% @doc Decode a single JSON-RPC request from a parsed JSON map.
--spec decode_single(map()) -> {ok, map()} | {error, map()}.
-decode_single(Map) when is_map(Map) ->
-    Request = #{
-        <<"jsonrpc">> => maps:get(<<"jsonrpc">>, Map, <<"2.0">>),
-        <<"method">>  => maps:get(<<"method">>, Map, undefined),
-        <<"params">>  => maps:get(<<"params">>, Map, #{}),
-        <<"id">>      => maps:get(<<"id">>, Map, undefined)
-    },
-    case validate(Request) of
-        ok    -> {ok, Request};
-        Error -> Error
-    end;
-decode_single(_) ->
-    {error, make_error_obj(?INVALID_REQUEST, <<"Invalid Request">>)}.
-
-%% @doc Construct a JSON-RPC error object map.
--spec make_error_obj(integer(), binary()) -> map().
-make_error_obj(Code, Message) ->
-    #{<<"code">> => Code, <<"message">> => Message}.
-
--spec make_error_obj(integer(), binary(), term()) -> map().
-make_error_obj(Code, Message, undefined) ->
-    make_error_obj(Code, Message);
-make_error_obj(Code, Message, Data) ->
-    #{<<"code">> => Code, <<"message">> => Message, <<"data">> => Data}.
+%% @doc 构造需要认证错误
+%%
+%% 错误码: -32004
+%%
+%% @param Id 请求 ID
+%% @returns JSON 编码的错误响应
+-spec authentication_required(term()) -> binary().
+authentication_required(Id) ->
+    jsx:encode(beamai_jsonrpc:custom_error(Id, ?AUTHENTICATION_REQUIRED, <<"Authentication required">>, null), []).

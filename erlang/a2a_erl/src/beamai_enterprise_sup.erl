@@ -1,207 +1,88 @@
-%%% @doc BeamAI Enterprise Supervisor
+%%%-------------------------------------------------------------------
+%%% @doc Supervisor for enterprise adapter workers
 %%%
-%%% This supervisor manages all BeamAI enterprise adapter modules. It
-%%% starts each adapter under supervision using a rest_for_one strategy,
-%%% which means that if an adapter crashes, all adapters started after it
-%%% are also restarted. This reflects the dependency chain between
-%%% adapters.
+%%% Manages one_for_one child processes for enterprise integrations:
+%%% - beamai_hotci_adapter   (hot code injection / CI integration)
+%%% - beamai_health_adapter  (health check bridge)
+%%% - beamai_metrics_adapter (metrics collection bridge)
+%%% - beamai_integrity_adapter (data integrity checks)
+%%% - beamai_security_adapter (security policy enforcement)
 %%%
-%%% The startup order is:
-%%% 1. beamai_hotci_adapter - core HotCI integration (no dependencies)
-%%% 2. beamai_security_adapter - security (depends on hotci adapter)
-%%% 3. beamai_health_adapter - health checks (depends on security)
-%%% 4. beamai_metrics_adapter - metrics collection (depends on health)
-%%% 5. beamai_integrity_adapter - integrity validation (depends on metrics)
-%%% 6. beamai_disaster_recovery_adapter - disaster recovery (depends on integrity)
-%%% 7. beamai_monitoring_adapter - monitoring hub (depends on all above)
-%%% 8. beamai_benchmark_adapter - benchmarking (optional, depends on monitoring)
-%%%
-%%% The supervisor can be started with a configuration map that specifies
-%%% which adapters are active. By default, all adapters are started.
-%%%
+%%% Each adapter is a gen_server that bridges between the A2A
+%%% infrastructure (a2a_health_handler, a2a_metrics, etc.) and the
+%%% beamai kernel's tool/filter system.
 %%% @end
+%%%-------------------------------------------------------------------
 -module(beamai_enterprise_sup).
+
 -behaviour(supervisor).
 
 %% API
--export([
-    start_link/0,
-    start_link/1,
-    init/1
-]).
+-export([start_link/0, start_link/1]).
+
+%% supervisor callback
+-export([init/1]).
 
 -define(SERVER, ?MODULE).
 
-%% Default configuration: all adapters enabled
--define(DEFAULT_CONFIG, #{
-    hotci_adapter => true,
-    security_adapter => true,
-    health_adapter => true,
-    metrics_adapter => true,
-    integrity_adapter => true,
-    disaster_recovery_adapter => true,
-    monitoring_adapter => true,
-    benchmark_adapter => true
-}).
+%%====================================================================
+%% API
+%%====================================================================
 
-%%%===================================================================
-%%% API Functions
-%%%===================================================================
-
-%% @doc Start the enterprise supervisor with default configuration.
-%% All adapters are enabled by default.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    start_link(?DEFAULT_CONFIG).
+    start_link(#{}).
 
-%% @doc Start the enterprise supervisor with custom configuration.
-%% The Config map can specify which adapters are active:
-%%   #{hotci_adapter => true, benchmark_adapter => false, ...}
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
-start_link(Config) ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, Config).
+start_link(Opts) ->
+    supervisor:start_link({local, ?SERVER}, ?MODULE, Opts).
 
-%%%===================================================================
-%%% Supervisor Callback
-%%%===================================================================
+%%====================================================================
+%% supervisor callback
+%%====================================================================
 
-%% @private
--spec init(map()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
-init(Config) ->
-    MergedConfig = maps:merge(?DEFAULT_CONFIG, Config),
-
-    logger:info("BeamAI enterprise supervisor initializing with config: ~p", [MergedConfig]),
-
-    %% Build child specs based on configuration
-    AllSpecs = [
-        {hotci_adapter, hotci_adapter_spec()},
-        {security_adapter, security_adapter_spec()},
-        {health_adapter, health_adapter_spec()},
-        {metrics_adapter, metrics_adapter_spec()},
-        {integrity_adapter, integrity_adapter_spec()},
-        {disaster_recovery_adapter, disaster_recovery_adapter_spec()},
-        {monitoring_adapter, monitoring_adapter_spec()},
-        {benchmark_adapter, benchmark_adapter_spec()}
-    ],
-
-    %% Filter out disabled adapters
-    ActiveSpecs = lists:filtermap(fun({Key, Spec}) ->
-        case maps:get(Key, MergedConfig, true) of
-            true -> {true, Spec};
-            false ->
-                logger:info("BeamAI enterprise supervisor: ~p disabled by config", [Key]),
-                false
-        end
-    end, AllSpecs),
-
-    %% rest_for_one: if one child terminates, all children started after
-    %% it are terminated and restarted in order.
+init(Opts) ->
     SupFlags = #{
-        strategy => rest_for_one,
+        strategy => one_for_one,
         intensity => 10,
         period => 60
     },
 
-    {ok, {SupFlags, ActiveSpecs}}.
+    Adapters = maps:get(adapters, Opts, default_adapters()),
 
-%%%===================================================================
-%%% Child Specifications
-%%%===================================================================
+    Children = [adapter_child_spec(Id, Mod, AdapterOpts)
+                || {Id, Mod, AdapterOpts} <- Adapters,
+                   is_module_available(Mod)],
 
-%% @private HotCI adapter - core integration with hot code upgrade system.
--spec hotci_adapter_spec() -> supervisor:child_spec().
-hotci_adapter_spec() ->
+    {ok, {SupFlags, Children}}.
+
+%%====================================================================
+%% Internal
+%%====================================================================
+
+default_adapters() ->
+    [
+        {beamai_health_adapter, beamai_health_adapter, #{}},
+        {beamai_metrics_adapter, beamai_metrics_adapter, #{}},
+        {beamai_integrity_adapter, beamai_integrity_adapter, #{}},
+        {beamai_security_adapter, beamai_security_adapter, #{}},
+        {beamai_hotci_adapter, beamai_hotci_adapter, #{}}
+    ].
+
+adapter_child_spec(Id, Module, Opts) ->
     #{
-        id => beamai_hotci_adapter,
-        start => {beamai_hotci_adapter, start_link, []},
+        id => Id,
+        start => {Module, start_link, [Opts]},
         restart => permanent,
         shutdown => 5000,
         type => worker,
-        modules => [beamai_hotci_adapter]
+        modules => [Module]
     }.
 
-%% @private Security adapter - module integrity and audit.
--spec security_adapter_spec() -> supervisor:child_spec().
-security_adapter_spec() ->
-    #{
-        id => beamai_security_adapter,
-        start => {beamai_security_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_security_adapter]
-    }.
-
-%% @private Health adapter - component health checks.
--spec health_adapter_spec() -> supervisor:child_spec().
-health_adapter_spec() ->
-    #{
-        id => beamai_health_adapter,
-        start => {beamai_health_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_health_adapter]
-    }.
-
-%% @private Metrics adapter - metrics collection and Prometheus export.
--spec metrics_adapter_spec() -> supervisor:child_spec().
-metrics_adapter_spec() ->
-    #{
-        id => beamai_metrics_adapter,
-        start => {beamai_metrics_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_metrics_adapter]
-    }.
-
-%% @private Integrity adapter - state integrity validation.
--spec integrity_adapter_spec() -> supervisor:child_spec().
-integrity_adapter_spec() ->
-    #{
-        id => beamai_integrity_adapter,
-        start => {beamai_integrity_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_integrity_adapter]
-    }.
-
-%% @private Disaster recovery adapter - snapshots and restore.
--spec disaster_recovery_adapter_spec() -> supervisor:child_spec().
-disaster_recovery_adapter_spec() ->
-    #{
-        id => beamai_disaster_recovery_adapter,
-        start => {beamai_disaster_recovery_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 10000,
-        type => worker,
-        modules => [beamai_disaster_recovery_adapter]
-    }.
-
-%% @private Monitoring adapter - dashboard and alerts.
--spec monitoring_adapter_spec() -> supervisor:child_spec().
-monitoring_adapter_spec() ->
-    #{
-        id => beamai_monitoring_adapter,
-        start => {beamai_monitoring_adapter, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_monitoring_adapter]
-    }.
-
-%% @private Benchmark adapter - performance benchmarking.
-%% This adapter is transient since benchmarks are on-demand and
-%% the adapter is less critical than others.
--spec benchmark_adapter_spec() -> supervisor:child_spec().
-benchmark_adapter_spec() ->
-    #{
-        id => beamai_benchmark_adapter,
-        start => {beamai_benchmark_adapter, start_link, []},
-        restart => transient,
-        shutdown => 5000,
-        type => worker,
-        modules => [beamai_benchmark_adapter]
-    }.
+%% @doc Check if a module is loadable. If the adapter module does not
+%% exist yet, we silently skip it so the supervisor can still start.
+is_module_available(Module) ->
+    case code:ensure_loaded(Module) of
+        {module, Module} -> true;
+        {error, _} -> false
+    end.

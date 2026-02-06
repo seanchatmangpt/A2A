@@ -1,20 +1,16 @@
-{application, beamai_memory, [
-    {description, "BeamAI Memory System - Context storage with ETS/SQLite backends"},
-    {vsn, "1.0.0"},
-    {registered, [beamai_memory_sup]},
-    {mod, {beamai_memory_app, []}},
-    {applications, [kernel, stdlib, beamai_core, esqlite]},
-    {modules, []},
-    {env, [
-        {backend, ets},
-        {sqlite_db_path, "beamai_memory.db"},
-        {checkpoint_interval, 60000},
-        {auto_checkpoint, true},
-        {default_ttl, infinity},
-        {max_buffer_size, 1000},
-        {forgetting_policy, ebbinghaus},
-        {decay_interval, 300000},
-        {importance_threshold, 0.3}
-    ]},
-    {licenses, ["Apache-2.0"]}
-]}.
+{application, beamai_memory,
+ [{description, "Agent Memory System - Short-term and Long-term Memory Management"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {beamai_memory_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  %% agent_llm: beamai_buffer_summarizer 的 LLM 摘要功能需要
+  {optional_applications, [beamai_llm]},
+  {env,[]},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

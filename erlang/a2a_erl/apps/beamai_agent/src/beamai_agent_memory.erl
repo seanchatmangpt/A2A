@@ -1,302 +1,144 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI Agent Memory Persistence
+%%% @doc Agent 持久化（Memory 集成）
 %%%
-%%% Provides save/restore functionality for agent conversation state.
-%%% Uses ETS for fast local storage with optional integration with
-%%% the beamai_memory application for durable persistence.
+%%% 提供 agent 状态的保存和恢复功能，通过 beamai_memory 的
+%%% snapshot 机制实现持久化。
+%%%
+%%% 持久化内容包括：
+%%%   - 消息历史（messages）
+%%%   - 对话轮数（turn_count）
+%%%   - 用户元数据（metadata）
+%%%   - 系统提示词（system_prompt）
+%%%   - Agent ID（agent_id）
+%%%
+%%% 不持久化的内容（每次从 config 重建）：
+%%%   - kernel（含 LLM 配置、plugins、filters）
+%%%   - callbacks
+%%%   - memory 实例本身
+%%%
+%%% 使用前提：
+%%%   agent 创建时需通过 config 传入 memory 实例。
+%%%   未配置 memory 时调用 save/1 会返回 {error, no_memory_configured}。
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_agent_memory).
 
--behaviour(gen_server).
-
-%% API
--export([
-    start_link/0,
-    start_link/1,
-    save/2,
-    restore/2,
-    list_saved/0,
-    delete/1,
-    clear/0,
-    count/0
-]).
-
-%% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
--define(SERVER, ?MODULE).
--define(TABLE, beamai_agent_memory_table).
-
--record(memory_entry, {
-    id          :: binary(),
-    state_data  :: map(),
-    saved_at    :: integer(),
-    metadata    :: map()
-}).
-
--record(state, {
-    table   :: ets:tid(),
-    config  :: map(),
-    stats   :: map()
-}).
+-export([save/1, restore/2]).
 
 %%====================================================================
 %% API
 %%====================================================================
 
-%% @doc Start the agent memory server with default options.
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    start_link(#{}).
+%% @doc 保存当前 agent 状态到 memory
+%%
+%% 将 agent 的运行时状态序列化为 snapshot 数据并持久化。
+%% 使用 agent_id 关联的 thread_id 作为存储键。
+%%
+%% 保存的数据字段：
+%%   - messages: 完整对话历史
+%%   - turn_count: 已完成的对话轮数
+%%   - metadata: 用户自定义元数据
+%%   - agent_id: agent 唯一标识
+%%   - system_prompt: 当前系统提示词
+%%
+%% @param State agent 状态 map（需包含 memory 配置）
+%% @returns ok 保存成功
+%% @returns {error, no_memory_configured} 未配置 memory
+%% @returns {error, Reason} 持久化失败
+-spec save(map()) -> ok | {error, term()}.
+save(#{memory := undefined}) ->
+    {error, no_memory_configured};
+save(#{memory := Memory, messages := Messages, id := AgentId,
+       turn_count := TurnCount, metadata := Meta,
+       system_prompt := SysPrompt} = State) ->
+    ThreadId = beamai_memory:get_thread_id(Memory),
+    IntState = maps:get(interrupt_state, State, undefined),
+    RunId = maps:get(run_id, State, undefined),
 
-%% @doc Start the agent memory server with options.
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
-start_link(Config) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Config, []).
-
-%% @doc Save agent state data under the given identifier.
-%% Returns {ok, Id} on success.
--spec save(binary(), map()) -> {ok, binary()} | {error, term()}.
-save(Id, StateData) ->
-    case whereis(?SERVER) of
-        undefined ->
-            %% Server not started, try ETS directly
-            save_to_ets(Id, StateData);
-        _Pid ->
-            gen_server:call(?SERVER, {save, Id, StateData})
-    end.
-
-%% @doc Restore agent state data by identifier.
-%% The Options map can include 'default' for fallback value.
--spec restore(binary(), map()) -> {ok, map()} | {error, not_found}.
-restore(Id, _Options) ->
-    case whereis(?SERVER) of
-        undefined ->
-            restore_from_ets(Id);
-        _Pid ->
-            gen_server:call(?SERVER, {restore, Id})
-    end.
-
-%% @doc List all saved state identifiers with metadata.
--spec list_saved() -> [map()].
-list_saved() ->
-    case whereis(?SERVER) of
-        undefined -> [];
-        _Pid -> gen_server:call(?SERVER, list_saved)
-    end.
-
-%% @doc Delete a saved state by identifier.
--spec delete(binary()) -> ok | {error, not_found}.
-delete(Id) ->
-    case whereis(?SERVER) of
-        undefined -> {error, not_found};
-        _Pid -> gen_server:call(?SERVER, {delete, Id})
-    end.
-
-%% @doc Clear all saved states.
--spec clear() -> ok.
-clear() ->
-    case whereis(?SERVER) of
-        undefined -> ok;
-        _Pid -> gen_server:cast(?SERVER, clear)
-    end.
-
-%% @doc Return the number of saved states.
--spec count() -> non_neg_integer().
-count() ->
-    case whereis(?SERVER) of
-        undefined -> 0;
-        _Pid -> gen_server:call(?SERVER, count)
-    end.
-
-%%====================================================================
-%% gen_server callbacks
-%%====================================================================
-
-%% @private
-init(Config) ->
-    Table = ets:new(?TABLE, [
-        set, private, {keypos, #memory_entry.id}
-    ]),
-    State = #state{
-        table = Table,
-        config = Config,
-        stats = #{saves => 0, restores => 0, deletes => 0}
+    %% 将 agent 数据包装为 process_snapshot 格式
+    %% 使用 steps_state 存储 agent 状态
+    AgentData = #{
+        messages => Messages,
+        turn_count => TurnCount,
+        metadata => Meta,
+        agent_id => AgentId,
+        system_prompt => SysPrompt,
+        interrupt_state => IntState,
+        run_id => RunId
     },
-    logger:info("BeamAI agent memory started"),
-    {ok, State}.
 
-%% @private
-handle_call({save, Id, StateData}, _From, #state{table = Table, stats = Stats} = State) ->
-    Now = erlang:system_time(millisecond),
-    Entry = #memory_entry{
-        id = Id,
-        state_data = StateData,
-        saved_at = Now,
-        metadata = #{
-            message_count => length(maps:get(messages, StateData, [])),
-            size_bytes => estimate_size(StateData)
-        }
+    ProcessState = #{
+        process_spec => <<"beamai_agent">>,
+        fsm_state => idle,
+        steps_state => #{agent_state => #{state => AgentData}},
+        event_queue => []
     },
-    ets:insert(Table, Entry),
-    %% Also persist to beamai_memory if available
-    try_persist_to_memory(Id, StateData),
-    Saves = maps:get(saves, Stats, 0),
-    NewStats = Stats#{saves => Saves + 1},
-    {reply, {ok, Id}, State#state{stats = NewStats}};
 
-handle_call({restore, Id}, _From, #state{table = Table, stats = Stats} = State) ->
-    Result = case ets:lookup(Table, Id) of
-        [#memory_entry{state_data = StateData}] ->
-            {ok, StateData};
-        [] ->
-            %% Try to restore from beamai_memory
-            case try_restore_from_memory(Id) of
-                {ok, StateData} ->
-                    %% Re-cache in ETS
-                    Now = erlang:system_time(millisecond),
-                    Entry = #memory_entry{
-                        id = Id,
-                        state_data = StateData,
-                        saved_at = Now,
-                        metadata = #{}
-                    },
-                    ets:insert(Table, Entry),
-                    {ok, StateData};
-                {error, _} ->
-                    {error, not_found}
-            end
+    CheckpointType = case IntState of
+        undefined -> <<"agent_snapshot">>;
+        _ -> <<"agent_interrupt">>
     end,
-    Restores = maps:get(restores, Stats, 0),
-    NewStats = Stats#{restores => Restores + 1},
-    {reply, Result, State#state{stats = NewStats}};
 
-handle_call(list_saved, _From, #state{table = Table} = State) ->
-    List = ets:foldl(fun(#memory_entry{id = Id, saved_at = SavedAt, metadata = Meta}, Acc) ->
-        [#{id => Id, saved_at => SavedAt, metadata => Meta} | Acc]
-    end, [], Table),
-    {reply, lists:reverse(List), State};
+    Opts = #{
+        agent_id => AgentId,
+        metadata => #{type => CheckpointType}
+    },
 
-handle_call({delete, Id}, _From, #state{table = Table, stats = Stats} = State) ->
-    case ets:member(Table, Id) of
-        true ->
-            ets:delete(Table, Id),
-            Deletes = maps:get(deletes, Stats, 0),
-            NewStats = Stats#{deletes => Deletes + 1},
-            {reply, ok, State#state{stats = NewStats}};
-        false ->
-            {reply, {error, not_found}, State}
-    end;
-
-handle_call(count, _From, #state{table = Table} = State) ->
-    {reply, ets:info(Table, size), State};
-
-handle_call(_Request, _From, State) ->
-    {reply, {error, unknown_request}, State}.
-
-%% @private
-handle_cast(clear, #state{table = Table} = State) ->
-    ets:delete_all_objects(Table),
-    logger:info("Agent memory cleared"),
-    {noreply, State};
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%% @private
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @private
-terminate(_Reason, #state{table = Table}) ->
-    ets:delete(Table),
-    ok.
-
-%% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
-
-%% @private Save directly to ETS when server is not running.
--spec save_to_ets(binary(), map()) -> {ok, binary()} | {error, term()}.
-save_to_ets(Id, StateData) ->
-    try
-        ensure_table(),
-        Now = erlang:system_time(millisecond),
-        Entry = #memory_entry{
-            id = Id,
-            state_data = StateData,
-            saved_at = Now,
-            metadata = #{}
-        },
-        ets:insert(?TABLE, Entry),
-        {ok, Id}
-    catch
-        _:Reason -> {error, Reason}
+    case beamai_memory:save_snapshot(Memory, ThreadId, ProcessState, Opts) of
+        {ok, _Snapshot, _NewMemory} -> ok;
+        {error, _} = Error -> Error
     end.
 
-%% @private Restore directly from ETS when server is not running.
--spec restore_from_ets(binary()) -> {ok, map()} | {error, not_found}.
-restore_from_ets(Id) ->
-    try
-        case ets:lookup(?TABLE, Id) of
-            [#memory_entry{state_data = StateData}] ->
-                {ok, StateData};
-            [] ->
-                {error, not_found}
-        end
-    catch
-        _:_ -> {error, not_found}
+%% @doc 从 memory 恢复 agent 状态
+%%
+%% 加载指定 memory 中最新的 snapshot，用其保存的数据恢复 agent 状态。
+%%
+%% 恢复流程：
+%%   1. 从 memory 加载最新 snapshot 数据
+%%   2. 使用原始 config 重建 agent（重建 kernel、注入 filters 等）
+%%   3. 将 snapshot 中的消息历史、turn_count、metadata 覆盖到新 state
+%%   4. 恢复 system_prompt（如果 snapshot 中有保存）
+%%
+%% @param Config agent 配置 map（用于重建 kernel、callbacks 等不可序列化部分）
+%% @param Memory memory 实例（用于加载 snapshot）
+%% @returns {ok, AgentState} 恢复成功，返回完整 agent 状态
+%% @returns {error, Reason} 恢复失败（snapshot 不存在或重建失败）
+-spec restore(map(), term()) -> {ok, map()} | {error, term()}.
+restore(Config, Memory) ->
+    ThreadId = beamai_memory:get_thread_id(Memory),
+    case beamai_memory:get_latest_snapshot(Memory, ThreadId) of
+        {ok, Snapshot} ->
+            %% 从 snapshot 的 steps_state 中提取 agent 数据
+            StepsState = beamai_snapshot:get_steps_state(Snapshot),
+            #{agent_state := #{state := SavedData}} = StepsState,
+            %% 用原始 config + memory 重建 agent
+            case beamai_agent:new(Config#{memory => Memory}) of
+                {ok, State0} ->
+                    %% 用 snapshot 数据覆盖运行时状态
+                    State1 = State0#{
+                        messages => maps:get(messages, SavedData, []),
+                        turn_count => maps:get(turn_count, SavedData, 0),
+                        metadata => maps:merge(
+                            maps:get(metadata, State0),
+                            maps:get(metadata, SavedData, #{})
+                        )
+                    },
+                    %% 恢复 system_prompt（如果 snapshot 中有保存）
+                    State2 = case maps:get(system_prompt, SavedData, undefined) of
+                        undefined -> State1;
+                        SP -> State1#{system_prompt => SP}
+                    end,
+                    %% 恢复中断状态
+                    State3 = State2#{
+                        interrupt_state => maps:get(interrupt_state, SavedData, undefined),
+                        run_id => maps:get(run_id, SavedData, undefined)
+                    },
+                    {ok, State3};
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
     end.
 
-%% @private Ensure the ETS table exists.
--spec ensure_table() -> ok.
-ensure_table() ->
-    case ets:info(?TABLE) of
-        undefined ->
-            ?TABLE = ets:new(?TABLE, [
-                named_table, public, set, {keypos, #memory_entry.id}
-            ]),
-            ok;
-        _ ->
-            ok
-    end.
-
-%% @private Try to persist to beamai_memory for durability.
--spec try_persist_to_memory(binary(), map()) -> ok.
-try_persist_to_memory(Id, StateData) ->
-    try
-        case whereis(beamai_memory_sup) of
-            undefined -> ok;
-            _Pid ->
-                Key = <<"agent_state:", Id/binary>>,
-                beamai_memory_app:get_config(backend, ets),
-                %% Attempt to store through beamai_memory if available
-                ok
-        end
-    catch
-        _:_ -> ok
-    end.
-
-%% @private Try to restore from beamai_memory.
--spec try_restore_from_memory(binary()) -> {ok, map()} | {error, not_found}.
-try_restore_from_memory(_Id) ->
-    %% Integration point for beamai_memory restoration
-    {error, not_found}.
-
-%% @private Estimate the size of state data in bytes.
--spec estimate_size(term()) -> non_neg_integer().
-estimate_size(Term) ->
-    erlang:external_size(Term).

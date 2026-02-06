@@ -1,539 +1,443 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Protocol Server
+%%% @doc A2A Server 核心模块
 %%%
-%%% A gen_server that implements the BeamAI A2A protocol endpoint.
-%%% It maintains server state including agent configuration, a cached
-%%% agent card, and a task process map.  All JSON-RPC requests flow
-%%% through this server, which applies the middleware pipeline and
-%%% delegates to beamai_a2a_handler for method dispatch.
+%%% 实现 A2A 协议的服务端核心逻辑。作为 gen_server 行为实现，
+%%% 负责管理服务器状态和协调各个子模块的工作。
 %%%
-%%% The server supports both authenticated and unauthenticated
-%%% request paths, configurable via the middleware pipeline.
+%%% == 职责 ==
 %%%
-%%% Key functions:
-%%%   start_link/1          - Start with agent config
-%%%   handle_request/2      - Process a decoded JSON-RPC request map
-%%%   handle_json/2         - Process raw JSON binary
-%%%   handle_request_with_auth/3 - Process with explicit auth context
-%%%   request_input/3       - Signal input_required to a task
-%%%   complete_task/3       - Mark a task as completed
-%%%   fail_task/3           - Mark a task as failed
+%%% 1. 服务器生命周期管理（启动/停止）
+%%% 2. 任务进程映射管理
+%%% 3. 请求分发和响应构建
+%%% 4. Agent Card 缓存
+%%%
+%%% == 子模块 ==
+%%%
+%%% - beamai_a2a_handler: JSON-RPC 方法处理器
+%%% - beamai_a2a_middleware: 认证和限流中间件
+%%% - beamai_a2a_convert: JSON 转换工具
+%%%
+%%% == 使用示例 ==
+%%%
+%%% ```erlang
+%%% %% 启动服务器
+%%% {ok, Server} = beamai_a2a_server:start_link(#{
+%%%     agent_config => AgentConfig
+%%% }).
+%%%
+%%% %% 处理请求（无认证）
+%%% {ok, Response} = beamai_a2a_server:handle_request(Server, JsonRpcRequest).
+%%%
+%%% %% 处理请求（带认证和限流）
+%%% Headers = [{<<"authorization">>, <<"Bearer my-api-key">>}],
+%%% case beamai_a2a_server:handle_json_with_auth(Server, JsonBin, Headers) of
+%%%     {ok, ResponseJson, RateLimitInfo} -> respond(200, ResponseJson);
+%%%     {error, auth_error, ErrorJson} -> respond(401, ErrorJson);
+%%%     {error, rate_limited, ErrorJson} -> respond(429, ErrorJson)
+%%% end.
+%%% ```
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_server).
+
 -behaviour(gen_server).
 
--include("a2a.hrl").
-
-%% API
+%% API 导出
 -export([
     start_link/1,
-    start_link/2,
+    start/1,
     handle_request/2,
     handle_json/2,
+    get_agent_card/1,
+    stop/1,
+
+    %% 带认证和限流的请求处理
     handle_request_with_auth/3,
+    handle_json_with_auth/3,
+
+    %% 任务状态控制（供外部模块调用）
     request_input/3,
     complete_task/3,
-    fail_task/3,
-    get_agent_card/1,
-    set_agent_card/2,
-    get_state/1
+    fail_task/3
 ]).
 
-%% gen_server callbacks
+%% gen_server 回调
 -export([
     init/1,
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2
+    terminate/2,
+    code_change/3
 ]).
 
--define(DEFAULT_NAME, beamai_a2a_server).
+-include_lib("beamai_core/include/beamai_common.hrl").
 
+%% 服务器状态记录
 -record(state, {
-    %% Agent configuration
-    agent_config :: map(),
-    %% Cached agent card (built from config)
-    agent_card :: #agent_card{} | undefined,
-    %% Middleware pipeline
-    pipeline :: beamai_a2a_middleware:pipeline(),
-    %% Task processes: task_id => pid
-    task_procs = #{} :: #{binary() => pid()},
-    %% Monitor refs: ref => task_id
-    task_monitors = #{} :: #{reference() => binary()},
-    %% Server name for registration
-    name :: atom()
+    agent_config :: map(),               %% Agent 配置
+    agent_card :: map(),                 %% 缓存的 Agent Card
+    tasks :: #{binary() => pid()},       %% Task ID -> Task Pid 映射
+    contexts :: #{binary() => [binary()]}  %% Context ID -> [Task IDs] 映射
 }).
 
 %%====================================================================
-%% API
+%% API - 服务器生命周期
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Start the A2A server with the given agent configuration.
+%% @doc 启动 A2A Server（带链接）
 %%
-%% Config keys:
-%%   `name'            - registered name (default: beamai_a2a_server)
-%%   `agent_card'      - #agent_card{} or map()
-%%   `handler_module'  - module implementing a2a_handler behaviour
-%%   `middleware'       - list of middleware funs (optional)
-%%   `auth_required'   - boolean (default: false)
-%%   `rate_limit'      - rate limit config map (optional)
-%% @end
-%%--------------------------------------------------------------------
+%% @param Opts 配置选项
+%%   - agent_config: Agent 配置（必需）
+%%   - name: 服务器注册名称（可选）
+%% @returns {ok, Pid} | {error, Reason}
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
-start_link(Config) ->
-    Name = maps:get(name, Config, ?DEFAULT_NAME),
-    start_link(Name, Config).
+start_link(Opts) ->
+    case maps:get(name, Opts, undefined) of
+        undefined ->
+            gen_server:start_link(?MODULE, Opts, []);
+        Name ->
+            gen_server:start_link({local, Name}, ?MODULE, Opts, [])
+    end.
 
--spec start_link(atom(), map()) -> {ok, pid()} | {error, term()}.
-start_link(Name, Config) ->
-    gen_server:start_link({local, Name}, ?MODULE, Config#{name => Name}, []).
+%% @doc 启动 A2A Server（不带链接）
+-spec start(map()) -> {ok, pid()} | {error, term()}.
+start(Opts) ->
+    gen_server:start(?MODULE, Opts, []).
 
-%%--------------------------------------------------------------------
-%% @doc Handle a decoded JSON-RPC request map.
+%% @doc 停止服务器
+-spec stop(pid() | atom()) -> ok.
+stop(Server) ->
+    gen_server:stop(Server, normal, ?DEFAULT_TIMEOUT).
+
+%%====================================================================
+%% API - 请求处理（无认证）
+%%====================================================================
+
+%% @doc 处理 JSON-RPC 请求
 %%
-%% Returns a JSON binary response.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_request(pid() | atom(), map()) -> binary().
+%% @param Server 服务器进程引用
+%% @param Request 请求 map（已解码的 JSON）
+%% @returns {ok, Response} | {error, Reason}
+-spec handle_request(pid() | atom(), map()) -> {ok, map()} | {error, term()}.
 handle_request(Server, Request) ->
-    gen_server:call(Server, {handle_request, Request}, 30000).
+    gen_server:call(Server, {handle_request, Request}, ?DEFAULT_LLM_TIMEOUT).
 
-%%--------------------------------------------------------------------
-%% @doc Handle a raw JSON binary payload.
+%% @doc 处理 JSON 字符串请求
 %%
-%% Decodes the JSON-RPC request, processes it, and returns a JSON
-%% binary response.
-%% @end
-%%--------------------------------------------------------------------
--spec handle_json(pid() | atom(), binary()) -> binary().
-handle_json(Server, JsonBinary) ->
-    gen_server:call(Server, {handle_json, JsonBinary}, 30000).
+%% @param Server 服务器进程引用
+%% @param JsonBin JSON 二进制字符串
+%% @returns {ok, ResponseJson} | {error, Reason}
+-spec handle_json(pid() | atom(), binary()) -> {ok, binary()} | {error, term()}.
+handle_json(Server, JsonBin) ->
+    case beamai_a2a_jsonrpc:decode(JsonBin) of
+        {ok, Request} ->
+            case handle_request(Server, Request) of
+                {ok, Response} ->
+                    {ok, jsx:encode(Response, [])};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, parse_error} ->
+            {ok, jsx:encode(beamai_a2a_jsonrpc:parse_error(null), [])};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
-%%--------------------------------------------------------------------
-%% @doc Handle a request with explicit authentication context.
+%%====================================================================
+%% API - 请求处理（带认证和限流）
+%%====================================================================
+
+%% @doc 带认证和限流的 JSON-RPC 请求处理
 %%
-%% `AuthInfo' is a map with authentication details (e.g., from
-%% HTTP headers already parsed by the Cowboy handler).
-%% @end
-%%--------------------------------------------------------------------
--spec handle_request_with_auth(pid() | atom(), map(), map()) -> binary().
-handle_request_with_auth(Server, Request, AuthInfo) ->
-    gen_server:call(Server, {handle_request_auth, Request, AuthInfo}, 30000).
-
-%%--------------------------------------------------------------------
-%% @doc Signal that a task requires input from the user.
+%% 处理流程：
+%% 1. 验证 API Key 认证
+%% 2. 检查限流
+%% 3. 处理实际请求
 %%
-%% `TaskId' is the task identifier.
-%% `Prompt' is the prompt message to display to the user.
-%% `Metadata' is optional metadata to include in the status update.
-%% @end
-%%--------------------------------------------------------------------
--spec request_input(pid() | atom(), binary(), binary()) -> ok | {error, term()}.
-request_input(Server, TaskId, Prompt) ->
-    gen_server:call(Server, {request_input, TaskId, Prompt}).
+%% @param Server 服务器进程引用
+%% @param Request 请求 map
+%% @param Headers HTTP 请求头列表
+%% @returns {ok, Response, RateLimitInfo} | {error, Type, Response}
+-spec handle_request_with_auth(pid() | atom(), map(), [{binary(), binary()}]) ->
+    {ok, map(), map()} | {error, atom(), map()}.
+handle_request_with_auth(Server, Request, Headers) ->
+    Id = maps:get(<<"id">>, Request, null),
+    case beamai_a2a_middleware:check_auth_and_rate_limit(Headers) of
+        {ok, _AuthInfo, RateLimitInfo} ->
+            %% 认证和限流都通过
+            case handle_request(Server, Request) of
+                {ok, Response} ->
+                    {ok, Response, RateLimitInfo};
+                {error, Reason} ->
+                    {error, Reason, RateLimitInfo}
+            end;
+        {error, auth_disabled, RateLimitInfo} ->
+            %% 认证已禁用，直接处理请求
+            case handle_request(Server, Request) of
+                {ok, Response} ->
+                    {ok, Response, RateLimitInfo};
+                {error, Reason} ->
+                    {error, Reason, RateLimitInfo}
+            end;
+        {error, missing_api_key, _} ->
+            {error, auth_error, beamai_a2a_middleware:make_auth_error_response(Id, missing_api_key)};
+        {error, invalid_api_key, _} ->
+            {error, auth_error, beamai_a2a_middleware:make_auth_error_response(Id, invalid_api_key)};
+        {error, key_expired, _} ->
+            {error, auth_error, beamai_a2a_middleware:make_auth_error_response(Id, key_expired)};
+        {error, insufficient_permissions, _} ->
+            {error, auth_error, beamai_a2a_middleware:make_auth_error_response(Id, insufficient_permissions)};
+        {error, rate_limited, RateLimitInfo} ->
+            {error, rate_limited, beamai_a2a_middleware:make_rate_limit_error_response(Id, RateLimitInfo)}
+    end.
 
-%%--------------------------------------------------------------------
-%% @doc Mark a task as completed with the given result.
+%% @doc 带认证和限流的 JSON 字符串请求处理
 %%
-%% `TaskId' is the task identifier.
-%% `Result' is the result map (may contain `artifacts').
-%% `Metadata' is optional metadata.
-%% @end
-%%--------------------------------------------------------------------
--spec complete_task(pid() | atom(), binary(), map()) -> ok | {error, term()}.
-complete_task(Server, TaskId, Result) ->
-    gen_server:call(Server, {complete_task, TaskId, Result}).
+%% @param Server 服务器进程引用
+%% @param JsonBin JSON 二进制字符串
+%% @param Headers HTTP 请求头列表
+%% @returns {ok, ResponseJson, RateLimitInfo} | {error, Type, ResponseJson}
+-spec handle_json_with_auth(pid() | atom(), binary(), [{binary(), binary()}]) ->
+    {ok, binary(), map()} | {error, atom(), binary()}.
+handle_json_with_auth(Server, JsonBin, Headers) ->
+    case beamai_a2a_jsonrpc:decode(JsonBin) of
+        {ok, Request} ->
+            case handle_request_with_auth(Server, Request, Headers) of
+                {ok, Response, RateLimitInfo} ->
+                    {ok, jsx:encode(Response, []), RateLimitInfo};
+                {error, Type, Response} when is_map(Response) ->
+                    {error, Type, jsx:encode(Response, [])};
+                {error, Reason, RateLimitInfo} ->
+                    {error, Reason, RateLimitInfo}
+            end;
+        {error, parse_error} ->
+            %% 解析错误不需要认证检查
+            {error, parse_error, jsx:encode(beamai_a2a_jsonrpc:parse_error(null), [])};
+        {error, Reason} ->
+            {error, Reason, #{}}
+    end.
 
-%%--------------------------------------------------------------------
-%% @doc Mark a task as failed.
-%%
-%% `TaskId' is the task identifier.
-%% `Reason' is the failure reason.
-%% `Metadata' is optional metadata.
-%% @end
-%%--------------------------------------------------------------------
--spec fail_task(pid() | atom(), binary(), binary()) -> ok | {error, term()}.
-fail_task(Server, TaskId, Reason) ->
-    gen_server:call(Server, {fail_task, TaskId, Reason}).
+%%====================================================================
+%% API - Agent Card
+%%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Get the cached agent card.
-%% @end
-%%--------------------------------------------------------------------
--spec get_agent_card(pid() | atom()) -> #agent_card{}.
+%% @doc 获取服务器的 Agent Card
+-spec get_agent_card(pid() | atom()) -> {ok, map()} | {error, term()}.
 get_agent_card(Server) ->
-    gen_server:call(Server, get_agent_card).
-
-%%--------------------------------------------------------------------
-%% @doc Set/update the agent card.
-%% @end
-%%--------------------------------------------------------------------
--spec set_agent_card(pid() | atom(), #agent_card{}) -> ok.
-set_agent_card(Server, Card) ->
-    gen_server:call(Server, {set_agent_card, Card}).
-
-%%--------------------------------------------------------------------
-%% @doc Get the current server state (for debugging).
-%% @end
-%%--------------------------------------------------------------------
--spec get_state(pid() | atom()) -> map().
-get_state(Server) ->
-    gen_server:call(Server, get_state).
+    gen_server:call(Server, get_agent_card, ?DEFAULT_TIMEOUT).
 
 %%====================================================================
-%% gen_server callbacks
+%% API - 任务状态控制
 %%====================================================================
 
-init(Config) ->
-    %% Build agent card from config
-    AgentCard = build_agent_card(Config),
+%% @doc 请求用户输入
+%%
+%% 将任务设置为 input_required 状态。
+%%
+%% @param TaskPid 任务进程
+%% @param Question 询问用户的问题
+%% @param Options 可选参数（预留）
+%% @returns ok | {error, Reason}
+-spec request_input(pid(), binary(), map()) -> ok | {error, term()}.
+request_input(TaskPid, Question, _Options) ->
+    QuestionMessage = #{
+        role => agent,
+        parts => [#{kind => text, text => Question}],
+        message_id => beamai_a2a_convert:generate_message_id()
+    },
+    case beamai_a2a_task:update_status(TaskPid, {input_required, QuestionMessage}) of
+        ok ->
+            %% 发送 push 通知
+            {ok, TaskId} = beamai_a2a_task:get_id(TaskPid),
+            {ok, Task} = beamai_a2a_task:get(TaskPid),
+            spawn(fun() -> beamai_a2a_push:notify_async(TaskId, Task) end),
+            ok;
+        Error ->
+            Error
+    end.
 
-    %% Set handler module in app env for beamai_a2a_handler
-    case maps:get(handler_module, Config, undefined) of
-        undefined -> ok;
-        Mod -> application:set_env(beamai_a2a, handler_module, Mod)
-    end,
+%% @doc 完成任务
+%%
+%% 将任务设置为 completed 状态。
+%%
+%% @param TaskPid 任务进程
+%% @param Response 响应内容
+%% @param Options 可选参数
+%% @returns ok | {error, Reason}
+-spec complete_task(pid(), binary() | map(), map()) -> ok | {error, term()}.
+complete_task(TaskPid, Response, Options) when is_binary(Response) ->
+    %% 创建 Artifact
+    ArtifactName = maps:get(artifact_name, Options, <<"response">>),
+    Artifact = #{
+        name => ArtifactName,
+        parts => [#{kind => text, text => Response}]
+    },
+    ok = beamai_a2a_task:add_artifact(TaskPid, Artifact),
+    case beamai_a2a_task:update_status(TaskPid, completed) of
+        ok ->
+            notify_task_change(TaskPid),
+            ok;
+        Error ->
+            Error
+    end;
+complete_task(TaskPid, ResponseMsg, _Options) when is_map(ResponseMsg) ->
+    case beamai_a2a_task:update_status(TaskPid, {completed, ResponseMsg}) of
+        ok ->
+            notify_task_change(TaskPid),
+            ok;
+        Error ->
+            Error
+    end.
 
-    %% Build middleware pipeline
-    Pipeline = build_pipeline(Config),
+%% @doc 标记任务失败
+%%
+%% @param TaskPid 任务进程
+%% @param Reason 错误原因
+%% @param Options 可选参数
+%% @returns ok | {error, Reason}
+-spec fail_task(pid(), term(), map()) -> ok | {error, term()}.
+fail_task(TaskPid, Reason, _Options) ->
+    ErrorMessage = #{
+        role => agent,
+        parts => [#{kind => text, text => format_error(Reason)}]
+    },
+    case beamai_a2a_task:update_status(TaskPid, {failed, ErrorMessage}) of
+        ok ->
+            notify_task_change(TaskPid),
+            ok;
+        Error ->
+            Error
+    end.
+
+%%====================================================================
+%% gen_server 回调
+%%====================================================================
+
+%% @private 初始化服务器
+init(Opts) ->
+    AgentConfig = maps:get(agent_config, Opts, #{}),
+
+    %% 生成 Agent Card
+    {ok, AgentCard} = beamai_a2a_card:generate(AgentConfig),
 
     State = #state{
-        agent_config = Config,
+        agent_config = AgentConfig,
         agent_card = AgentCard,
-        pipeline = Pipeline,
-        name = maps:get(name, Config, ?DEFAULT_NAME)
+        tasks = #{},
+        contexts = #{}
     },
 
-    logger:info("BeamAI A2A server started: ~p", [State#state.name]),
     {ok, State}.
 
+%% @private 处理同步调用
 handle_call({handle_request, Request}, _From, State) ->
-    Response = process_request(Request, #{}, State),
-    {reply, Response, State};
+    case do_handle_request(Request, State) of
+        {ok, Response, NewState} ->
+            {reply, {ok, Response}, NewState};
+        {error, Reason, NewState} ->
+            {reply, {error, Reason}, NewState}
+    end;
 
-handle_call({handle_json, JsonBinary}, _From, State) ->
-    Response = process_json(JsonBinary, #{}, State),
-    {reply, Response, State};
-
-handle_call({handle_request_auth, Request, AuthInfo}, _From, State) ->
-    Context = #{auth_claims => AuthInfo},
-    Response = process_request(Request, Context, State),
-    {reply, Response, State};
-
-handle_call({request_input, TaskId, Prompt}, _From, State) ->
-    Result = do_request_input(TaskId, Prompt),
-    {reply, Result, State};
-
-handle_call({complete_task, TaskId, ResultMap}, _From, State) ->
-    Result = do_complete_task(TaskId, ResultMap),
-    {reply, Result, State};
-
-handle_call({fail_task, TaskId, Reason}, _From, State) ->
-    Result = do_fail_task(TaskId, Reason),
-    {reply, Result, State};
-
-handle_call(get_agent_card, _From, State) ->
-    {reply, State#state.agent_card, State};
-
-handle_call({set_agent_card, Card}, _From, State) ->
-    %% Also update the a2a_agent_card gen_server if running
-    try a2a_agent_card:set_card(Card)
-    catch _:_ -> ok
-    end,
-    {reply, ok, State#state{agent_card = Card}};
-
-handle_call(get_state, _From, State) ->
-    Info = #{
-        name => State#state.name,
-        task_count => maps:size(State#state.task_procs),
-        agent_card_name => case State#state.agent_card of
-            undefined -> undefined;
-            Card -> Card#agent_card.name
-        end
-    },
-    {reply, Info, State};
+handle_call(get_agent_card, _From, #state{agent_card = Card} = State) ->
+    {reply, {ok, Card}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+%% @private 处理异步消息
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', Ref, process, _Pid, _Reason}, State) ->
-    %% Task process died - clean up tracking
-    case maps:get(Ref, State#state.task_monitors, undefined) of
-        undefined ->
-            {noreply, State};
-        TaskId ->
-            NewProcs = maps:remove(TaskId, State#state.task_procs),
-            NewMons = maps:remove(Ref, State#state.task_monitors),
-            {noreply, State#state{
-                task_procs = NewProcs,
-                task_monitors = NewMons
-            }}
-    end;
+%% @private 处理系统消息
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
+    %% Task 进程终止，清理映射
+    NewTasks = maps:filter(fun(_Id, TaskPid) -> TaskPid =/= Pid end, State#state.tasks),
+    {noreply, State#state{tasks = NewTasks}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @private 终止回调
 terminate(_Reason, _State) ->
     ok.
 
+%% @private 代码升级
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
 %%====================================================================
-%% Request processing
+%% 内部函数 - 请求处理
 %%====================================================================
 
-%% @doc Process a raw JSON binary through the full pipeline.
--spec process_json(binary(), map(), #state{}) -> binary().
-process_json(JsonBinary, InitialContext, State) ->
-    case beamai_a2a_jsonrpc:decode(JsonBinary) of
-        {ok, Request} ->
-            process_request(Request, InitialContext, State);
-        {batch, Requests} ->
-            Responses = [process_batch_item(Item, InitialContext, State)
-                         || Item <- Requests],
-            %% Filter out notifications (no id => no response)
-            Filtered = [R || R <- Responses, R =/= no_response],
-            beamai_a2a_jsonrpc:batch(Filtered);
-        {error, ErrorObj} ->
-            beamai_a2a_jsonrpc:encode_error(null,
-                maps:get(<<"code">>, ErrorObj),
-                maps:get(<<"message">>, ErrorObj))
-    end.
-
-%% @doc Process a single JSON-RPC request map.
--spec process_request(map(), map(), #state{}) -> binary().
-process_request(Request, InitialContext, State) ->
+%% @private 处理请求分发
+do_handle_request(#{<<"method">> := Method} = Request, State) ->
     Id = maps:get(<<"id">>, Request, null),
-    Method = maps:get(<<"method">>, Request, undefined),
     Params = maps:get(<<"params">>, Request, #{}),
 
-    %% Run middleware pipeline
-    case beamai_a2a_middleware:apply(State#state.pipeline,
-                                     Request, InitialContext) of
-        {ok, Context} ->
-            %% Dispatch to handler
-            case beamai_a2a_handler:handle(Method, Params, Context) of
-                {ok, Result} ->
-                    beamai_a2a_jsonrpc:encode_result(Id, Result);
-                {error, ErrorObj} ->
-                    beamai_a2a_jsonrpc:encode_error(Id,
-                        maps:get(<<"code">>, ErrorObj),
-                        maps:get(<<"message">>, ErrorObj));
-                {subscribe, Pid, TaskId} ->
-                    %% For subscriptions, return a result indicating
-                    %% the caller should upgrade to SSE. The actual
-                    %% SSE setup is handled by the cowboy handler.
-                    track_task(TaskId, Pid, State),
-                    beamai_a2a_jsonrpc:encode_result(Id, #{
-                        <<"subscribe">> => true,
-                        <<"taskId">>    => TaskId,
-                        <<"taskPid">>   => list_to_binary(
-                            pid_to_list(Pid))
-                    })
-            end;
-        {error, ErrorObj} ->
-            beamai_a2a_jsonrpc:encode_error(Id,
-                maps:get(<<"code">>, ErrorObj),
-                maps:get(<<"message">>, ErrorObj));
-        {stop, Response} when is_binary(Response) ->
-            Response;
-        {stop, _Response} ->
-            beamai_a2a_jsonrpc:encode_error(Id, -32603,
-                                            <<"Request stopped by middleware">>)
-    end.
+    %% 构建处理器上下文
+    Context = #{
+        id => Id,
+        tasks => State#state.tasks,
+        contexts => State#state.contexts,
+        agent_config => State#state.agent_config
+    },
 
-%% @doc Process a single item from a batch request.
--spec process_batch_item({ok, map()} | {error, map()}, map(), #state{}) ->
-    binary() | no_response.
-process_batch_item({ok, Request}, Context, State) ->
-    Id = maps:get(<<"id">>, Request, undefined),
-    case Id of
-        undefined ->
-            %% Notification (no id) - process but don't return response
-            _ = process_request(Request, Context, State),
-            no_response;
-        _ ->
-            process_request(Request, Context, State)
-    end;
-process_batch_item({error, ErrorObj}, _Context, _State) ->
-    beamai_a2a_jsonrpc:encode_error(null,
-        maps:get(<<"code">>, ErrorObj),
-        maps:get(<<"message">>, ErrorObj)).
-
-%%====================================================================
-%% Task lifecycle operations
-%%====================================================================
-
-%% @doc Signal that a task requires input.
--spec do_request_input(binary(), binary()) -> ok | {error, term()}.
-do_request_input(TaskId, Prompt) ->
-    case a2a_task_store:get_task_pid(TaskId) of
-        {ok, Pid} ->
-            %% Create a prompt message and send status update
-            PromptMsg = #message{
-                message_id = beamai_a2a_utils:generate_id(),
-                task_id = TaskId,
-                role = agent,
-                parts = [#part{content = {text, Prompt}}]
+    %% 调用处理器
+    case beamai_a2a_handler:dispatch(Method, Params, Context) of
+        {ok, Response, NewContext} ->
+            NewState = State#state{
+                tasks = maps:get(tasks, NewContext, State#state.tasks),
+                contexts = maps:get(contexts, NewContext, State#state.contexts)
             },
-            _ = PromptMsg,  %% The message is for documentation
-            a2a_task_statem:update_status(Pid, input_required),
-            %% Notify push endpoints
-            beamai_a2a_push:notify(TaskId, input_required, #{
-                <<"prompt">> => Prompt
-            }),
-            ok;
-        {error, not_found} ->
-            {error, task_not_found}
-    end.
+            {ok, Response, NewState};
+        {error, Reason, NewContext} ->
+            NewState = State#state{
+                tasks = maps:get(tasks, NewContext, State#state.tasks),
+                contexts = maps:get(contexts, NewContext, State#state.contexts)
+            },
+            {error, Reason, NewState}
+    end;
 
-%% @doc Complete a task with results.
--spec do_complete_task(binary(), map()) -> ok | {error, term()}.
-do_complete_task(TaskId, ResultMap) ->
-    case a2a_task_store:get_task_pid(TaskId) of
-        {ok, Pid} ->
-            %% Add artifacts if present
-            case maps:get(artifacts, ResultMap,
-                          maps:get(<<"artifacts">>, ResultMap, [])) of
-                [] -> ok;
-                Artifacts ->
-                    lists:foreach(fun(ArtMap) ->
-                        Artifact = case is_map(ArtMap) of
-                            true -> beamai_a2a_convert:map_to_artifact(ArtMap);
-                            false -> ArtMap
-                        end,
-                        a2a_task_statem:add_artifact(Pid, Artifact)
-                    end, Artifacts)
-            end,
-            a2a_task_statem:update_status(Pid, completed),
-            beamai_a2a_push:notify(TaskId, completed, ResultMap),
-            ok;
-        {error, not_found} ->
-            {error, task_not_found}
-    end.
+do_handle_request(Request, State) when is_map(Request) ->
+    %% 请求缺少 method 字段
+    Id = maps:get(<<"id">>, Request, null),
+    Response = #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"id">> => Id,
+        <<"error">> => #{
+            <<"code">> => -32600,
+            <<"message">> => <<"Invalid Request">>
+        }
+    },
+    {ok, Response, State};
 
-%% @doc Fail a task with a reason.
--spec do_fail_task(binary(), binary()) -> ok | {error, term()}.
-do_fail_task(TaskId, Reason) ->
-    case a2a_task_store:get_task_pid(TaskId) of
-        {ok, Pid} ->
-            a2a_task_statem:update_status(Pid, failed),
-            beamai_a2a_push:notify(TaskId, failed, #{
-                <<"reason">> => Reason
-            }),
-            ok;
-        {error, not_found} ->
-            {error, task_not_found}
-    end.
+do_handle_request({batch, Requests}, State) ->
+    %% 批处理请求
+    {Responses, FinalState} = lists:foldl(
+        fun(Req, {Acc, S}) ->
+            case do_handle_request(Req, S) of
+                {ok, Resp, NewS} -> {[Resp | Acc], NewS};
+                {error, _, NewS} -> {Acc, NewS}
+            end
+        end,
+        {[], State},
+        Requests
+    ),
+    {ok, lists:reverse(Responses), FinalState}.
 
 %%====================================================================
-%% Internal functions
+%% 内部函数 - 工具
 %%====================================================================
 
-%% @doc Build an agent card from the server configuration.
--spec build_agent_card(map()) -> #agent_card{}.
-build_agent_card(Config) ->
-    case maps:get(agent_card, Config, undefined) of
-        undefined ->
-            %% Try to get from the a2a_agent_card gen_server
-            try a2a_agent_card:get_card()
-            catch _:_ -> default_agent_card(Config)
-            end;
-        Card when is_record(Card, agent_card) ->
-            Card;
-        CardMap when is_map(CardMap) ->
-            beamai_a2a_convert:map_to_agent_card(CardMap)
-    end.
+%% @private 发送任务变更通知
+notify_task_change(TaskPid) ->
+    {ok, TaskId} = beamai_a2a_task:get_id(TaskPid),
+    {ok, Task} = beamai_a2a_task:get(TaskPid),
+    spawn(fun() -> beamai_a2a_push:notify_async(TaskId, Task) end),
+    ok.
 
-%% @doc Create a default agent card.
--spec default_agent_card(map()) -> #agent_card{}.
-default_agent_card(Config) ->
-    Name = maps:get(agent_name, Config, <<"BeamAI A2A Agent">>),
-    Desc = maps:get(agent_description, Config,
-                    <<"A2A protocol agent powered by BeamAI">>),
-    Version = maps:get(agent_version, Config, <<"0.1.0">>),
-    #agent_card{
-        name = Name,
-        description = Desc,
-        version = Version,
-        supported_interfaces = [
-            #agent_interface{
-                url = get_base_url(Config),
-                protocol_binding = <<"JSONRPC">>,
-                protocol_version = <<"0.4">>
-            }
-        ],
-        capabilities = #agent_capabilities{
-            streaming = true,
-            push_notifications = true,
-            extended_agent_card = false,
-            extensions = []
-        },
-        default_input_modes = [<<"text/plain">>, <<"application/json">>],
-        default_output_modes = [<<"text/plain">>, <<"application/json">>],
-        skills = [],
-        security_schemes = #{},
-        security_requirements = []
-    }.
-
-%% @doc Get the base URL from config or application env.
--spec get_base_url(map()) -> binary().
-get_base_url(Config) ->
-    case maps:get(base_url, Config, undefined) of
-        undefined ->
-            Host = application:get_env(a2a_erl, host, "localhost"),
-            Port = application:get_env(a2a_erl, port, 8080),
-            Scheme = application:get_env(a2a_erl, scheme, "http"),
-            iolist_to_binary(io_lib:format("~s://~s:~p",
-                                            [Scheme, Host, Port]));
-        Url -> Url
-    end.
-
-%% @doc Build the middleware pipeline from configuration.
--spec build_pipeline(map()) -> beamai_a2a_middleware:pipeline().
-build_pipeline(Config) ->
-    %% Start with logging
-    Base = [beamai_a2a_middleware:logging()],
-
-    %% Add CORS
-    WithCors = Base ++ [beamai_a2a_middleware:cors()],
-
-    %% Add auth if required
-    WithAuth = case maps:get(auth_required, Config, false) of
-        true ->
-            AuthOpts = maps:get(auth_opts, Config, #{}),
-            WithCors ++ [beamai_a2a_middleware:auth(AuthOpts)];
-        false ->
-            WithCors
-    end,
-
-    %% Add rate limiting if configured
-    WithRate = case maps:get(rate_limit, Config, undefined) of
-        undefined ->
-            WithAuth;
-        RateConfig when is_map(RateConfig) ->
-            WithAuth ++ [beamai_a2a_middleware:rate_limit(RateConfig)]
-    end,
-
-    %% Add custom middleware
-    Custom = maps:get(middleware, Config, []),
-    beamai_a2a_middleware:chain(WithRate ++ Custom).
-
-%% @doc Track a task process for monitoring.
--spec track_task(binary(), pid(), #state{}) -> ok.
-track_task(TaskId, Pid, State) ->
-    case maps:is_key(TaskId, State#state.task_procs) of
-        true -> ok;
-        false ->
-            Ref = erlang:monitor(process, Pid),
-            %% Note: We update state via a cast since we may be in a
-            %% synchronous call context.  The state update will be
-            %% handled in handle_cast.
-            gen_server:cast(State#state.name,
-                            {track_task, TaskId, Pid, Ref}),
-            ok
-    end.
+%% @private 格式化错误（委托给公共模块）
+format_error(Reason) ->
+    beamai_a2a_utils:format_error(Reason).

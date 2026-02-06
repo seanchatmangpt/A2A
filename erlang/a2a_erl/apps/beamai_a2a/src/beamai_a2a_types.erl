@@ -1,277 +1,326 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Type Definitions and Validation
+%%% @doc A2A 协议类型定义
 %%%
-%%% Defines canonical type helpers for the A2A protocol within the
-%%% BeamAI framework.  Provides state-transition validation, terminal
-%%% state checks, message-role validation, and part-kind classification.
+%%% 定义 A2A 协议中使用的所有数据类型，包括：
+%%% - Agent Card（代理卡片）
+%%% - Skill（技能）
+%%% - Task（任务）和状态
+%%% - Message（消息）和 Part（内容部分）
+%%% - Artifact（产出物）
 %%%
-%%% Task states: submitted, working, input_required, auth_required,
-%%%              completed, failed, canceled, rejected
+%%% == 设计原则 ==
 %%%
-%%% Message roles: user, agent
+%%% 1. 内部使用 atom 作为 key（性能和模式匹配）
+%%% 2. 外部 JSON 使用 binary key
+%%% 3. 提供类型转换函数
 %%%
-%%% Part types: text, file, data
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_types).
 
-%% API - Task states
--export([
-    task_state/1,
-    is_terminal/1,
-    is_interrupted/1,
-    can_transition/2,
-    terminal_states/0,
-    interrupted_states/0,
-    all_states/0
+%% 类型导出
+-export_type([
+    %% Agent Card
+    agent_card/0,
+    skill/0,
+    capability/0,
+    provider/0,
+
+    %% Task
+    task/0,
+    task_id/0,
+    task_state/0,
+    task_status/0,
+    context_id/0,
+
+    %% Message
+    message/0,
+    message_id/0,
+    role/0,
+    part/0,
+    text_part/0,
+    file_part/0,
+    data_part/0,
+
+    %% Artifact
+    artifact/0,
+    artifact_id/0
 ]).
 
-%% API - Message roles
+%% API 导出
 -export([
-    message_role/1,
-    valid_role/1
+    %% Task 状态转换
+    binary_to_task_state/1,
+    task_state_to_binary/1,
+    is_terminal_state/1,
+
+    %% Role 转换
+    binary_to_role/1,
+    role_to_binary/1,
+
+    %% Part kind 转换
+    binary_to_part_kind/1,
+    part_kind_to_binary/1,
+
+    %% Push 事件转换（安全版本）
+    binary_to_push_event/1,
+    push_event_to_binary/1,
+    is_valid_push_event/1
 ]).
 
-%% API - Part kinds
--export([
-    part_kind/1,
-    valid_part_kind/1
-]).
-
-%% API - Validation
--export([
-    validate_task_state/1,
-    validate_message_role/1,
-    validate_part/1
-]).
-
 %%====================================================================
-%% Type definitions
+%% 类型定义
 %%====================================================================
 
--type task_state() :: submitted | working | input_required |
-                      auth_required | completed | failed |
-                      canceled | rejected.
+%% Agent Card 类型
+-type agent_card() :: #{
+    name := binary(),
+    description := binary(),
+    url := binary(),
+    version => binary(),
+    protocol_version => binary(),
+    provider => provider(),
+    capabilities => capability(),
+    default_input_modes => [binary()],
+    default_output_modes => [binary()],
+    skills => [skill()],
+    security_schemes => map(),
+    security => [map()]
+}.
 
--type message_role() :: user | agent.
+%% 技能定义
+-type skill() :: #{
+    id := binary(),
+    name := binary(),
+    description := binary(),
+    tags => [binary()],
+    examples => [binary()],
+    input_modes => [binary()],
+    output_modes => [binary()]
+}.
 
--type part_kind() :: text | file | data.
+%% 能力定义
+-type capability() :: #{
+    streaming => boolean(),
+    push_notifications => boolean(),
+    state_transition_history => boolean(),
+    extended_agent_card => boolean()
+}.
 
--export_type([task_state/0, message_role/0, part_kind/0]).
+%% 提供者信息
+-type provider() :: #{
+    organization := binary(),
+    url => binary()
+}.
+
+%% Task 类型
+-type task_id() :: binary().
+-type context_id() :: binary().
+
+-type task_state() :: submitted
+                    | working
+                    | input_required
+                    | auth_required
+                    | completed
+                    | failed
+                    | canceled
+                    | rejected.
+
+-type task_status() :: #{
+    state := task_state(),
+    message => message(),
+    timestamp => non_neg_integer()
+}.
+
+-type task() :: #{
+    id := task_id(),
+    context_id => context_id(),
+    status := task_status(),
+    history => [task_status()],
+    artifacts => [artifact()],
+    metadata => map(),
+    created_at => non_neg_integer(),
+    updated_at => non_neg_integer()
+}.
+
+%% Message 类型
+-type message_id() :: binary().
+-type role() :: user | agent.
+
+-type message() :: #{
+    message_id => message_id(),
+    role := role(),
+    parts := [part()],
+    metadata => map()
+}.
+
+%% Part 类型
+-type text_part() :: #{
+    kind := text,
+    text := binary()
+}.
+
+-type file_part() :: #{
+    kind := file,
+    file := #{
+        name := binary(),
+        mime_type => binary(),
+        bytes => binary(),
+        uri => binary()
+    }
+}.
+
+-type data_part() :: #{
+    kind := data,
+    data := map() | list()
+}.
+
+-type part() :: text_part() | file_part() | data_part().
+
+%% Artifact 类型
+-type artifact_id() :: binary().
+
+-type artifact() :: #{
+    artifact_id := artifact_id(),
+    name := binary(),
+    description => binary(),
+    parts := [part()],
+    metadata => map()
+}.
 
 %%====================================================================
-%% Task state functions
+%% Task 状态转换
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Normalise a task-state representation to a canonical atom.
+%% Task 状态映射表
+-define(TASK_STATES_MAP, #{
+    <<"submitted">> => submitted,
+    <<"working">> => working,
+    <<"input-required">> => input_required,
+    <<"auth-required">> => auth_required,
+    <<"completed">> => completed,
+    <<"failed">> => failed,
+    <<"canceled">> => canceled,
+    <<"rejected">> => rejected
+}).
+
+%% @doc 将 binary 转换为 task_state atom
+-spec binary_to_task_state(binary()) -> task_state().
+binary_to_task_state(Bin) ->
+    maps:get(Bin, ?TASK_STATES_MAP, submitted).
+
+%% @doc 将 task_state atom 转换为 binary
+-spec task_state_to_binary(task_state()) -> binary().
+task_state_to_binary(submitted) -> <<"submitted">>;
+task_state_to_binary(working) -> <<"working">>;
+task_state_to_binary(input_required) -> <<"input-required">>;
+task_state_to_binary(auth_required) -> <<"auth-required">>;
+task_state_to_binary(completed) -> <<"completed">>;
+task_state_to_binary(failed) -> <<"failed">>;
+task_state_to_binary(canceled) -> <<"canceled">>;
+task_state_to_binary(rejected) -> <<"rejected">>;
+task_state_to_binary(_) -> <<"submitted">>.
+
+%% @doc 判断是否为终态
 %%
-%% Accepts atoms, binaries (in either camelCase JSON form or lowercase
-%% atom form), and returns the corresponding atom.
-%% @end
-%%--------------------------------------------------------------------
--spec task_state(atom() | binary()) -> task_state() | {error, invalid_state}.
-task_state(submitted)         -> submitted;
-task_state(working)           -> working;
-task_state(input_required)    -> input_required;
-task_state(auth_required)     -> auth_required;
-task_state(completed)         -> completed;
-task_state(failed)            -> failed;
-task_state(canceled)          -> canceled;
-task_state(rejected)          -> rejected;
-%% Binary representations (JSON wire format)
-task_state(<<"submitted">>)      -> submitted;
-task_state(<<"working">>)        -> working;
-task_state(<<"input-required">>) -> input_required;
-task_state(<<"input_required">>) -> input_required;
-task_state(<<"auth-required">>)  -> auth_required;
-task_state(<<"auth_required">>)  -> auth_required;
-task_state(<<"completed">>)      -> completed;
-task_state(<<"failed">>)         -> failed;
-task_state(<<"canceled">>)       -> canceled;
-task_state(<<"rejected">>)       -> rejected;
-%% ProtoJSON SCREAMING_SNAKE_CASE format (matches existing a2a_json)
-task_state(<<"TASK_STATE_SUBMITTED">>)      -> submitted;
-task_state(<<"TASK_STATE_WORKING">>)        -> working;
-task_state(<<"TASK_STATE_COMPLETED">>)      -> completed;
-task_state(<<"TASK_STATE_FAILED">>)         -> failed;
-task_state(<<"TASK_STATE_CANCELED">>)       -> canceled;
-task_state(<<"TASK_STATE_INPUT_REQUIRED">>) -> input_required;
-task_state(<<"TASK_STATE_REJECTED">>)       -> rejected;
-task_state(<<"TASK_STATE_AUTH_REQUIRED">>)  -> auth_required;
-task_state(_Other)            -> {error, invalid_state}.
+%% 终态的任务不可重启，需要创建新任务。
+-spec is_terminal_state(task_state()) -> boolean().
+is_terminal_state(completed) -> true;
+is_terminal_state(failed) -> true;
+is_terminal_state(canceled) -> true;
+is_terminal_state(rejected) -> true;
+is_terminal_state(_) -> false.
 
-%%--------------------------------------------------------------------
-%% @doc Return true if the given state is terminal (no further
-%% transitions allowed).
-%% @end
-%%--------------------------------------------------------------------
--spec is_terminal(task_state()) -> boolean().
-is_terminal(completed) -> true;
-is_terminal(failed)    -> true;
-is_terminal(canceled)  -> true;
-is_terminal(rejected)  -> true;
-is_terminal(_)         -> false.
+%%====================================================================
+%% Role 转换
+%%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Return true if the given state is an interrupted/waiting state.
-%% @end
-%%--------------------------------------------------------------------
--spec is_interrupted(task_state()) -> boolean().
-is_interrupted(input_required) -> true;
-is_interrupted(auth_required)  -> true;
-is_interrupted(_)              -> false.
+%% @doc 将 binary 转换为 role atom
+-spec binary_to_role(binary()) -> role().
+binary_to_role(<<"user">>) -> user;
+binary_to_role(<<"agent">>) -> agent;
+binary_to_role(_) -> user.
 
-%%--------------------------------------------------------------------
-%% @doc Check whether a transition from `From' to `To' is valid
-%% according to the A2A protocol specification.
+%% @doc 将 role atom 转换为 binary
+-spec role_to_binary(role()) -> binary().
+role_to_binary(user) -> <<"user">>;
+role_to_binary(agent) -> <<"agent">>;
+role_to_binary(_) -> <<"user">>.
+
+%%====================================================================
+%% Part Kind 转换
+%%====================================================================
+
+%% @doc 将 binary 转换为 part kind atom
+-spec binary_to_part_kind(binary()) -> atom().
+binary_to_part_kind(<<"text">>) -> text;
+binary_to_part_kind(<<"file">>) -> file;
+binary_to_part_kind(<<"data">>) -> data;
+binary_to_part_kind(_) -> text.
+
+%% @doc 将 part kind atom 转换为 binary
+-spec part_kind_to_binary(atom()) -> binary().
+part_kind_to_binary(text) -> <<"text">>;
+part_kind_to_binary(file) -> <<"file">>;
+part_kind_to_binary(data) -> <<"data">>;
+part_kind_to_binary(_) -> <<"text">>.
+
+%%====================================================================
+%% Push 事件转换（安全版本，防止 atom 表耗尽攻击）
+%%====================================================================
+
+%% Push 事件白名单 - 仅允许这些预定义的事件类型
+%% 对应 task_state 的所有可能值
+-define(VALID_PUSH_EVENTS, #{
+    <<"submitted">> => submitted,
+    <<"working">> => working,
+    <<"input_required">> => input_required,
+    <<"input-required">> => input_required,
+    <<"auth_required">> => auth_required,
+    <<"auth-required">> => auth_required,
+    <<"completed">> => completed,
+    <<"failed">> => failed,
+    <<"canceled">> => canceled,
+    <<"rejected">> => rejected,
+    <<"all">> => all
+}).
+
+%% @doc 安全地将 binary 转换为 push 事件 atom
 %%
-%% Returns `true' if the transition is allowed, `false' otherwise.
+%% 使用预定义白名单进行验证，防止恶意输入导致 atom 表耗尽攻击。
+%% 未知事件返回 undefined，调用方应过滤掉无效事件。
 %%
-%% Valid transitions:
-%%   submitted      -> working
-%%   working        -> completed | failed | canceled | rejected |
-%%                     input_required | auth_required
-%%   input_required -> working | canceled
-%%   auth_required  -> working | canceled
-%%   terminal       -> (none)
-%% @end
-%%--------------------------------------------------------------------
--spec can_transition(task_state(), task_state()) -> boolean().
-can_transition(submitted, working)              -> true;
-can_transition(working, completed)              -> true;
-can_transition(working, failed)                 -> true;
-can_transition(working, canceled)               -> true;
-can_transition(working, rejected)               -> true;
-can_transition(working, input_required)         -> true;
-can_transition(working, auth_required)          -> true;
-can_transition(input_required, working)         -> true;
-can_transition(input_required, canceled)        -> true;
-can_transition(auth_required, working)          -> true;
-can_transition(auth_required, canceled)         -> true;
-can_transition(_From, _To)                      -> false.
+%% @param Bin 事件名称的 binary 表示
+%% @returns 对应的 atom 或 undefined（未知事件）
+-spec binary_to_push_event(binary()) -> atom() | undefined.
+binary_to_push_event(Bin) when is_binary(Bin) ->
+    maps:get(Bin, ?VALID_PUSH_EVENTS, undefined);
+binary_to_push_event(_) ->
+    undefined.
 
-%%--------------------------------------------------------------------
-%% @doc Return the list of all terminal states.
-%% @end
-%%--------------------------------------------------------------------
--spec terminal_states() -> [task_state()].
-terminal_states() ->
-    [completed, failed, canceled, rejected].
+%% @doc 将 push 事件 atom 转换为 binary
+-spec push_event_to_binary(atom()) -> binary().
+push_event_to_binary(submitted) -> <<"submitted">>;
+push_event_to_binary(working) -> <<"working">>;
+push_event_to_binary(input_required) -> <<"input-required">>;
+push_event_to_binary(auth_required) -> <<"auth-required">>;
+push_event_to_binary(completed) -> <<"completed">>;
+push_event_to_binary(failed) -> <<"failed">>;
+push_event_to_binary(canceled) -> <<"canceled">>;
+push_event_to_binary(rejected) -> <<"rejected">>;
+push_event_to_binary(all) -> <<"all">>;
+push_event_to_binary(_) -> <<"unknown">>.
 
-%%--------------------------------------------------------------------
-%% @doc Return the list of all interrupted states.
-%% @end
-%%--------------------------------------------------------------------
--spec interrupted_states() -> [task_state()].
-interrupted_states() ->
-    [input_required, auth_required].
-
-%%--------------------------------------------------------------------
-%% @doc Return the list of all valid task states.
-%% @end
-%%--------------------------------------------------------------------
--spec all_states() -> [task_state()].
-all_states() ->
-    [submitted, working, input_required, auth_required,
-     completed, failed, canceled, rejected].
-
-%%====================================================================
-%% Message role functions
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Normalise a message role to its canonical atom form.
-%% @end
-%%--------------------------------------------------------------------
--spec message_role(atom() | binary()) -> message_role() | {error, invalid_role}.
-message_role(user)           -> user;
-message_role(agent)          -> agent;
-message_role(<<"user">>)     -> user;
-message_role(<<"agent">>)    -> agent;
-message_role(<<"ROLE_USER">>)  -> user;
-message_role(<<"ROLE_AGENT">>) -> agent;
-message_role(_)              -> {error, invalid_role}.
-
-%%--------------------------------------------------------------------
-%% @doc Return true if the argument is a valid message role atom.
-%% @end
-%%--------------------------------------------------------------------
--spec valid_role(term()) -> boolean().
-valid_role(user)  -> true;
-valid_role(agent) -> true;
-valid_role(_)     -> false.
-
-%%====================================================================
-%% Part kind functions
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Classify a part representation and return its kind atom.
+%% @doc 检查是否为有效的 push 事件
 %%
-%% Accepts both the tuple form used in a2a.hrl records and the map
-%% form used in BeamAI JSON payloads.
-%% @end
-%%--------------------------------------------------------------------
--spec part_kind(tuple() | map()) -> part_kind() | {error, unknown_part}.
-%% Tuple form from #part.content
-part_kind({text, _})    -> text;
-part_kind({raw, _})     -> file;
-part_kind({url, _})     -> file;
-part_kind({data, _})    -> data;
-%% Map form from JSON
-part_kind(#{<<"text">> := _})  -> text;
-part_kind(#{<<"raw">> := _})   -> file;
-part_kind(#{<<"url">> := _})   -> file;
-part_kind(#{<<"data">> := _})  -> data;
-part_kind(_)                   -> {error, unknown_part}.
-
-%%--------------------------------------------------------------------
-%% @doc Return true if the argument is a valid part kind atom.
-%% @end
-%%--------------------------------------------------------------------
--spec valid_part_kind(term()) -> boolean().
-valid_part_kind(text) -> true;
-valid_part_kind(file) -> true;
-valid_part_kind(data) -> true;
-valid_part_kind(_)    -> false.
-
-%%====================================================================
-%% Validation helpers
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Validate that a value is a valid task state.
-%% Returns `ok' or `{error, {invalid_task_state, Value}}'.
-%% @end
-%%--------------------------------------------------------------------
--spec validate_task_state(term()) -> ok | {error, {invalid_task_state, term()}}.
-validate_task_state(State) ->
-    case task_state(State) of
-        {error, _} -> {error, {invalid_task_state, State}};
-        _Valid     -> ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc Validate that a value is a valid message role.
-%% Returns `ok' or `{error, {invalid_message_role, Value}}'.
-%% @end
-%%--------------------------------------------------------------------
--spec validate_message_role(term()) -> ok | {error, {invalid_message_role, term()}}.
-validate_message_role(Role) ->
-    case message_role(Role) of
-        {error, _} -> {error, {invalid_message_role, Role}};
-        _Valid     -> ok
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc Validate that a map or tuple represents a valid part.
-%% Returns `ok' or `{error, {invalid_part, Value}}'.
-%% @end
-%%--------------------------------------------------------------------
--spec validate_part(term()) -> ok | {error, {invalid_part, term()}}.
-validate_part(Part) ->
-    case part_kind(Part) of
-        {error, _} -> {error, {invalid_part, Part}};
-        _Valid     -> ok
-    end.
+%% 用于验证事件名称是否在白名单中。
+%%
+%% @param Event 事件名称（binary 或 atom）
+%% @returns true | false
+-spec is_valid_push_event(binary() | atom()) -> boolean().
+is_valid_push_event(Event) when is_binary(Event) ->
+    maps:is_key(Event, ?VALID_PUSH_EVENTS);
+is_valid_push_event(Event) when is_atom(Event) ->
+    lists:member(Event, maps:values(?VALID_PUSH_EVENTS));
+is_valid_push_event(_) ->
+    false.

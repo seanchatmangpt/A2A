@@ -1,337 +1,218 @@
 %%%-------------------------------------------------------------------
-%%% @doc LLM HTTP Client.
+%%% @doc LLM HTTP 客户端公共模块
 %%%
-%%% HTTP client wrapper specialized for LLM API calls. Built on top
-%%% of hackney with features for:
-%%% - Automatic retry with exponential backoff
-%%% - Request/response logging
-%%% - API key management via ETS-backed credential store
-%%% - Streaming SSE (Server-Sent Events) parsing
-%%% - Timeout management
+%%% 提供 LLM Provider 共用的 HTTP 请求和流式处理功能。
+%%% 基于 beamai_http 构建，添加 LLM 特定的 SSE 解析和累加器。
+%%%
+%%% 设计原则：
+%%%   - 使用 beamai_http 作为底层 HTTP 客户端
+%%%   - 提供 LLM 特定的 SSE 解析和事件累加
+%%%   - 使用回调函数处理 Provider 特定的差异
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(llm_http_client).
 
--export([
-    request/4,
-    request/5,
-    stream_request/4,
-    stream_request/5,
-    set_api_key/2,
-    get_api_key/1,
-    delete_api_key/1
-]).
+-include_lib("beamai_core/include/beamai_common.hrl").
 
--define(CREDENTIAL_TABLE, beamai_llm_credentials).
--define(DEFAULT_TIMEOUT, 60000).
--define(DEFAULT_CONNECT_TIMEOUT, 10000).
--define(MAX_RETRIES, 3).
--define(BASE_RETRY_DELAY, 1000).
+%% 同步请求 API
+-export([request/4, request/5]).
 
--type method() :: get | post | put | delete.
--type url() :: binary() | string().
--type headers() :: [{binary(), binary()}].
--type body() :: binary() | map().
+%% 流式请求 API
+-export([stream_request/5, stream_request/6]).
+
+%% SSE 解析工具
+-export([parse_sse/1, parse_sse_lines/2]).
+
+%% 流式累加器
+-export([init_stream_acc/0, finalize_stream/1]).
 
 %%====================================================================
-%% API Functions
+%% 类型定义
 %%====================================================================
 
-%% @doc Perform an HTTP request to an LLM API endpoint.
-%% Body can be a binary or a map (which will be JSON-encoded).
--spec request(method(), url(), headers(), body()) ->
-    {ok, integer(), headers(), map() | binary()} | {error, term()}.
-request(Method, Url, Headers, Body) ->
-    request(Method, Url, Headers, Body, #{}).
+-type request_opts() :: #{
+    timeout => pos_integer(),
+    connect_timeout => pos_integer(),
+    stream_timeout => pos_integer()
+}.
 
-%% @doc Perform an HTTP request with custom options.
-%% Options:
-%%   timeout     - Request timeout in ms (default 60000)
-%%   retries     - Max retry count (default 3)
-%%   retry_delay - Base retry delay in ms (default 1000)
-%%   log_request - Whether to log requests (default false)
--spec request(method(), url(), headers(), body(), map()) ->
-    {ok, integer(), headers(), map() | binary()} | {error, term()}.
-request(Method, Url, Headers, Body, Opts) ->
-    EncodedBody = encode_body(Body),
-    MergedHeaders = merge_default_headers(Headers),
-    Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
-    MaxRetries = maps:get(retries, Opts, ?MAX_RETRIES),
-    BaseDelay = maps:get(retry_delay, Opts, ?BASE_RETRY_DELAY),
-    LogRequest = maps:get(log_request, Opts, false),
+-type response_parser() :: fun((map()) -> {ok, map()} | {error, term()}).
+-type event_accumulator() :: fun((map(), map()) -> map()).
+-type stream_callback() :: fun((map()) -> any()).
 
-    case LogRequest of
-        true ->
-            logger:debug("LLM HTTP ~p ~s", [Method, Url]);
-        false ->
-            ok
-    end,
+-export_type([request_opts/0, response_parser/0, event_accumulator/0, stream_callback/0]).
 
-    do_request_with_retry(Method, ensure_binary(Url), MergedHeaders,
-                          EncodedBody, Timeout, 0, MaxRetries, BaseDelay).
+%%====================================================================
+%% 同步请求 API
+%%====================================================================
 
-%% @doc Perform a streaming HTTP request for SSE-based LLM responses.
-%% The callback function is invoked for each parsed SSE event.
--spec stream_request(method(), url(), headers(), body()) ->
-    {ok, reference()} | {error, term()}.
-stream_request(Method, Url, Headers, Body) ->
-    stream_request(Method, Url, Headers, Body, #{}).
+%% @doc 发送 HTTP POST 请求
+%% 使用默认响应解析（返回原始 JSON）
+-spec request(binary(), [{binary(), binary()}], map(), request_opts()) ->
+    {ok, map()} | {error, term()}.
+request(Url, Headers, Body, Opts) ->
+    request(Url, Headers, Body, Opts, fun(R) -> {ok, R} end).
 
-%% @doc Perform a streaming HTTP request with options.
--spec stream_request(method(), url(), headers(), body(), map()) ->
-    {ok, reference()} | {error, term()}.
-stream_request(Method, Url, Headers, Body, Opts) ->
-    EncodedBody = encode_body(Body),
-    MergedHeaders = merge_default_headers(Headers),
-    Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
-    Callback = maps:get(callback, Opts, fun(_Event) -> ok end),
-
-    UrlBin = ensure_binary(Url),
-    HackneyOpts = [
-        {recv_timeout, Timeout},
-        {connect_timeout, ?DEFAULT_CONNECT_TIMEOUT},
-        async
-    ],
-
-    case hackney:request(Method, UrlBin, MergedHeaders, EncodedBody, HackneyOpts) of
-        {ok, ClientRef} ->
-            StreamRef = make_ref(),
-            spawn_link(fun() ->
-                stream_receiver(ClientRef, Callback, StreamRef, <<>>)
-            end),
-            {ok, StreamRef};
+%% @doc 发送 HTTP POST 请求（带自定义响应解析器）
+%% 使用 beamai_http 作为底层 HTTP 客户端
+-spec request(binary(), [{binary(), binary()}], map(), request_opts(), response_parser()) ->
+    {ok, map()} | {error, term()}.
+request(Url, Headers, Body, Opts, ResponseParser) ->
+    HttpOpts = #{
+        timeout => maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
+        connect_timeout => maps:get(connect_timeout, Opts, ?DEFAULT_CONNECT_TIMEOUT)
+    },
+    %% 使用 beamai_http:request 直接传入 headers，避免 post_json 重复添加 Content-Type
+    JsonBody = jsx:encode(Body),
+    case beamai_http:request(post, Url, Headers, JsonBody, HttpOpts) of
+        {ok, Response} when is_map(Response) ->
+            ResponseParser(Response);
+        {ok, Response} when is_binary(Response) ->
+            %% 如果是 binary，尝试解析 JSON
+            case beamai_utils:parse_json(Response) of
+                Parsed when map_size(Parsed) > 0 -> ResponseParser(Parsed);
+                Empty ->
+                    error_logger:warning_msg("Failed to parse response JSON: ~ts~n", [Response]),
+                    {error, {parse_error, Empty}}
+            end;
+        {ok, Response} ->
+            %% 其他类型，记录并返回错误
+            error_logger:warning_msg("Unexpected response type: ~p~n", [Response]),
+            {error, {unexpected_response, Response}};
+        {error, {http_error, Code, RespBody}} ->
+            {error, {http_error, Code, RespBody}};
         {error, Reason} ->
-            logger:error("LLM stream request failed: ~p", [Reason]),
+            {error, {request_failed, Reason}}
+    end.
+
+%%====================================================================
+%% 流式请求 API
+%%====================================================================
+
+%% @doc 发送流式 HTTP 请求
+%% 使用默认事件累加器
+-spec stream_request(binary(), [{binary(), binary()}], map(), request_opts(), stream_callback()) ->
+    {ok, map()} | {error, term()}.
+stream_request(Url, Headers, Body, Opts, Callback) ->
+    stream_request(Url, Headers, Body, Opts, Callback, fun default_accumulator/2).
+
+%% @doc 发送流式 HTTP 请求（带自定义事件累加器）
+%% 使用 beamai_http:stream_request 作为底层，添加 SSE 解析
+-spec stream_request(binary(), [{binary(), binary()}], map(), request_opts(),
+                     stream_callback(), event_accumulator()) ->
+    {ok, map()} | {error, term()}.
+stream_request(Url, Headers, Body, Opts, Callback, Accumulator) ->
+    StreamBody = Body#{<<"stream">> => true},
+    HttpOpts = #{
+        timeout => maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
+        connect_timeout => maps:get(connect_timeout, Opts, ?DEFAULT_CONNECT_TIMEOUT),
+        headers => Headers,
+        init_acc => #{buffer => <<>>, acc => init_stream_acc(), callback => Callback, accumulator => Accumulator}
+    },
+    %% 使用 beamai_http 的流式请求，传入 SSE 处理器
+    case beamai_http:stream_request(post, Url, [], StreamBody, HttpOpts, fun sse_chunk_handler/2) of
+        {ok, #{acc := FinalAcc}} ->
+            finalize_stream(FinalAcc);
+        {error, Reason} ->
             {error, Reason}
     end.
 
-%% @doc Store an API key for a provider in the credential store.
--spec set_api_key(atom(), binary()) -> ok.
-set_api_key(Provider, ApiKey) ->
-    ensure_credential_table(),
-    ets:insert(?CREDENTIAL_TABLE, {Provider, ApiKey}),
-    ok.
-
-%% @doc Retrieve an API key for a provider.
-%% Falls back to environment variables if not in ETS.
--spec get_api_key(atom()) -> {ok, binary()} | {error, not_found}.
-get_api_key(Provider) ->
-    ensure_credential_table(),
-    case ets:lookup(?CREDENTIAL_TABLE, Provider) of
-        [{Provider, ApiKey}] ->
-            {ok, ApiKey};
-        [] ->
-            %% Fallback to environment variable
-            EnvVar = provider_env_var(Provider),
-            case os:getenv(EnvVar) of
-                false -> {error, not_found};
-                Value -> {ok, list_to_binary(Value)}
-            end
-    end.
-
-%% @doc Delete a stored API key.
--spec delete_api_key(atom()) -> ok.
-delete_api_key(Provider) ->
-    ensure_credential_table(),
-    ets:delete(?CREDENTIAL_TABLE, Provider),
-    ok.
-
 %%====================================================================
-%% Internal Functions
+%% SSE 处理核心
 %%====================================================================
 
-%% @private
-do_request_with_retry(Method, Url, Headers, Body, Timeout, Attempt, MaxRetries, BaseDelay) ->
-    HackneyOpts = [
-        {recv_timeout, Timeout},
-        {connect_timeout, ?DEFAULT_CONNECT_TIMEOUT},
-        with_body
-    ],
-    case hackney:request(Method, Url, Headers, Body, HackneyOpts) of
-        {ok, StatusCode, RespHeaders, RespBody} when StatusCode >= 200, StatusCode < 300 ->
-            DecodedBody = try_decode_json(RespBody),
-            {ok, StatusCode, RespHeaders, DecodedBody};
-        {ok, StatusCode, RespHeaders, RespBody} when StatusCode =:= 429;
-                                                      StatusCode =:= 500;
-                                                      StatusCode =:= 502;
-                                                      StatusCode =:= 503;
-                                                      StatusCode =:= 504 ->
-            %% Retryable status codes
-            case Attempt < MaxRetries of
-                true ->
-                    Delay = compute_retry_delay(StatusCode, RespHeaders, Attempt, BaseDelay),
-                    logger:warning("LLM API returned ~p, retrying in ~pms (attempt ~p/~p)",
-                                   [StatusCode, Delay, Attempt + 1, MaxRetries]),
-                    timer:sleep(Delay),
-                    do_request_with_retry(Method, Url, Headers, Body, Timeout,
-                                          Attempt + 1, MaxRetries, BaseDelay);
-                false ->
-                    DecodedBody = try_decode_json(RespBody),
-                    {error, {http_error, StatusCode, DecodedBody}}
-            end;
-        {ok, StatusCode, _RespHeaders, RespBody} ->
-            DecodedBody = try_decode_json(RespBody),
-            {error, {http_error, StatusCode, DecodedBody}};
-        {error, Reason} when Attempt < MaxRetries,
-                              (Reason =:= timeout orelse
-                               Reason =:= closed orelse
-                               Reason =:= econnrefused) ->
-            Delay = BaseDelay * (1 bsl Attempt) + rand:uniform(BaseDelay),
-            logger:warning("LLM HTTP error ~p, retrying in ~pms (attempt ~p/~p)",
-                           [Reason, Delay, Attempt + 1, MaxRetries]),
-            timer:sleep(Delay),
-            do_request_with_retry(Method, Url, Headers, Body, Timeout,
-                                  Attempt + 1, MaxRetries, BaseDelay);
-        {error, Reason} ->
-            logger:error("LLM HTTP request failed permanently: ~p", [Reason]),
-            {error, Reason}
-    end.
+%% @private SSE 数据块处理器
+%% 解析 SSE 事件并调用回调和累加器
+-spec sse_chunk_handler(binary(), map()) -> {continue, map()} | {done, map()}.
+sse_chunk_handler(Chunk, #{buffer := Buffer, acc := Acc, callback := Callback, accumulator := Accumulator} = State) ->
+    {NewBuffer, Events} = parse_sse(<<Buffer/binary, Chunk/binary>>),
+    NewAcc = process_events(Events, Acc, Callback, Accumulator),
+    {continue, State#{buffer => NewBuffer, acc => NewAcc}}.
 
-%% @private
-%% Compute retry delay, respecting Retry-After header if present.
--spec compute_retry_delay(integer(), list(), non_neg_integer(), non_neg_integer()) ->
-    non_neg_integer().
-compute_retry_delay(_StatusCode, RespHeaders, Attempt, BaseDelay) ->
-    RetryAfter = find_header(<<"retry-after">>, RespHeaders),
-    case RetryAfter of
-        undefined ->
-            %% Exponential backoff with jitter
-            BaseDelay * (1 bsl Attempt) + rand:uniform(BaseDelay);
-        Value ->
-            try
-                binary_to_integer(Value) * 1000
-            catch _:_ ->
-                BaseDelay * (1 bsl Attempt)
-            end
-    end.
-
-%% @private
--spec find_header(binary(), list()) -> binary() | undefined.
-find_header(Name, Headers) ->
-    LowerName = string:lowercase(Name),
-    case lists:keyfind(LowerName, 1, [{string:lowercase(K), V} || {K, V} <- Headers]) of
-        {_, Value} -> Value;
-        false -> undefined
-    end.
-
-%% @private
-%% Receive and parse SSE events from a hackney async stream.
--spec stream_receiver(reference(), fun(), reference(), binary()) -> ok.
-stream_receiver(ClientRef, Callback, StreamRef, Buffer) ->
-    receive
-        {hackney_response, ClientRef, {status, StatusCode, _Reason}} ->
-            case StatusCode >= 200 andalso StatusCode < 300 of
-                true ->
-                    stream_receiver(ClientRef, Callback, StreamRef, Buffer);
-                false ->
-                    Callback({error, {http_status, StatusCode}}),
-                    hackney:close(ClientRef)
-            end;
-        {hackney_response, ClientRef, {headers, _Headers}} ->
-            stream_receiver(ClientRef, Callback, StreamRef, Buffer);
-        {hackney_response, ClientRef, done} ->
-            %% Process any remaining data in buffer
-            process_sse_buffer(Buffer, Callback),
-            Callback(eof),
-            ok;
-        {hackney_response, ClientRef, Chunk} when is_binary(Chunk) ->
-            NewBuffer = <<Buffer/binary, Chunk/binary>>,
-            Remaining = process_sse_buffer(NewBuffer, Callback),
-            stream_receiver(ClientRef, Callback, StreamRef, Remaining);
-        {hackney_response, ClientRef, {error, Reason}} ->
-            Callback({error, Reason}),
-            ok
-    after 120000 ->
-        Callback({error, stream_timeout}),
-        hackney:close(ClientRef),
-        ok
-    end.
-
-%% @private
-%% Parse SSE events from buffer, returning unparsed remainder.
--spec process_sse_buffer(binary(), fun()) -> binary().
-process_sse_buffer(Buffer, Callback) ->
-    Lines = binary:split(Buffer, <<"\n">>, [global]),
-    process_sse_lines(Lines, Callback, <<>>).
-
-process_sse_lines([], _Callback, Acc) ->
+%% @private 处理事件列表
+-spec process_events([map() | done | skip], map(), stream_callback(), event_accumulator()) -> map().
+process_events([], Acc, _Callback, _Accumulator) ->
     Acc;
-process_sse_lines([Last], _Callback, _Acc) ->
-    %% Last incomplete line becomes the new buffer
-    Last;
-process_sse_lines([Line | Rest], Callback, _Acc) ->
-    case Line of
-        <<"data: ", Data/binary>> ->
-            case Data of
-                <<"[DONE]">> ->
-                    ok;
-                _ ->
-                    case try_decode_json(Data) of
-                        Data when is_binary(Data) ->
-                            Callback(#{type => <<"data">>, raw => Data});
-                        Decoded ->
-                            Callback(#{type => <<"data">>, data => Decoded})
-                    end
-            end;
-        <<"event: ", EventType/binary>> ->
-            Callback(#{type => <<"event">>, event => EventType});
-        <<>> ->
-            ok;
-        _ ->
-            ok
-    end,
-    process_sse_lines(Rest, Callback, <<>>).
+process_events([done | _], Acc, _Callback, _Accumulator) ->
+    Acc;
+process_events([skip | Rest], Acc, Callback, Accumulator) ->
+    process_events(Rest, Acc, Callback, Accumulator);
+process_events([Event | Rest], Acc, Callback, Accumulator) ->
+    Callback(Event),
+    NewAcc = Accumulator(Event, Acc),
+    process_events(Rest, NewAcc, Callback, Accumulator).
 
-%% @private
--spec encode_body(body()) -> binary().
-encode_body(Body) when is_binary(Body) -> Body;
-encode_body(Body) when is_map(Body) -> jsx:encode(Body);
-encode_body(Body) when is_list(Body) -> jsx:encode(Body);
-encode_body(<<>>) -> <<>>.
+%%====================================================================
+%% SSE 解析
+%%====================================================================
 
-%% @private
--spec merge_default_headers(headers()) -> headers().
-merge_default_headers(Headers) ->
-    Defaults = [
-        {<<"Content-Type">>, <<"application/json">>},
-        {<<"Accept">>, <<"application/json">>}
-    ],
-    ExistingKeys = [K || {K, _} <- Headers],
-    FilteredDefaults = [{K, V} || {K, V} <- Defaults,
-                        not lists:member(K, ExistingKeys)],
-    FilteredDefaults ++ Headers.
+%% @doc 解析 SSE 数据
+%% 返回 {未处理的剩余数据, 解析出的事件列表}
+-spec parse_sse(binary()) -> {binary(), [map() | done | skip]}.
+parse_sse(Data) ->
+    Lines = binary:split(Data, <<"\n">>, [global]),
+    parse_sse_lines(Lines, []).
 
-%% @private
--spec try_decode_json(binary()) -> map() | binary().
-try_decode_json(Body) when is_binary(Body), byte_size(Body) > 0 ->
-    try
-        jsx:decode(Body, [return_maps])
-    catch
-        _:_ -> Body
-    end;
-try_decode_json(Body) ->
-    Body.
+%% @doc 解析 SSE 行列表
+-spec parse_sse_lines([binary()], [map() | done | skip]) -> {binary(), [map() | done | skip]}.
+parse_sse_lines([], Acc) ->
+    {<<>>, lists:reverse(Acc)};
+parse_sse_lines([<<>>], Acc) ->
+    {<<>>, lists:reverse(Acc)};
+parse_sse_lines([<<"data: [DONE]">> | Rest], Acc) ->
+    parse_sse_lines(Rest, [done | Acc]);
+parse_sse_lines([<<"data: ", Json/binary>> | Rest], Acc) ->
+    Event = safe_decode_json(Json),
+    parse_sse_lines(Rest, [Event | Acc]);
+parse_sse_lines([LastLine], Acc) ->
+    %% 最后一行可能是不完整的数据，保留到下次处理
+    {LastLine, lists:reverse(Acc)};
+parse_sse_lines([_ | Rest], Acc) ->
+    parse_sse_lines(Rest, Acc).
 
-%% @private
--spec ensure_credential_table() -> ok.
-ensure_credential_table() ->
-    case ets:info(?CREDENTIAL_TABLE) of
-        undefined ->
-            ets:new(?CREDENTIAL_TABLE, [named_table, public, set]),
-            ok;
-        _ ->
-            ok
+%% @private 安全解析 JSON
+-spec safe_decode_json(binary()) -> map() | skip.
+safe_decode_json(Json) ->
+    try jsx:decode(Json, [return_maps])
+    catch _:_ -> skip
     end.
 
-%% @private
--spec provider_env_var(atom()) -> string().
-provider_env_var(anthropic) -> "ANTHROPIC_API_KEY";
-provider_env_var(openai)    -> "OPENAI_API_KEY";
-provider_env_var(Provider)  ->
-    string:uppercase(atom_to_list(Provider)) ++ "_API_KEY".
+%%====================================================================
+%% 流式累加器
+%%====================================================================
 
-%% @private
--spec ensure_binary(binary() | string()) -> binary().
-ensure_binary(V) when is_binary(V) -> V;
-ensure_binary(V) when is_list(V) -> list_to_binary(V).
+%% @doc 初始化流式累加器
+-spec init_stream_acc() -> map().
+init_stream_acc() ->
+    #{
+        id => <<>>,
+        model => <<>>,
+        content => <<>>,
+        tool_calls => [],
+        finish_reason => <<>>
+    }.
+
+%% @doc 完成流式处理，生成最终结果
+-spec finalize_stream(map()) -> {ok, map()}.
+finalize_stream(Acc) ->
+    {ok, Acc#{
+        usage => #{
+            prompt_tokens => 0,
+            completion_tokens => 0,
+            total_tokens => 0
+        }
+    }}.
+
+%% @private 默认事件累加器（OpenAI 格式）
+-spec default_accumulator(map(), map()) -> map().
+default_accumulator(#{<<"choices">> := [#{<<"delta">> := Delta} | _]} = Event, Acc) ->
+    Content = maps:get(<<"content">>, Delta, <<>>),
+    ContentBin = beamai_utils:ensure_binary(Content),
+    Acc#{
+        id => maps:get(<<"id">>, Event, maps:get(id, Acc)),
+        model => maps:get(<<"model">>, Event, maps:get(model, Acc)),
+        content => <<(maps:get(content, Acc))/binary, ContentBin/binary>>
+    };
+default_accumulator(_, Acc) ->
+    Acc.

@@ -1,272 +1,280 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI Agent Tool Loop
+%%% @doc 统一的 Tool Loop 执行模块
 %%%
-%%% Handles the tool execution loop for agents. Parses LLM responses
-%%% for tool calls, executes tools through the BeamAI kernel, formats
-%%% results as messages, and loops until no more tool calls remain.
+%%% 将 beamai_agent 中原本分散的 tool_loop 和 stream_tool_loop
+%%% 合并为单一入口，通过 mode 参数区分普通/流式行为。
+%%%
+%%% 核心逻辑：
+%%%   1. 调用 invoke_chat 发送消息给 LLM
+%%%   2. 检查响应中是否包含 tool_calls
+%%%      - 有 tool_calls: 检查中断 → 执行工具 → 拼接结果 → 递归
+%%%      - 无 tool_calls:
+%%%        * normal 模式: 直接返回结果
+%%%        * stream 模式: 切换到流式进行最终调用
+%%%   3. 迭代次数用尽时返回 max_tool_iterations 错误
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_agent_tool_loop).
 
+-export([run/2]).
+
+-type loop_opts() :: #{
+    kernel := beamai_kernel:kernel(),
+    messages := [map()],
+    chat_opts := map(),
+    callbacks := map(),
+    meta := map(),
+    max_iterations := pos_integer(),
+    agent := map(),
+    mode := normal | stream
+}.
+
+-export_type([loop_opts/0]).
+
+%%====================================================================
 %% API
--export([
-    run/3,
-    step/3,
-    parse_tool_calls/1,
-    execute_tool/3,
-    format_result/1
-]).
-
--define(MAX_ITERATIONS, 50).
-
-%%====================================================================
-%% API
 %%====================================================================
 
-%% @doc Run the complete tool loop given an LLM response, messages, and kernel.
-%% Returns the final response after all tool calls are resolved.
--spec run(atom() | pid(), term(), [map()]) ->
-    {ok, binary(), [map()]} | {error, term()}.
-run(KernelRef, LlmResponse, Messages) ->
-    run_loop(KernelRef, LlmResponse, Messages, 0).
-
-%% @doc Execute a single step of the tool loop.
-%% Returns the tool results and whether more iterations are needed.
--spec step(atom() | pid(), [map()], map()) ->
-    {ok, [map()], boolean()} | {error, term()}.
-step(KernelRef, ToolCalls, Context) ->
-    Results = execute_tool_calls(KernelRef, ToolCalls, Context),
-    {ok, Results, false}.
-
-%% @doc Parse an LLM response to extract tool call requests.
-%% Supports multiple response formats from different LLM providers.
--spec parse_tool_calls(term()) -> [map()].
-parse_tool_calls(Response) when is_map(Response) ->
-    %% Anthropic format: content blocks with type "tool_use"
-    case maps:find(<<"content">>, Response) of
-        {ok, ContentList} when is_list(ContentList) ->
-            parse_content_blocks(ContentList);
-        _ ->
-            %% OpenAI format: tool_calls in message
-            case maps:find(<<"tool_calls">>, Response) of
-                {ok, ToolCalls} when is_list(ToolCalls) ->
-                    parse_openai_tool_calls(ToolCalls);
-                _ ->
-                    %% Check for function_call (legacy format)
-                    case maps:find(<<"function_call">>, Response) of
-                        {ok, FunctionCall} when is_map(FunctionCall) ->
-                            [parse_legacy_function_call(FunctionCall)];
-                        _ ->
-                            []
-                    end
-            end
-    end;
-parse_tool_calls(Response) when is_binary(Response) ->
-    %% Plain text response, no tool calls
-    [];
-parse_tool_calls(_) ->
-    [].
-
-%% @doc Execute a single tool through the BeamAI kernel.
--spec execute_tool(atom() | pid(), binary(), map()) ->
-    {ok, term()} | {error, term()}.
-execute_tool(KernelRef, ToolName, Args) ->
-    try
-        case whereis(KernelRef) of
-            undefined ->
-                {error, {kernel_not_available, KernelRef}};
-            _Pid ->
-                beamai_kernel:invoke_tool(KernelRef, ToolName, Args, #{})
-        end
-    catch
-        Class:Reason:_Stack ->
-            {error, {tool_execution_failed, Class, Reason}}
-    end.
-
-%% @doc Format a tool execution result as a string suitable for
-%% including in a conversation message.
--spec format_result(term()) -> binary().
-format_result(Result) when is_binary(Result) ->
-    Result;
-format_result(Result) when is_map(Result) ->
-    try jsx:encode(Result)
-    catch _:_ -> iolist_to_binary(io_lib:format("~p", [Result]))
-    end;
-format_result(Result) when is_list(Result) ->
-    try jsx:encode(Result)
-    catch _:_ -> iolist_to_binary(io_lib:format("~p", [Result]))
-    end;
-format_result(Result) when is_integer(Result) ->
-    integer_to_binary(Result);
-format_result(Result) when is_float(Result) ->
-    float_to_binary(Result, [{decimals, 6}, compact]);
-format_result(Result) when is_atom(Result) ->
-    atom_to_binary(Result, utf8);
-format_result(Result) ->
-    iolist_to_binary(io_lib:format("~p", [Result])).
+%% @doc 统一的 tool loop 入口
+%%
+%% 执行 LLM 调用循环，处理 tool calls 和中断。
+%% mode=normal 时直接返回结果；mode=stream 时最后一次调用使用流式。
+%%
+%% @param Opts 循环选项（包含 kernel、消息、回调等）
+%% @param PrevToolCalls 之前已执行的 tool 调用记录
+%% @returns {ok, Response, ToolCallsMade, Iterations} |
+%%          {interrupt, Type, Context} |
+%%          {error, Reason}
+-spec run(loop_opts(), [map()]) ->
+    {ok, map(), [map()], pos_integer()} |
+    {interrupt, atom(), map()} |
+    {error, term()}.
+run(Opts, PrevToolCalls) ->
+    #{max_iterations := MaxIter} = Opts,
+    iterate(Opts, MaxIter, PrevToolCalls).
 
 %%====================================================================
-%% Internal functions
+%% 内部函数 - 主循环
 %%====================================================================
 
-%% @private Run the tool loop until no more tool calls.
--spec run_loop(atom() | pid(), term(), [map()], non_neg_integer()) ->
-    {ok, binary(), [map()]} | {error, term()}.
-run_loop(_KernelRef, _LlmResponse, Messages, Iteration)
-  when Iteration >= ?MAX_ITERATIONS ->
-    LastMsg = case Messages of
-        [] -> #{<<"content">> => <<"Max tool iterations reached">>};
-        _ -> lists:last(Messages)
-    end,
-    Content = maps:get(<<"content">>, LastMsg, <<"Max iterations">>),
-    {ok, Content, Messages};
+%% @private 迭代次数耗尽，返回错误
+iterate(_Opts, 0, ToolCallsMade) ->
+    {error, {max_tool_iterations, ToolCallsMade}};
 
-run_loop(KernelRef, LlmResponse, Messages, Iteration) ->
-    case parse_tool_calls(LlmResponse) of
-        [] ->
-            %% No tool calls, extract final response
-            FinalText = extract_final_text(LlmResponse),
-            {ok, FinalText, Messages};
-        ToolCalls ->
-            %% Execute all tool calls
-            Results = execute_tool_calls(KernelRef, ToolCalls, #{}),
-            NewMessages = Messages ++ Results,
-
-            %% Re-query LLM with tool results
-            case do_llm_followup(KernelRef, NewMessages) of
-                {ok, NewLlmResponse} ->
-                    %% Add assistant message
-                    AssistantMsg = #{<<"role">> => <<"assistant">>,
-                                    <<"content">> => NewLlmResponse},
-                    UpdatedMessages = NewMessages ++ [AssistantMsg],
-                    run_loop(KernelRef, NewLlmResponse, UpdatedMessages, Iteration + 1);
-                {error, Reason} ->
-                    {error, Reason}
-            end
-    end.
-
-%% @private Execute a list of tool calls and return result messages.
--spec execute_tool_calls(atom() | pid(), [map()], map()) -> [map()].
-execute_tool_calls(KernelRef, ToolCalls, _Context) ->
-    lists:map(fun(ToolCall) ->
-        ToolName = maps:get(<<"name">>, ToolCall, <<>>),
-        ToolArgs = maps:get(<<"arguments">>, ToolCall, #{}),
-        ToolId = maps:get(<<"id">>, ToolCall, generate_id()),
-        ParsedArgs = case ToolArgs of
-            A when is_binary(A) ->
-                try jsx:decode(A, [return_maps])
-                catch _:_ -> #{<<"input">> => A}
-                end;
-            A when is_map(A) -> A;
-            _ -> #{}
-        end,
-        case execute_tool(KernelRef, ToolName, ParsedArgs) of
-            {ok, Result} ->
-                #{<<"role">> => <<"tool">>,
-                  <<"tool_call_id">> => ToolId,
-                  <<"name">> => ToolName,
-                  <<"content">> => format_result(Result)};
-            {error, Reason} ->
-                #{<<"role">> => <<"tool">>,
-                  <<"tool_call_id">> => ToolId,
-                  <<"name">> => ToolName,
-                  <<"content">> => format_result({error, Reason})}
-        end
-    end, ToolCalls).
-
-%% @private Parse Anthropic-style content blocks for tool_use blocks.
--spec parse_content_blocks([map()]) -> [map()].
-parse_content_blocks(Blocks) ->
-    lists:filtermap(fun(Block) ->
-        case maps:get(<<"type">>, Block, undefined) of
-            <<"tool_use">> ->
-                {true, #{
-                    <<"id">> => maps:get(<<"id">>, Block, generate_id()),
-                    <<"name">> => maps:get(<<"name">>, Block, <<>>),
-                    <<"arguments">> => maps:get(<<"input">>, Block, #{})
-                }};
-            _ ->
-                false
-        end
-    end, Blocks).
-
-%% @private Parse OpenAI-style tool_calls array.
--spec parse_openai_tool_calls([map()]) -> [map()].
-parse_openai_tool_calls(ToolCalls) ->
-    lists:filtermap(fun(TC) ->
-        case maps:get(<<"type">>, TC, <<"function">>) of
-            <<"function">> ->
-                Function = maps:get(<<"function">>, TC, #{}),
-                Args = maps:get(<<"arguments">>, Function, <<"{}">>),
-                ParsedArgs = case Args of
-                    A when is_binary(A) ->
-                        try jsx:decode(A, [return_maps])
-                        catch _:_ -> #{}
-                        end;
-                    A when is_map(A) -> A;
-                    _ -> #{}
-                end,
-                {true, #{
-                    <<"id">> => maps:get(<<"id">>, TC, generate_id()),
-                    <<"name">> => maps:get(<<"name">>, Function, <<>>),
-                    <<"arguments">> => ParsedArgs
-                }};
-            _ ->
-                false
-        end
-    end, ToolCalls).
-
-%% @private Parse a legacy function_call object.
--spec parse_legacy_function_call(map()) -> map().
-parse_legacy_function_call(FunctionCall) ->
-    Args = maps:get(<<"arguments">>, FunctionCall, <<"{}">>),
-    ParsedArgs = case Args of
-        A when is_binary(A) ->
-            try jsx:decode(A, [return_maps])
-            catch _:_ -> #{}
+%% @private 主循环体：调用 LLM 并根据响应分支处理
+iterate(Opts, N, ToolCallsMade) ->
+    #{kernel := Kernel, messages := Msgs, chat_opts := ChatOpts} = Opts,
+    case beamai_kernel:invoke_chat(Kernel, Msgs, ChatOpts) of
+        {ok, Response, _Ctx} ->
+            case llm_response:has_tool_calls(Response) of
+                true ->
+                    TCs = llm_response:tool_calls(Response),
+                    handle_tool_calls(TCs, Msgs, Opts, N, ToolCallsMade);
+                false ->
+                    finish_no_tools(Opts, Response, ToolCallsMade)
             end;
-        A when is_map(A) -> A;
-        _ -> #{}
-    end,
+        {error, _} = Err ->
+            Err
+    end.
+
+%%====================================================================
+%% 内部函数 - Tool Calls 处理
+%%====================================================================
+
+%% @private 处理 LLM 返回的 tool_calls
+%%
+%% 分三个优先级检查：
+%%   1. 是否包含 interrupt tool
+%%   2. callback 是否触发中断
+%%   3. 正常执行（执行中检查结果中断）
+handle_tool_calls(TCs, Msgs, Opts, N, ToolCallsMade) ->
+    #{agent := Agent} = Opts,
+    case beamai_agent_interrupt:find_interrupt_tool(TCs, Agent) of
+        {yes, InterruptTC, OtherCalls} ->
+            handle_interrupt_tool(InterruptTC, OtherCalls, TCs, Msgs, Opts, N, ToolCallsMade);
+        no ->
+            handle_normal_tool_calls(TCs, Msgs, Opts, N, ToolCallsMade)
+    end.
+
+%% @private 处理 interrupt tool 类型的中断
+%%
+%% 先执行非中断 tools，然后构建中断上下文返回。
+handle_interrupt_tool(InterruptTC, OtherCalls, TCs, Msgs, Opts, N, ToolCallsMade) ->
+    #{kernel := Kernel, agent := Agent} = Opts,
+    #{max_tool_iterations := MaxIter} = Agent,
+    {OtherResults, OtherCallRecords} = beamai_agent_utils:execute_tools(Kernel, OtherCalls),
+    Reason = extract_interrupt_reason(InterruptTC),
+    Context = build_interrupt_context(TCs, Msgs, MaxIter - N,
+                                      OtherResults, InterruptTC,
+                                      ToolCallsMade ++ OtherCallRecords, Reason),
+    {interrupt, tool_request, Context}.
+
+%% @private 处理非中断 tool calls（callback 检查 + 执行）
+handle_normal_tool_calls(TCs, Msgs, Opts, N, ToolCallsMade) ->
+    #{callbacks := Callbacks, agent := Agent} = Opts,
+    case check_callback_interrupt(TCs, Callbacks) of
+        {interrupt, CallbackReason, InterruptedTC} ->
+            #{max_tool_iterations := MaxIter} = Agent,
+            Context = build_interrupt_context(TCs, Msgs, MaxIter - N,
+                                              [], InterruptedTC,
+                                              ToolCallsMade, CallbackReason),
+            {interrupt, callback, Context};
+        ok ->
+            execute_and_continue(TCs, Msgs, Opts, N, ToolCallsMade)
+    end.
+
+%% @private 执行 tools 并继续循环（或处理执行中断）
+execute_and_continue(TCs, Msgs, Opts, N, ToolCallsMade) ->
+    #{kernel := Kernel, agent := Agent} = Opts,
+    case execute_tools_with_interrupt_check(Kernel, TCs) of
+        {ok, ToolResults, NewToolCalls} ->
+            AssistantMsg = #{role => assistant, content => null, tool_calls => TCs},
+            NewMsgs = Msgs ++ [AssistantMsg | ToolResults],
+            NewOpts = Opts#{messages => NewMsgs},
+            iterate(NewOpts, N - 1, ToolCallsMade ++ NewToolCalls);
+        {interrupt, IntReason, PartialResults, InterruptedTC, CompletedCalls} ->
+            #{max_tool_iterations := MaxIter} = Agent,
+            Context = build_interrupt_context(TCs, Msgs, MaxIter - N,
+                                              PartialResults, InterruptedTC,
+                                              ToolCallsMade ++ CompletedCalls, IntReason),
+            {interrupt, tool_result, Context}
+    end.
+
+%%====================================================================
+%% 内部函数 - 无 Tool Calls 结束处理
+%%====================================================================
+
+%% @private 无 tool_calls 时的结束处理
+%%
+%% normal 模式: 直接返回响应
+%% stream 模式: 进行流式最终调用
+finish_no_tools(#{mode := normal}, Response, ToolCallsMade) ->
+    Iters = compute_iterations(ToolCallsMade),
+    {ok, Response, ToolCallsMade, Iters};
+finish_no_tools(#{mode := stream} = Opts, _Response, ToolCallsMade) ->
+    #{kernel := Kernel, messages := Msgs, chat_opts := ChatOpts,
+      callbacks := Callbacks, meta := Meta} = Opts,
+    case stream_final_call(Kernel, Msgs, ChatOpts, Callbacks, Meta) of
+        {ok, StreamResponse} ->
+            Iters = compute_iterations(ToolCallsMade),
+            {ok, StreamResponse, ToolCallsMade, Iters};
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private 计算迭代次数
+compute_iterations([]) -> 1;
+compute_iterations(ToolCallsMade) -> length(ToolCallsMade) + 1.
+
+%% @private 流式最终 LLM 调用
+%%
+%% 使用 beamai_chat_completion:stream_chat 进行流式调用，
+%% 每收到一个 token 通过 on_token 回调传递给用户。
+stream_final_call(Kernel, Msgs, Opts, Callbacks, Meta) ->
+    case beamai_kernel:get_service(Kernel) of
+        {ok, LlmConfig} ->
+            TokenCb = fun(Token) ->
+                beamai_agent_callbacks:invoke(on_token, [Token, Meta], Callbacks)
+            end,
+            beamai_chat_completion:stream_chat(LlmConfig, Msgs, TokenCb, Opts);
+        error ->
+            {error, no_llm_service}
+    end.
+
+%%====================================================================
+%% 内部函数 - 中断上下文构建
+%%====================================================================
+
+%% @private 构建中断上下文 map
+%%
+%% 统一的中断上下文构建函数，消除原代码中 6 处重复。
+build_interrupt_context(TCs, Msgs, Iteration, CompletedResults,
+                        InterruptedTC, ToolCallsMade, Reason) ->
+    AssistantMsg = #{role => assistant, content => null, tool_calls => TCs},
     #{
-        <<"id">> => generate_id(),
-        <<"name">> => maps:get(<<"name">>, FunctionCall, <<>>),
-        <<"arguments">> => ParsedArgs
+        pending_messages => Msgs,
+        assistant_response => AssistantMsg,
+        completed_tool_results => CompletedResults,
+        interrupted_tool_call => InterruptedTC,
+        iteration => Iteration,
+        tool_calls_made => ToolCallsMade,
+        reason => Reason
     }.
 
-%% @private Extract final text from an LLM response.
--spec extract_final_text(term()) -> binary().
-extract_final_text(Response) when is_binary(Response) ->
-    Response;
-extract_final_text(#{<<"content">> := Content}) when is_binary(Content) ->
-    Content;
-extract_final_text(#{<<"content">> := ContentList}) when is_list(ContentList) ->
-    TextBlocks = lists:filtermap(fun(Block) ->
-        case maps:get(<<"type">>, Block, <<"text">>) of
-            <<"text">> -> {true, maps:get(<<"text">>, Block, <<>>)};
-            _ -> false
-        end
-    end, ContentList),
-    iolist_to_binary(lists:join(<<" ">>, TextBlocks));
-extract_final_text(#{<<"text">> := Text}) when is_binary(Text) ->
-    Text;
-extract_final_text(_) ->
-    <<>>.
+%%====================================================================
+%% 内部函数 - Callback 中断检查
+%%====================================================================
 
-%% @private Follow up with the LLM after tool execution.
--spec do_llm_followup(atom() | pid(), [map()]) -> {ok, term()} | {error, term()}.
-do_llm_followup(KernelRef, Messages) ->
-    try
-        MessagePayload = #{<<"messages">> => Messages},
-        beamai_kernel:chat_with_tools(KernelRef, MessagePayload, #{})
-    catch
-        _:Reason -> {error, Reason}
+%% @private 检查 on_tool_call callback 是否触发中断
+%%
+%% 遍历 tool_calls，对每个调用触发 on_tool_call callback。
+%% 如果 callback 返回 {interrupt, Reason}，中断执行。
+check_callback_interrupt(ToolCalls, Callbacks) ->
+    case maps:get(on_tool_call, Callbacks, undefined) of
+        undefined -> ok;
+        Fun -> check_callback_interrupt_loop(ToolCalls, Fun)
     end.
 
-%% @private Generate a unique identifier.
--spec generate_id() -> binary().
-generate_id() ->
-    Bytes = crypto:strong_rand_bytes(6),
-    Hex = binary:encode_hex(Bytes),
-    <<"call_", Hex/binary>>.
+%% @private 逐个检查 tool_call 的 callback 中断
+check_callback_interrupt_loop([], _Fun) ->
+    ok;
+check_callback_interrupt_loop([TC | Rest], Fun) ->
+    {_Id, Name, Args} = beamai_tool:parse_tool_call(TC),
+    case catch Fun(Name, Args) of
+        {interrupt, Reason} ->
+            {interrupt, Reason, TC};
+        _ ->
+            check_callback_interrupt_loop(Rest, Fun)
+    end.
+
+%%====================================================================
+%% 内部函数 - 带中断检查的 Tool 执行
+%%====================================================================
+
+%% @private 逐个执行 tool_calls，检查执行结果中的中断信号
+%%
+%% 如果某个 tool 返回 {interrupt, Reason, PartialResult}，
+%% 停止执行并返回中断信息。
+execute_tools_with_interrupt_check(Kernel, ToolCalls) ->
+    execute_tools_iter(Kernel, ToolCalls, [], []).
+
+%% @private 执行循环体
+execute_tools_iter(_Kernel, [], ResultsAcc, CallsAcc) ->
+    {ok, lists:reverse(ResultsAcc), lists:reverse(CallsAcc)};
+execute_tools_iter(Kernel, [TC | Rest], ResultsAcc, CallsAcc) ->
+    {Id, Name, Args} = beamai_tool:parse_tool_call(TC),
+    case beamai_kernel:invoke_tool(Kernel, Name, Args, beamai_context:new()) of
+        {ok, Value, _Ctx} ->
+            Result = beamai_tool:encode_result(Value),
+            Msg = #{role => tool, tool_call_id => Id, content => Result},
+            CallRecord = #{name => Name, args => Args, result => Result, tool_call_id => Id},
+            execute_tools_iter(Kernel, Rest,
+                [Msg | ResultsAcc], [CallRecord | CallsAcc]);
+        {interrupt, Reason, PartialResult} ->
+            PartialMsg = #{role => tool, tool_call_id => Id,
+                          content => beamai_tool:encode_result(PartialResult)},
+            {interrupt, Reason,
+             lists:reverse([PartialMsg | ResultsAcc]),
+             TC,
+             lists:reverse(CallsAcc)};
+        {error, Reason} ->
+            Result = beamai_tool:encode_result(#{error => Reason}),
+            Msg = #{role => tool, tool_call_id => Id, content => Result},
+            CallRecord = #{name => Name, args => Args, result => Result, tool_call_id => Id},
+            execute_tools_iter(Kernel, Rest,
+                [Msg | ResultsAcc], [CallRecord | CallsAcc])
+    end.
+
+%%====================================================================
+%% 内部函数 - 辅助
+%%====================================================================
+
+%% @private 从 interrupt tool_call 中提取中断原因
+extract_interrupt_reason(#{function := #{arguments := Args}}) when is_map(Args) ->
+    Args;
+extract_interrupt_reason(#{<<"function">> := #{<<"arguments">> := Args}}) when is_map(Args) ->
+    Args;
+extract_interrupt_reason(TC) ->
+    {_Id, Name, Args} = beamai_tool:parse_tool_call(TC),
+    #{tool => Name, arguments => Args}.

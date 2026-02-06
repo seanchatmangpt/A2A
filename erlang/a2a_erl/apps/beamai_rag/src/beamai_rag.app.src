@@ -1,17 +1,20 @@
 {application, beamai_rag, [
-    {description, "BeamAI RAG - Retrieval-Augmented Generation support"},
+    {description, "Agent Framework RAG Layer"},
     {vsn, "0.1.0"},
     {registered, []},
-    {mod, {beamai_rag_app, []}},
     {applications, [
         kernel,
         stdlib,
-        beamai_core,
-        beamai_memory,
-        beamai_llm
+        jsx,
+        beamai_core
     ]},
+    {optional_applications, [beamai_llm]},
     {env, []},
-    {modules, []},
-    {licenses, ["Apache-2.0"]},
-    {links, []}
+    {modules, [
+        beamai_rag,
+        beamai_embeddings,
+        beamai_vector_store,
+        beamai_rag_splitter,
+        beamai_rag_utils
+    ]}
 ]}.

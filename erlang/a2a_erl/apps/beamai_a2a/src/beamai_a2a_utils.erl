@@ -1,134 +1,136 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Utility Functions
+%%% @doc A2A 公共工具函数模块
 %%%
-%%% Provides common utility functions used across the BeamAI A2A
-%%% framework: UUID generation, ISO 8601 timestamps, and map
-%%% manipulation helpers.
+%%% 提供 A2A 模块共用的工具函数，减少代码重复。
+%%%
+%%% == 主要功能 ==
+%%%
+%%% 1. 错误格式化
+%%%    - format_error/1: 将各种错误类型转换为 binary
+%%%
+%%% 2. ID 生成
+%%%    - generate_id/0: 生成唯一 ID
+%%%    - generate_id/1: 生成带前缀的唯一 ID
+%%%
+%%% 3. 时间戳
+%%%    - timestamp/0: 获取当前毫秒时间戳
+%%%    - timestamp_iso8601/0: 获取 ISO 8601 格式时间戳
+%%%
+%%% == 使用示例 ==
+%%%
+%%% ```erlang
+%%% %% 格式化错误
+%%% ErrorBin = beamai_a2a_utils:format_error(some_error),
+%%% %% => <<"some_error">>
+%%%
+%%% ErrorBin2 = beamai_a2a_utils:format_error({http_error, 500, "Internal Error"}),
+%%% %% => <<"{http_error,500,\"Internal Error\"}">>
+%%%
+%%% %% 生成 ID
+%%% TaskId = beamai_a2a_utils:generate_id(<<"task_">>),
+%%% %% => <<"task_abc123...">>
+%%% ```
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_utils).
 
-%% API
+%% API 导出
 -export([
+    %% 错误格式化
+    format_error/1,
+
+    %% ID 生成
     generate_id/0,
-    now_iso8601/0,
-    now_ms/0,
-    deep_merge/2,
-    to_binary/1,
-    optional/2,
-    optional/3
+    generate_id/1,
+
+    %% 时间戳
+    timestamp/0,
+    timestamp_iso8601/0
 ]).
 
-%%--------------------------------------------------------------------
-%% @doc Generate a v4-style UUID as a lowercase hex binary with dashes.
+%%====================================================================
+%% 错误格式化
+%%====================================================================
+
+%% @doc 将错误转换为 binary 格式
 %%
-%% Uses crypto:strong_rand_bytes/1 for randomness. The result follows
-%% the 8-4-4-4-12 grouping convention (e.g.,
-%% <<"550e8400-e29b-41d4-a716-446655440000">>).
-%% @end
-%%--------------------------------------------------------------------
+%% 支持多种输入类型：
+%% - binary: 直接返回
+%% - atom: 转换为 binary
+%% - 其他: 使用 io_lib:format 格式化
+%%
+%% 此函数用于将内部错误原因转换为可在 JSON-RPC 响应中使用的字符串。
+%%
+%% @param Reason 错误原因（任意类型）
+%% @returns 错误描述的 binary 字符串
+-spec format_error(term()) -> binary().
+format_error(Reason) when is_binary(Reason) ->
+    Reason;
+format_error(Reason) when is_atom(Reason) ->
+    atom_to_binary(Reason, utf8);
+format_error(Reason) when is_list(Reason) ->
+    %% 尝试作为字符串处理
+    try
+        unicode:characters_to_binary(Reason)
+    catch
+        _:_ ->
+            iolist_to_binary(io_lib:format("~p", [Reason]))
+    end;
+format_error(Reason) ->
+    iolist_to_binary(io_lib:format("~p", [Reason])).
+
+%%====================================================================
+%% ID 生成
+%%====================================================================
+
+%% @doc 生成唯一 ID
+%%
+%% 使用 UUID v4 格式生成唯一标识符。
+%%
+%% @returns 唯一 ID（binary）
 -spec generate_id() -> binary().
 generate_id() ->
+    %% 生成 16 字节随机数据
     Bytes = crypto:strong_rand_bytes(16),
-    %% Set version 4 (bits 48-51) and variant 1 (bits 64-65)
-    <<A:4/binary, _:4, B:12, _:2, C:62>> = Bytes,
-    Patched = <<A/binary, 4:4, B:12, 2:2, C:62>>,
-    Hex = binary:encode_hex(Patched, lowercase),
-    <<P1:8/binary, P2:4/binary, P3:4/binary, P4:4/binary, P5:12/binary>> = Hex,
-    <<P1/binary, "-", P2/binary, "-", P3/binary, "-", P4/binary, "-", P5/binary>>.
+    %% 设置 UUID v4 版本位
+    <<A:32, B:16, _:4, C:12, _:2, D:62>> = Bytes,
+    %% 格式化为标准 UUID 字符串
+    list_to_binary(io_lib:format(
+        "~8.16.0b-~4.16.0b-4~3.16.0b-~1.16.0b~3.16.0b-~12.16.0b",
+        [A, B, C, 8 + (D bsr 60), (D bsr 48) band 16#fff, D band 16#ffffffffffff]
+    )).
 
-%%--------------------------------------------------------------------
-%% @doc Return the current UTC time as an ISO 8601 binary string.
+%% @doc 生成带前缀的唯一 ID
 %%
-%% Format: <<"2024-01-15T12:30:45.123Z">>
-%% @end
-%%--------------------------------------------------------------------
--spec now_iso8601() -> binary().
-now_iso8601() ->
-    timestamp_to_iso8601(erlang:system_time(millisecond)).
+%% @param Prefix ID 前缀（binary）
+%% @returns 带前缀的唯一 ID（binary）
+-spec generate_id(binary()) -> binary().
+generate_id(Prefix) when is_binary(Prefix) ->
+    Id = generate_id(),
+    <<Prefix/binary, Id/binary>>.
 
-%%--------------------------------------------------------------------
-%% @doc Return the current time in milliseconds since Unix epoch.
-%% @end
-%%--------------------------------------------------------------------
--spec now_ms() -> integer().
-now_ms() ->
+%%====================================================================
+%% 时间戳
+%%====================================================================
+
+%% @doc 获取当前毫秒时间戳
+%%
+%% @returns Unix 毫秒时间戳（integer）
+-spec timestamp() -> non_neg_integer().
+timestamp() ->
     erlang:system_time(millisecond).
 
-%%--------------------------------------------------------------------
-%% @doc Deep-merge two maps recursively.
+%% @doc 获取 ISO 8601 格式时间戳
 %%
-%% When both values for a key are maps, they are merged recursively.
-%% Otherwise the value from `Override' takes precedence.
+%% 返回格式：YYYY-MM-DDTHH:MM:SS.sssZ
 %%
-%% Example:
-%%   deep_merge(#{a => #{b => 1, c => 2}}, #{a => #{c => 3}})
-%%   => #{a => #{b => 1, c => 3}}
-%% @end
-%%--------------------------------------------------------------------
--spec deep_merge(map(), map()) -> map().
-deep_merge(Base, Override) when is_map(Base), is_map(Override) ->
-    maps:fold(
-        fun(Key, OverrideVal, Acc) ->
-            case maps:find(Key, Acc) of
-                {ok, BaseVal} when is_map(BaseVal), is_map(OverrideVal) ->
-                    maps:put(Key, deep_merge(BaseVal, OverrideVal), Acc);
-                _ ->
-                    maps:put(Key, OverrideVal, Acc)
-            end
-        end,
-        Base,
-        Override
-    );
-deep_merge(_Base, Override) ->
-    Override.
-
-%%--------------------------------------------------------------------
-%% @doc Convert a term to binary for safe embedding in JSON or logs.
-%% @end
-%%--------------------------------------------------------------------
--spec to_binary(term()) -> binary().
-to_binary(V) when is_binary(V) -> V;
-to_binary(V) when is_list(V) -> list_to_binary(V);
-to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
-to_binary(V) when is_integer(V) -> integer_to_binary(V);
-to_binary(V) when is_float(V) -> float_to_binary(V, [{decimals, 6}, compact]);
-to_binary(V) -> iolist_to_binary(io_lib:format("~p", [V])).
-
-%%--------------------------------------------------------------------
-%% @doc Conditionally include a key in a map when the value is not
-%% `undefined'.  Returns the map unchanged if `Value' is `undefined'.
-%% @end
-%%--------------------------------------------------------------------
--spec optional(map(), {term(), term()}) -> map().
-optional(Map, {_Key, undefined}) ->
-    Map;
-optional(Map, {Key, Value}) ->
-    maps:put(Key, Value, Map).
-
-%%--------------------------------------------------------------------
-%% @doc Conditionally include a key in a map, using a `Default' for
-%% comparison.  If `Value =:= Default', the key is omitted.
-%% @end
-%%--------------------------------------------------------------------
--spec optional(map(), {term(), term()}, term()) -> map().
-optional(Map, {_Key, Value}, Default) when Value =:= Default ->
-    Map;
-optional(Map, {Key, Value}, _Default) ->
-    maps:put(Key, Value, Map).
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
-
-%% @doc Convert a millisecond timestamp to an ISO 8601 binary.
--spec timestamp_to_iso8601(integer()) -> binary().
-timestamp_to_iso8601(TimestampMs) ->
-    Seconds = TimestampMs div 1000,
-    Millis = TimestampMs rem 1000,
-    {{Year, Month, Day}, {Hour, Min, Sec}} =
-        calendar:system_time_to_universal_time(Seconds, second),
-    iolist_to_binary(io_lib:format(
+%% @returns ISO 8601 格式时间戳（binary）
+-spec timestamp_iso8601() -> binary().
+timestamp_iso8601() ->
+    {{Y, M, D}, {H, Mi, S}} = calendar:universal_time(),
+    Ms = erlang:system_time(millisecond) rem 1000,
+    list_to_binary(io_lib:format(
         "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
-        [Year, Month, Day, Hour, Min, Sec, Millis]
+        [Y, M, D, H, Mi, S, Ms]
     )).

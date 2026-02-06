@@ -1,359 +1,588 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Push Notification Manager
+%%% @doc A2A Push Notifications 模块
 %%%
-%%% Manages push notification registrations for tasks and sends
-%%% notifications on task state changes.  Integrates with the
-%%% existing a2a_push_notifier module while providing additional
-%%% features:
+%%% 实现 A2A 协议的 Push Notifications (Webhook) 功能。
+%%% 当任务状态改变时，通过 HTTP POST 发送通知到已注册的 webhook URL。
 %%%
-%%% - Registration/unregistration of push endpoints per task
-%%% - Automatic retry with exponential backoff on failure
-%%% - Persistent storage of push configs via a2a_task_store
-%%% - Notification payload construction following the A2A spec
+%%% == 功能 ==
 %%%
-%%% This module is a gen_server that maintains an in-memory index
-%%% of push configurations and handles retry scheduling.
+%%% - Webhook URL 注册和管理
+%%% - 任务状态变更通知
+%%% - 认证支持（Bearer Token）
+%%% - 失败重试机制（指数退避）
+%%% - 事件过滤（仅通知特定状态变化）
+%%%
+%%% == 使用示例 ==
+%%%
+%%% ```erlang
+%%% %% 注册 webhook
+%%% Config = #{
+%%%     url => <<"https://example.com/webhook">>,
+%%%     token => <<"secret-token">>,  %% 可选，用于 Bearer 认证
+%%%     events => [completed, failed]  %% 可选，默认 all
+%%% },
+%%% ok = beamai_a2a_push:register(TaskId, Config).
+%%%
+%%% %% 发送通知（由任务状态更新时自动调用）
+%%% ok = beamai_a2a_push:notify(TaskId, Task).
+%%%
+%%% %% 获取 webhook 配置
+%%% {ok, Config} = beamai_a2a_push:get_config(TaskId).
+%%%
+%%% %% 取消注册
+%%% ok = beamai_a2a_push:unregister(TaskId).
+%%% ```
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_push).
+
 -behaviour(gen_server).
 
--include("a2a.hrl").
+%% 避免与 erlang:get/1 冲突
+-compile({no_auto_import,[get/1]}).
 
-%% API
+%% API 导出
 -export([
     start_link/0,
+    start_link/1,
+    stop/0,
+
+    %% Webhook 管理
+    register/2,
     register/3,
-    unregister/2,
-    notify/3,
+    unregister/1,
     get_config/1,
-    list_configs/1
+    list_webhooks/0,
+    list_webhooks/1,
+
+    %% 通知发送
+    notify/2,
+    notify_async/2,
+
+    %% 统计信息
+    stats/0
 ]).
 
-%% gen_server callbacks
+%% gen_server 回调
 -export([
     init/1,
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2
+    terminate/2,
+    code_change/3
 ]).
 
+-include_lib("beamai_core/include/beamai_common.hrl").
+
+%% 常量定义
 -define(SERVER, ?MODULE).
--define(MAX_RETRIES, 5).
--define(BASE_BACKOFF_MS, 1000).
+-define(TABLE, beamai_a2a_push_registry).       %% Webhook 注册表
+-define(RETRY_TABLE, beamai_a2a_push_retries).  %% 重试追踪表
+-define(PUSH_RETRY_COUNT, 3).                  %% 默认重试次数
+-define(PUSH_RETRY_DELAY, 1000).               %% 初始重试延迟（毫秒）
+-define(PUSH_MAX_RETRY_DELAY, 30000).          %% 最大重试延迟（毫秒）
+-define(PUSH_HTTP_TIMEOUT, 10000).             %% HTTP 请求超时（毫秒）
 
+%% 服务器状态
 -record(state, {
-    %% task_id => [push_config_entry()]
-    configs = #{} :: #{binary() => [push_config_entry()]}
+    config :: map(),  %% 服务配置
+    stats :: map()    %% 统计信息
 }).
 
--record(push_config_entry, {
-    id         :: binary(),
-    task_id    :: binary(),
-    url        :: binary(),
-    token      :: binary() | undefined,
-    auth       :: {binary(), binary() | undefined} | undefined, %% {Scheme, Creds}
-    retries    :: non_neg_integer(),
-    created_at :: integer()
+%% Webhook 配置记录
+-record(webhook, {
+    task_id :: binary(),              %% 任务 ID
+    url :: binary(),                  %% Webhook URL
+    token :: binary() | undefined,    %% Bearer Token（可选）
+    events :: [atom()] | all,         %% 订阅的事件列表
+    retry_count :: non_neg_integer(), %% 最大重试次数
+    created_at :: non_neg_integer()   %% 创建时间戳
 }).
 
 %%====================================================================
-%% API
+%% API - 服务生命周期
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Start the push notification manager.
-%% @end
-%%--------------------------------------------------------------------
+%% @doc 启动 Push Notifications 服务
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    start_link(#{}).
 
-%%--------------------------------------------------------------------
-%% @doc Register a push notification endpoint for a task.
+%% @doc 启动 Push Notifications 服务（带配置）
 %%
-%% `TaskId' is the task identifier.
-%% `ConfigId' is a unique identifier for this push configuration.
-%% `PushConfig' is a map with keys:
-%%   `url'            - (required) webhook URL
-%%   `token'          - (optional) verification token
-%%   `authentication' - (optional) #{scheme => ..., credentials => ...}
-%% @end
-%%--------------------------------------------------------------------
--spec register(binary(), binary(), map()) -> ok | {error, term()}.
-register(TaskId, ConfigId, PushConfig) ->
-    gen_server:call(?SERVER, {register, TaskId, ConfigId, PushConfig}).
+%% @param Config 服务配置（预留）
+%% @returns {ok, Pid} | {error, Reason}
+-spec start_link(map()) -> {ok, pid()} | {error, term()}.
+start_link(Config) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Config, []).
 
-%%--------------------------------------------------------------------
-%% @doc Unregister a push notification endpoint.
-%% @end
-%%--------------------------------------------------------------------
--spec unregister(binary(), binary()) -> ok.
-unregister(TaskId, ConfigId) ->
-    gen_server:call(?SERVER, {unregister, TaskId, ConfigId}).
+%% @doc 停止服务
+-spec stop() -> ok.
+stop() ->
+    gen_server:stop(?SERVER).
 
-%%--------------------------------------------------------------------
-%% @doc Send a push notification for a task event.
-%%
-%% `TaskId' is the task identifier.
-%% `EventType' is the type of event (e.g., `status_update',
-%%   `artifact_update').
-%% `Payload' is the event data to include in the notification.
-%%
-%% Notifications are sent asynchronously. Failed attempts are
-%% retried with exponential backoff.
-%% @end
-%%--------------------------------------------------------------------
--spec notify(binary(), atom(), map()) -> ok.
-notify(TaskId, EventType, Payload) ->
-    gen_server:cast(?SERVER, {notify, TaskId, EventType, Payload}).
+%%====================================================================
+%% API - Webhook 管理
+%%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Get the push notification configuration for a task.
+%% @doc 为任务注册 webhook
 %%
-%% Returns `{ok, [Config]}' or `{ok, []}' if no configs are
-%% registered.
-%% @end
-%%--------------------------------------------------------------------
--spec get_config(binary()) -> {ok, [map()]}.
+%% @param TaskId 任务 ID
+%% @param Config webhook 配置
+%%   - url: webhook URL（必需）
+%%   - token: Bearer token（可选）
+%%   - events: 要通知的事件列表（可选，默认 all）
+%%   - retry_count: 重试次数（可选，默认 3）
+%% @returns ok | {error, Reason}
+-spec register(binary(), map()) -> ok | {error, term()}.
+register(TaskId, Config) ->
+    register(TaskId, Config, #{}).
+
+%% @doc 为任务注册 webhook（带额外选项）
+-spec register(binary(), map(), map()) -> ok | {error, term()}.
+register(TaskId, Config, _Opts) ->
+    gen_server:call(?SERVER, {register, TaskId, Config}, ?DEFAULT_TIMEOUT).
+
+%% @doc 取消任务的 webhook 注册
+-spec unregister(binary()) -> ok | {error, term()}.
+unregister(TaskId) ->
+    gen_server:call(?SERVER, {unregister, TaskId}, ?DEFAULT_TIMEOUT).
+
+%% @doc 获取任务的 webhook 配置
+-spec get_config(binary()) -> {ok, map()} | {error, not_found}.
 get_config(TaskId) ->
-    gen_server:call(?SERVER, {get_config, TaskId}).
+    gen_server:call(?SERVER, {get_config, TaskId}, ?DEFAULT_TIMEOUT).
 
-%%--------------------------------------------------------------------
-%% @doc List all push configurations for a task.
-%% @end
-%%--------------------------------------------------------------------
--spec list_configs(binary()) -> {ok, [map()]}.
-list_configs(TaskId) ->
-    get_config(TaskId).
+%% @doc 列出所有 webhook
+-spec list_webhooks() -> [map()].
+list_webhooks() ->
+    gen_server:call(?SERVER, list_webhooks, ?DEFAULT_TIMEOUT).
+
+%% @doc 列出指定任务的 webhook
+-spec list_webhooks(binary()) -> [map()].
+list_webhooks(TaskId) ->
+    gen_server:call(?SERVER, {list_webhooks, TaskId}, ?DEFAULT_TIMEOUT).
 
 %%====================================================================
-%% gen_server callbacks
+%% API - 通知发送
 %%====================================================================
 
-init([]) ->
-    {ok, #state{}}.
+%% @doc 发送任务状态通知（同步）
+%%
+%% @param TaskId 任务 ID
+%% @param Task 任务数据
+%% @returns ok | {error, Reason}
+-spec notify(binary(), map()) -> ok | {error, term()}.
+notify(TaskId, Task) ->
+    gen_server:call(?SERVER, {notify, TaskId, Task}, ?DEFAULT_TIMEOUT * 2).
 
-handle_call({register, TaskId, ConfigId, PushConfig}, _From, State) ->
-    Url = maps:get(<<"url">>, PushConfig, maps:get(url, PushConfig, undefined)),
-    case Url of
-        undefined ->
-            {reply, {error, missing_url}, State};
-        _ ->
-            Entry = #push_config_entry{
-                id = ConfigId,
-                task_id = TaskId,
-                url = beamai_a2a_utils:to_binary(Url),
-                token = maps:get(<<"token">>, PushConfig,
-                            maps:get(token, PushConfig, undefined)),
-                auth = extract_auth(PushConfig),
-                retries = 0,
-                created_at = beamai_a2a_utils:now_ms()
-            },
-            TaskConfigs = maps:get(TaskId, State#state.configs, []),
-            %% Replace if same ConfigId exists, otherwise append
-            Filtered = [E || E <- TaskConfigs,
-                             E#push_config_entry.id =/= ConfigId],
-            NewConfigs = maps:put(TaskId, [Entry | Filtered],
-                                  State#state.configs),
-            %% Also persist to the task store
-            persist_push_config(TaskId, ConfigId, PushConfig),
-            {reply, ok, State#state{configs = NewConfigs}}
+%% @doc 发送任务状态通知（异步）
+%%
+%% 异步发送通知，不等待结果。适用于不需要确认的场景。
+%%
+%% @param TaskId 任务 ID
+%% @param Task 任务数据
+%% @returns ok
+-spec notify_async(binary(), map()) -> ok.
+notify_async(TaskId, Task) ->
+    gen_server:cast(?SERVER, {notify, TaskId, Task}).
+
+%%====================================================================
+%% API - 统计信息
+%%====================================================================
+
+%% @doc 获取统计信息
+%%
+%% 返回包含以下字段的 map：
+%% - notifications_sent: 成功发送的通知数
+%% - notifications_failed: 失败的通知数
+%% - retries: 重试次数
+%% - webhooks_registered: 当前注册的 webhook 数
+%% - table_size: 注册表大小
+%% - retry_table_size: 重试表大小
+-spec stats() -> map().
+stats() ->
+    gen_server:call(?SERVER, stats, ?DEFAULT_TIMEOUT).
+
+%%====================================================================
+%% gen_server 回调
+%%====================================================================
+
+%% @private 初始化服务
+init(Config) ->
+    %% 创建 Webhook 注册表
+    ets:new(?TABLE, [
+        named_table,
+        public,
+        set,
+        {keypos, #webhook.task_id},
+        {read_concurrency, true}
+    ]),
+
+    %% 创建重试追踪表
+    ets:new(?RETRY_TABLE, [
+        named_table,
+        public,
+        set,
+        {read_concurrency, true}
+    ]),
+
+    State = #state{
+        config = Config,
+        stats = #{
+            notifications_sent => 0,
+            notifications_failed => 0,
+            retries => 0,
+            webhooks_registered => 0
+        }
+    },
+
+    {ok, State}.
+
+%% @private 处理同步调用
+handle_call({register, TaskId, Config}, _From, State) ->
+    case do_register(TaskId, Config) of
+        ok ->
+            NewStats = maps:update_with(
+                webhooks_registered,
+                fun(V) -> V + 1 end,
+                State#state.stats
+            ),
+            {reply, ok, State#state{stats = NewStats}};
+        {error, Reason} ->
+            {reply, {error, Reason}, State}
     end;
 
-handle_call({unregister, TaskId, ConfigId}, _From, State) ->
-    TaskConfigs = maps:get(TaskId, State#state.configs, []),
-    Filtered = [E || E <- TaskConfigs,
-                     E#push_config_entry.id =/= ConfigId],
-    NewConfigs = case Filtered of
-        [] -> maps:remove(TaskId, State#state.configs);
-        _  -> maps:put(TaskId, Filtered, State#state.configs)
-    end,
-    remove_push_config(TaskId, ConfigId),
-    {reply, ok, State#state{configs = NewConfigs}};
+handle_call({unregister, TaskId}, _From, State) ->
+    case do_unregister(TaskId) of
+        ok ->
+            NewStats = maps:update_with(
+                webhooks_registered,
+                fun(V) -> max(0, V - 1) end,
+                State#state.stats
+            ),
+            {reply, ok, State#state{stats = NewStats}};
+        {error, Reason} ->
+            {reply, {error, Reason}, State}
+    end;
 
 handle_call({get_config, TaskId}, _From, State) ->
-    TaskConfigs = maps:get(TaskId, State#state.configs, []),
-    Result = [entry_to_map(E) || E <- TaskConfigs],
-    {reply, {ok, Result}, State};
+    Result = do_get_config(TaskId),
+    {reply, Result, State};
+
+handle_call(list_webhooks, _From, State) ->
+    Webhooks = do_list_webhooks(),
+    {reply, Webhooks, State};
+
+handle_call({list_webhooks, TaskId}, _From, State) ->
+    Webhooks = do_list_webhooks(TaskId),
+    {reply, Webhooks, State};
+
+handle_call({notify, TaskId, Task}, _From, State) ->
+    {Result, NewStats} = do_notify(TaskId, Task, State#state.stats),
+    {reply, Result, State#state{stats = NewStats}};
+
+handle_call(stats, _From, State) ->
+    BaseStats = State#state.stats,
+    FullStats = BaseStats#{
+        table_size => ets:info(?TABLE, size),
+        retry_table_size => ets:info(?RETRY_TABLE, size)
+    },
+    {reply, FullStats, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast({notify, TaskId, EventType, Payload}, State) ->
-    TaskConfigs = maps:get(TaskId, State#state.configs, []),
-    lists:foreach(fun(Entry) ->
-        send_notification(Entry, EventType, Payload, 0)
-    end, TaskConfigs),
-    {noreply, State};
+%% @private 处理异步消息
+handle_cast({notify, TaskId, Task}, State) ->
+    {_Result, NewStats} = do_notify(TaskId, Task, State#state.stats),
+    {noreply, State#state{stats = NewStats}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({retry_notification, Entry, EventType, Payload, Attempt}, State) ->
-    send_notification(Entry, EventType, Payload, Attempt),
-    {noreply, State};
+%% @private 处理系统消息
+handle_info({retry, TaskId, Task, Attempt}, State) ->
+    %% 处理重试请求
+    {_Result, NewStats} = do_retry_notify(TaskId, Task, Attempt, State#state.stats),
+    {noreply, State#state{stats = NewStats}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @private 终止回调
 terminate(_Reason, _State) ->
+    ets:delete(?TABLE),
+    ets:delete(?RETRY_TABLE),
     ok.
 
+%% @private 代码升级
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
 %%====================================================================
-%% Internal functions
+%% 内部函数 - Webhook 管理
 %%====================================================================
 
-%% @doc Send a push notification to a registered endpoint.
--spec send_notification(#push_config_entry{}, atom(), map(),
-                        non_neg_integer()) -> ok.
-send_notification(Entry, EventType, Payload, Attempt) ->
-    Url = Entry#push_config_entry.url,
-    Body = build_notification_body(Entry#push_config_entry.task_id,
-                                    EventType, Payload),
-    Headers = build_notification_headers(Entry),
-    Request = {binary_to_list(Url), Headers, "application/json", Body},
-
-    %% Send asynchronously to avoid blocking
-    Self = self(),
-    spawn(fun() ->
-        case httpc:request(post, Request, [{timeout, 10000}], []) of
-            {ok, {{_, StatusCode, _}, _, _}} when StatusCode >= 200,
-                                                   StatusCode < 300 ->
-                logger:debug("Push notification sent to ~s (status ~p)",
-                             [Url, StatusCode]),
-                ok;
-            {ok, {{_, StatusCode, _}, _, RespBody}} ->
-                logger:warning("Push notification to ~s failed: ~p ~s",
-                               [Url, StatusCode, RespBody]),
-                maybe_retry(Self, Entry, EventType, Payload, Attempt);
-            {error, Reason} ->
-                logger:error("Push notification to ~s error: ~p",
-                             [Url, Reason]),
-                maybe_retry(Self, Entry, EventType, Payload, Attempt)
-        end
-    end),
-    ok.
-
-%% @doc Schedule a retry with exponential backoff.
--spec maybe_retry(pid(), #push_config_entry{}, atom(), map(),
-                  non_neg_integer()) -> ok.
-maybe_retry(Server, Entry, EventType, Payload, Attempt) ->
-    NextAttempt = Attempt + 1,
-    case NextAttempt >= ?MAX_RETRIES of
-        true ->
-            logger:error("Push notification to ~s exhausted retries (~p)",
-                         [Entry#push_config_entry.url, ?MAX_RETRIES]),
-            ok;
-        false ->
-            BackoffMs = ?BASE_BACKOFF_MS * trunc(math:pow(2, Attempt)),
-            %% Add jitter (up to 25% of backoff)
-            Jitter = rand:uniform(max(1, BackoffMs div 4)),
-            Delay = BackoffMs + Jitter,
-            erlang:send_after(Delay, Server,
-                              {retry_notification, Entry, EventType,
-                               Payload, NextAttempt}),
+%% @private 注册 webhook
+do_register(TaskId, Config) ->
+    case maps:get(url, Config, undefined) of
+        undefined ->
+            {error, missing_url};
+        Url ->
+            Webhook = #webhook{
+                task_id = TaskId,
+                url = normalize_url(Url),
+                token = maps:get(token, Config, undefined),
+                events = normalize_events(maps:get(events, Config, all)),
+                retry_count = maps:get(retry_count, Config, ?PUSH_RETRY_COUNT),
+                created_at = erlang:system_time(millisecond)
+            },
+            ets:insert(?TABLE, Webhook),
             ok
     end.
 
-%% @doc Build the JSON notification body.
--spec build_notification_body(binary(), atom(), map()) -> binary().
-build_notification_body(TaskId, EventType, Payload) ->
-    EventBin = atom_to_binary(EventType, utf8),
-    Notification = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"method">>  => <<"tasks/pushNotification">>,
-        <<"params">>  => #{
-            <<"taskId">>    => TaskId,
-            <<"eventType">> => EventBin,
-            <<"data">>      => Payload
-        }
+%% @private 取消注册
+do_unregister(TaskId) ->
+    case ets:lookup(?TABLE, TaskId) of
+        [] ->
+            {error, not_found};
+        _ ->
+            ets:delete(?TABLE, TaskId),
+            ets:delete(?RETRY_TABLE, TaskId),
+            ok
+    end.
+
+%% @private 获取配置
+do_get_config(TaskId) ->
+    case ets:lookup(?TABLE, TaskId) of
+        [] ->
+            {error, not_found};
+        [Webhook] ->
+            {ok, webhook_to_map(Webhook)}
+    end.
+
+%% @private 列出所有 webhook
+do_list_webhooks() ->
+    ets:foldl(
+        fun(Webhook, Acc) ->
+            [webhook_to_map(Webhook) | Acc]
+        end,
+        [],
+        ?TABLE
+    ).
+
+%% @private 列出指定任务的 webhook
+do_list_webhooks(TaskId) ->
+    case ets:lookup(?TABLE, TaskId) of
+        [] -> [];
+        [Webhook] -> [webhook_to_map(Webhook)]
+    end.
+
+%%====================================================================
+%% 内部函数 - 通知发送
+%%====================================================================
+
+%% @private 发送通知
+do_notify(TaskId, Task, Stats) ->
+    case ets:lookup(?TABLE, TaskId) of
+        [] ->
+            %% 没有注册的 webhook，直接返回
+            {ok, Stats};
+        [Webhook] ->
+            %% 检查事件过滤
+            TaskState = get_task_state(Task),
+            case should_notify(TaskState, Webhook#webhook.events) of
+                true ->
+                    send_notification(TaskId, Task, Webhook, Stats);
+                false ->
+                    {ok, Stats}
+            end
+    end.
+
+%% @private 重试发送通知
+do_retry_notify(TaskId, Task, Attempt, Stats) ->
+    case ets:lookup(?TABLE, TaskId) of
+        [] ->
+            {ok, Stats};
+        [Webhook] ->
+            case Attempt > Webhook#webhook.retry_count of
+                true ->
+                    %% 超过重试次数，标记失败
+                    NewStats = maps:update_with(
+                        notifications_failed,
+                        fun(V) -> V + 1 end,
+                        Stats
+                    ),
+                    ets:delete(?RETRY_TABLE, TaskId),
+                    {{error, max_retries_exceeded}, NewStats};
+                false ->
+                    %% 继续重试
+                    RetryStats = maps:update_with(retries, fun(V) -> V + 1 end, Stats),
+                    send_notification(TaskId, Task, Webhook, RetryStats)
+            end
+    end.
+
+%% @private 发送 HTTP 通知
+send_notification(TaskId, Task, Webhook, Stats) ->
+    Url = Webhook#webhook.url,
+    Payload = build_payload(TaskId, Task),
+    Headers = build_headers(Webhook#webhook.token),
+
+    case do_http_post(Url, Headers, Payload) of
+        {ok, _Response} ->
+            %% 成功
+            NewStats = maps:update_with(
+                notifications_sent,
+                fun(V) -> V + 1 end,
+                Stats
+            ),
+            ets:delete(?RETRY_TABLE, TaskId),
+            {ok, NewStats};
+        {error, Reason} ->
+            %% 失败，安排重试
+            Attempt = get_retry_attempt(TaskId),
+            case Attempt < Webhook#webhook.retry_count of
+                true ->
+                    schedule_retry(TaskId, Task, Attempt + 1),
+                    {{error, {retry_scheduled, Reason}}, Stats};
+                false ->
+                    NewStats = maps:update_with(
+                        notifications_failed,
+                        fun(V) -> V + 1 end,
+                        Stats
+                    ),
+                    ets:delete(?RETRY_TABLE, TaskId),
+                    {{error, Reason}, NewStats}
+            end
+    end.
+
+%% @private 构建请求 payload
+%%
+%% 使用 beamai_a2a_convert 模块将 Task 转换为 JSON 格式
+build_payload(TaskId, Task) ->
+    Event = #{
+        <<"type">> => <<"TaskStatusUpdateEvent">>,
+        <<"taskId">> => TaskId,
+        <<"task">> => beamai_a2a_convert:task_to_json(Task),
+        <<"timestamp">> => erlang:system_time(millisecond)
     },
-    iolist_to_binary(json:encode(Notification)).
+    jsx:encode(Event, []).
 
-%% @doc Build HTTP headers for the push notification request.
--spec build_notification_headers(#push_config_entry{}) ->
-    [{string(), string()}].
-build_notification_headers(Entry) ->
-    BaseHeaders = [{"Content-Type", "application/json"}],
-    WithAuth = case Entry#push_config_entry.auth of
-        undefined ->
-            BaseHeaders;
-        {Scheme, undefined} ->
-            [{"Authorization", binary_to_list(Scheme)} | BaseHeaders];
-        {Scheme, Creds} ->
-            AuthVal = binary_to_list(<<Scheme/binary, " ", Creds/binary>>),
-            [{"Authorization", AuthVal} | BaseHeaders]
-    end,
-    case Entry#push_config_entry.token of
-        undefined -> WithAuth;
-        Token -> [{"X-A2A-Token", binary_to_list(Token)} | WithAuth]
+%% @private 构建请求头
+build_headers(undefined) ->
+    [
+        {<<"Content-Type">>, <<"application/json">>},
+        {<<"User-Agent">>, <<"A2A-Agent/1.0">>}
+    ];
+build_headers(Token) when is_binary(Token) ->
+    [
+        {<<"Content-Type">>, <<"application/json">>},
+        {<<"Authorization">>, <<"Bearer ", Token/binary>>},
+        {<<"User-Agent">>, <<"A2A-Agent/1.0">>}
+    ].
+
+%% @private 发送 HTTP POST 请求
+do_http_post(Url, Headers, Body) ->
+    %% 使用 beamai_http 模块
+    case beamai_http:post(Url, Headers, Body, #{timeout => ?PUSH_HTTP_TIMEOUT}) of
+        {ok, {{_, StatusCode, _}, _, ResponseBody}} when StatusCode >= 200, StatusCode < 300 ->
+            {ok, ResponseBody};
+        {ok, {{_, StatusCode, _}, _, ResponseBody}} ->
+            {error, {http_error, StatusCode, ResponseBody}};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
-%% @doc Extract authentication info from a push config map.
--spec extract_auth(map()) -> {binary(), binary() | undefined} | undefined.
-extract_auth(Config) ->
-    case maps:get(<<"authentication">>, Config,
-                  maps:get(authentication, Config, undefined)) of
-        undefined -> undefined;
-        AuthMap when is_map(AuthMap) ->
-            Scheme = maps:get(<<"scheme">>, AuthMap,
-                              maps:get(scheme, AuthMap, <<"Bearer">>)),
-            Creds = maps:get(<<"credentials">>, AuthMap,
-                             maps:get(credentials, AuthMap, undefined)),
-            {beamai_a2a_utils:to_binary(Scheme),
-             case Creds of
-                 undefined -> undefined;
-                 _ -> beamai_a2a_utils:to_binary(Creds)
-             end};
-        _ -> undefined
+%%====================================================================
+%% 内部函数 - 重试机制
+%%====================================================================
+
+%% @private 获取重试次数
+get_retry_attempt(TaskId) ->
+    case ets:lookup(?RETRY_TABLE, TaskId) of
+        [] -> 0;
+        [{TaskId, Attempt}] -> Attempt
     end.
 
-%% @doc Convert an entry record to a map for external consumption.
--spec entry_to_map(#push_config_entry{}) -> map().
-entry_to_map(Entry) ->
-    Base = #{
-        <<"id">>        => Entry#push_config_entry.id,
-        <<"taskId">>    => Entry#push_config_entry.task_id,
-        <<"url">>       => Entry#push_config_entry.url,
-        <<"createdAt">> => Entry#push_config_entry.created_at
-    },
-    M1 = case Entry#push_config_entry.token of
-        undefined -> Base;
-        Token -> Base#{<<"token">> => Token}
-    end,
-    case Entry#push_config_entry.auth of
-        undefined -> M1;
-        {Scheme, Creds} ->
-            AuthMap = #{<<"scheme">> => Scheme},
-            AuthMap2 = case Creds of
-                undefined -> AuthMap;
-                _ -> AuthMap#{<<"credentials">> => <<"***">>}  %% redacted
-            end,
-            M1#{<<"authentication">> => AuthMap2}
-    end.
+%% @private 安排重试
+%%
+%% 使用指数退避算法计算重试延迟
+schedule_retry(TaskId, Task, Attempt) ->
+    ets:insert(?RETRY_TABLE, {TaskId, Attempt}),
+    Delay = calculate_retry_delay(Attempt),
+    erlang:send_after(Delay, self(), {retry, TaskId, Task, Attempt}).
 
-%% @doc Persist push config to the task store (best-effort).
--spec persist_push_config(binary(), binary(), map()) -> ok.
-persist_push_config(TaskId, ConfigId, PushConfig) ->
-    try
-        PNConfig = beamai_a2a_convert:map_to_push_config(PushConfig),
-        TaskPNConfig = #task_push_notification_config{
-            id = ConfigId,
-            task_id = TaskId,
-            push_notification_config = PNConfig
-        },
-        a2a_task_store:add_push_config(TaskId, TaskPNConfig)
-    catch
-        _:_ -> ok  %% Best effort
-    end.
+%% @private 计算重试延迟（指数退避）
+%%
+%% 延迟 = 基础延迟 * 2^(尝试次数-1)
+%% 最大不超过 PUSH_MAX_RETRY_DELAY
+calculate_retry_delay(Attempt) ->
+    Delay = ?PUSH_RETRY_DELAY * (1 bsl (Attempt - 1)),
+    min(Delay, ?PUSH_MAX_RETRY_DELAY).
 
-%% @doc Remove push config from the task store (best-effort).
--spec remove_push_config(binary(), binary()) -> ok.
-remove_push_config(TaskId, ConfigId) ->
-    try
-        a2a_task_store:delete_push_config(TaskId, ConfigId)
-    catch
-        _:_ -> ok  %% Best effort
-    end.
+%%====================================================================
+%% 内部函数 - 事件过滤
+%%====================================================================
+
+%% @private 检查是否应该通知
+should_notify(_State, all) -> true;
+should_notify(State, Events) when is_list(Events) ->
+    lists:member(State, Events).
+
+%% @private 从任务获取状态
+get_task_state(Task) ->
+    Status = maps:get(status, Task, #{}),
+    maps:get(state, Status, unknown).
+
+%%====================================================================
+%% 内部函数 - 数据转换
+%%====================================================================
+
+%% @private 规范化 URL
+normalize_url(Url) when is_binary(Url) -> Url;
+normalize_url(Url) when is_list(Url) -> list_to_binary(Url).
+
+%% @private 规范化事件列表
+%%
+%% 使用 beamai_a2a_types 的安全转换函数，防止 atom 表耗尽攻击。
+%% 无效事件会被过滤掉。
+normalize_events(all) -> all;
+normalize_events(Events) when is_list(Events) ->
+    ValidEvents = [normalize_event(E) || E <- Events],
+    %% 过滤掉 undefined（无效事件）
+    [E || E <- ValidEvents, E =/= undefined];
+normalize_events(_) -> all.
+
+%% @private 规范化单个事件（安全版本）
+%%
+%% 使用白名单验证，防止恶意输入创建任意 atom。
+normalize_event(E) when is_atom(E) ->
+    %% 验证 atom 是否在白名单中
+    case beamai_a2a_types:is_valid_push_event(E) of
+        true -> E;
+        false -> undefined
+    end;
+normalize_event(E) when is_binary(E) ->
+    beamai_a2a_types:binary_to_push_event(E);
+normalize_event(E) when is_list(E) ->
+    %% 先转为 binary 再使用安全转换
+    beamai_a2a_types:binary_to_push_event(list_to_binary(E)).
+
+%% @private 将 webhook 记录转换为 map
+%%
+%% 注意：token 字段被隐藏为 "***"
+webhook_to_map(#webhook{} = W) ->
+    #{
+        task_id => W#webhook.task_id,
+        url => W#webhook.url,
+        token => case W#webhook.token of
+            undefined -> undefined;
+            _ -> <<"***">>  %% 安全：隐藏实际 token
+        end,
+        events => W#webhook.events,
+        retry_count => W#webhook.retry_count,
+        created_at => W#webhook.created_at
+    }.

@@ -1,19 +1,25 @@
 %%%-------------------------------------------------------------------
-%%% @doc beamai_a2a application callback module.
-%%% Provides Agent-to-Agent protocol integration for BeamAI,
-%%% bridging the A2A protocol with BeamAI kernel capabilities.
+%%% @doc A2A 应用入口模块
+%%%
+%%% 管理 A2A 应用的启动和停止。
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_app).
 
 -behaviour(application).
 
+%% application 回调
 -export([start/2, stop/1]).
 
--spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
+%%====================================================================
+%% application 回调
+%%====================================================================
+
+%% @doc 启动应用
 start(_StartType, _StartArgs) ->
     beamai_a2a_sup:start_link().
 
--spec stop(term()) -> ok.
+%% @doc 停止应用
 stop(_State) ->
     ok.

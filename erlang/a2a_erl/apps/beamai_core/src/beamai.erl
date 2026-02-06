@@ -1,211 +1,225 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI main facade module.
-%%% Provides the primary API for interacting with the BeamAI framework.
-%%% This module delegates to the kernel, tool, filter, and LLM
-%%% subsystems, presenting a unified interface.
+%%% @doc Facade 入口：所有外部调用的统一入口
+%%%
+%%% 提供简洁的顶层 API，涵盖：
+%%% - 构建 Kernel（工具 + LLM 服务）
+%%% - 调用工具和 Chat Completion
+%%% - 工具调用循环（LLM + 工具执行）
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai).
 
--export([
-    %% Kernel management
-    kernel/0,
-    kernel/1,
-    %% Tool management
-    tool/2,
-    tool/3,
-    add_tool/2,
-    add_tools/2,
-    add_tool_module/2,
-    %% LLM management
-    add_llm/2,
-    add_llm/3,
-    %% Filter management
-    add_filter/2,
-    add_filter/4,
-    %% Invocation
-    invoke_tool/4,
-    %% Chat
-    chat/2,
-    chat/3,
-    chat_with_tools/2,
-    chat_with_tools/3,
-    %% Rendering
-    render/2,
-    %% Query
-    tools/1,
-    tools/2,
-    tools_by_tag/2,
-    %% Context
-    context/0,
-    context/1
-]).
+%% Kernel
+-export([kernel/0, kernel/1]).
 
--type kernel_ref() :: pid() | atom().
--type tool_name() :: binary() | atom().
--type tool_def() :: map().
--type llm_provider() :: atom().
--type llm_opts() :: map() | proplists:proplist().
--type filter_fun() :: fun((map()) -> map()).
--type filter_stage() :: pre_invoke | post_invoke | pre_chat | post_chat.
--type chat_message() :: binary() | map().
--type chat_opts() :: map().
--type context() :: map().
+%% Tool
+-export([tool/2, tool/3]).
+-export([add_tool/2]).
+-export([add_tools/2]).
+-export([add_tool_module/2]).
 
--export_type([
-    kernel_ref/0, tool_name/0, tool_def/0, llm_provider/0,
-    llm_opts/0, filter_fun/0, filter_stage/0, chat_message/0,
-    chat_opts/0, context/0
-]).
+%% Service (LLM)
+-export([add_llm/3, add_llm/2]).
+
+%% Filter
+-export([add_filter/2, add_filter/4]).
+
+%% Invoke
+-export([invoke_tool/4]).
+-export([chat/2, chat/3]).
+-export([chat_with_tools/2, chat_with_tools/3]).
+
+%% Prompt
+-export([render/2]).
+
+%% Query
+-export([tools/1, tools/2]).
+-export([tools_by_tag/2]).
+
+%% Context
+-export([context/0, context/1]).
 
 %%====================================================================
-%% Kernel management
+%% Kernel
 %%====================================================================
 
-%% @doc Get the default kernel process reference.
--spec kernel() -> kernel_ref().
+%% @doc 创建空 Kernel（默认配置）
+-spec kernel() -> beamai_kernel:kernel().
 kernel() ->
-    beamai_kernel:default().
+    beamai_kernel:new().
 
-%% @doc Get or create a named kernel instance.
--spec kernel(atom()) -> kernel_ref().
-kernel(Name) ->
-    beamai_kernel:get_or_create(Name).
-
-%%====================================================================
-%% Tool management
-%%====================================================================
-
-%% @doc Define a tool with a name and function.
--spec tool(tool_name(), fun()) -> tool_def().
-tool(Name, Fun) ->
-    beamai_tool:new(Name, Fun).
-
-%% @doc Define a tool with a name, function, and options/metadata.
--spec tool(tool_name(), fun(), map()) -> tool_def().
-tool(Name, Fun, Opts) ->
-    beamai_tool:new(Name, Fun, Opts).
-
-%% @doc Add a tool definition to a kernel.
--spec add_tool(kernel_ref(), tool_def()) -> ok.
-add_tool(KernelRef, ToolDef) ->
-    beamai_kernel:add_tool(KernelRef, ToolDef).
-
-%% @doc Add multiple tool definitions to a kernel.
--spec add_tools(kernel_ref(), [tool_def()]) -> ok.
-add_tools(KernelRef, ToolDefs) ->
-    beamai_kernel:add_tools(KernelRef, ToolDefs).
-
-%% @doc Add all tools exported from a module to a kernel.
-%% The module must export a beamai_tools/0 function returning a list of tool defs.
--spec add_tool_module(kernel_ref(), module()) -> ok.
-add_tool_module(KernelRef, Module) ->
-    Tools = Module:beamai_tools(),
-    beamai_kernel:add_tools(KernelRef, Tools).
+%% @doc 创建 Kernel（自定义配置）
+%%
+%% @param Settings 配置项（如 #{max_tool_iterations => 5}）
+-spec kernel(beamai_kernel:kernel_settings()) -> beamai_kernel:kernel().
+kernel(Settings) ->
+    beamai_kernel:new(Settings).
 
 %%====================================================================
-%% LLM management
+%% Tool
 %%====================================================================
 
-%% @doc Add an LLM provider to the kernel with default options.
--spec add_llm(kernel_ref(), llm_provider()) -> ok.
-add_llm(KernelRef, Provider) ->
-    add_llm(KernelRef, Provider, #{}).
+%% @doc 创建工具定义（名称 + 处理器）
+-spec tool(binary(), beamai_tool:handler()) -> beamai_tool:tool_spec().
+tool(Name, Handler) ->
+    beamai_tool:new(Name, Handler).
 
-%% @doc Add an LLM provider to the kernel with specific options.
--spec add_llm(kernel_ref(), llm_provider(), llm_opts()) -> ok.
-add_llm(KernelRef, Provider, Opts) ->
-    beamai_kernel:add_llm(KernelRef, Provider, Opts).
+%% @doc 创建工具定义（带额外选项，如 description、parameters、tag）
+-spec tool(binary(), beamai_tool:handler(), map()) -> beamai_tool:tool_spec().
+tool(Name, Handler, Opts) ->
+    beamai_tool:new(Name, Handler, Opts).
 
-%%====================================================================
-%% Filter management
-%%====================================================================
+%% @doc 注册单个工具到 Kernel
+-spec add_tool(beamai_kernel:kernel(), beamai_tool:tool_spec()) -> beamai_kernel:kernel().
+add_tool(Kernel, Tool) ->
+    beamai_kernel:add_tool(Kernel, Tool).
 
-%% @doc Add a filter function that applies to all stages.
--spec add_filter(kernel_ref(), filter_fun()) -> ok.
-add_filter(KernelRef, FilterFun) ->
-    beamai_kernel:add_filter(KernelRef, FilterFun).
+%% @doc 批量注册工具到 Kernel
+-spec add_tools(beamai_kernel:kernel(), [beamai_tool:tool_spec()]) -> beamai_kernel:kernel().
+add_tools(Kernel, Tools) ->
+    beamai_kernel:add_tools(Kernel, Tools).
 
-%% @doc Add a filter function for a specific stage with a name and priority.
--spec add_filter(kernel_ref(), filter_stage(), binary(), filter_fun()) -> ok.
-add_filter(KernelRef, Stage, Name, FilterFun) ->
-    beamai_kernel:add_filter(KernelRef, Stage, Name, FilterFun).
-
-%%====================================================================
-%% Invocation
-%%====================================================================
-
-%% @doc Invoke a named tool on a kernel with arguments and context.
--spec invoke_tool(kernel_ref(), tool_name(), map(), context()) ->
-    {ok, term()} | {error, term()}.
-invoke_tool(KernelRef, ToolName, Args, Context) ->
-    beamai_kernel:invoke_tool(KernelRef, ToolName, Args, Context).
+%% @doc 从模块自动加载并注册工具
+%%
+%% 模块需实现 beamai_tool_behaviour，至少实现 tools/0 回调。
+-spec add_tool_module(beamai_kernel:kernel(), module()) -> beamai_kernel:kernel().
+add_tool_module(Kernel, Module) ->
+    beamai_kernel:add_tool_module(Kernel, Module).
 
 %%====================================================================
-%% Chat
+%% Service (LLM)
 %%====================================================================
 
-%% @doc Send a chat message to the default LLM on the kernel.
--spec chat(kernel_ref(), chat_message()) -> {ok, binary()} | {error, term()}.
-chat(KernelRef, Message) ->
-    chat(KernelRef, Message, #{}).
+%% @doc 通过提供商和选项添加 LLM 服务
+%%
+%% 自动调用 beamai_chat_completion:create/2 创建配置并注册。
+%%
+%% 示例:
+%%   K1 = beamai:add_llm(K0, anthropic, #{
+%%       model => <<"claude-sonnet-4-20250514">>,
+%%       api_key => os:getenv("ANTHROPIC_API_KEY")
+%%   })
+-spec add_llm(beamai_kernel:kernel(), beamai_chat_completion:provider(), map()) -> beamai_kernel:kernel().
+add_llm(Kernel, Provider, Opts) ->
+    LlmConfig = beamai_chat_completion:create(Provider, Opts),
+    beamai_kernel:add_service(Kernel, LlmConfig).
 
-%% @doc Send a chat message with options (model, temperature, etc.).
--spec chat(kernel_ref(), chat_message(), chat_opts()) ->
-    {ok, binary()} | {error, term()}.
-chat(KernelRef, Message, Opts) ->
-    beamai_kernel:chat(KernelRef, Message, Opts).
-
-%% @doc Send a chat message and allow the LLM to use registered tools.
--spec chat_with_tools(kernel_ref(), chat_message()) ->
-    {ok, binary()} | {error, term()}.
-chat_with_tools(KernelRef, Message) ->
-    chat_with_tools(KernelRef, Message, #{}).
-
-%% @doc Send a chat message with tool use and options.
--spec chat_with_tools(kernel_ref(), chat_message(), chat_opts()) ->
-    {ok, binary()} | {error, term()}.
-chat_with_tools(KernelRef, Message, Opts) ->
-    beamai_kernel:chat_with_tools(KernelRef, Message, Opts).
+%% @doc 使用预构建的 LLM 配置添加服务
+%%
+%% 示例:
+%%   LLM = beamai_chat_completion:create(openai, #{model => <<"gpt-4">>, api_key => Key}),
+%%   K1 = beamai:add_llm(K0, LLM)
+-spec add_llm(beamai_kernel:kernel(), beamai_chat_completion:config()) -> beamai_kernel:kernel().
+add_llm(Kernel, LlmConfig) ->
+    beamai_kernel:add_service(Kernel, LlmConfig).
 
 %%====================================================================
-%% Rendering
+%% Filter
 %%====================================================================
 
-%% @doc Render a template with the given bindings.
--spec render(binary(), map()) -> binary().
-render(Template, Bindings) ->
-    beamai_template:render(Template, Bindings).
+%% @doc 注册已构建的过滤器到 Kernel
+-spec add_filter(beamai_kernel:kernel(), beamai_filter:filter_def()) -> beamai_kernel:kernel().
+add_filter(Kernel, Filter) ->
+    beamai_kernel:add_filter(Kernel, Filter).
+
+%% @doc 快捷创建并注册过滤器
+%%
+%% @param Kernel Kernel 实例
+%% @param Name 过滤器名称
+%% @param Type 过滤器类型（pre_invocation | post_invocation | pre_chat | post_chat）
+%% @param Handler 过滤器处理函数
+%% @returns 更新后的 Kernel
+-spec add_filter(beamai_kernel:kernel(), binary(), beamai_filter:filter_type(),
+                 fun((beamai_filter:filter_context()) -> beamai_filter:filter_result())) ->
+    beamai_kernel:kernel().
+add_filter(Kernel, Name, Type, Handler) ->
+    Filter = beamai_filter:new(Name, Type, Handler),
+    beamai_kernel:add_filter(Kernel, Filter).
+
+%%====================================================================
+%% Invoke
+%%====================================================================
+
+%% @doc 调用 Kernel 中注册的工具
+-spec invoke_tool(beamai_kernel:kernel(), binary(), beamai_tool:args(), beamai_context:t()) ->
+    {ok, term(), beamai_context:t()} | {error, term()}.
+invoke_tool(Kernel, ToolName, Args, Context) ->
+    beamai_kernel:invoke_tool(Kernel, ToolName, Args, Context).
+
+%% @doc 发送 Chat Completion 请求（默认选项）
+-spec chat(beamai_kernel:kernel(), [map()]) ->
+    {ok, map(), beamai_context:t()} | {error, term()}.
+chat(Kernel, Messages) ->
+    chat(Kernel, Messages, #{}).
+
+%% @doc 发送 Chat Completion 请求（自定义选项）
+%%
+%% 执行前置/后置 Chat 过滤器管道。
+-spec chat(beamai_kernel:kernel(), [map()], beamai_kernel:chat_opts()) ->
+    {ok, map(), beamai_context:t()} | {error, term()}.
+chat(Kernel, Messages, Opts) ->
+    beamai_kernel:invoke_chat(Kernel, Messages, Opts).
+
+%% @doc 发送带工具调用循环的 Chat 请求（默认选项）
+%%
+%% 自动注册 Kernel 中所有工具为 tools，驱动 LLM ↔ Tool 循环。
+-spec chat_with_tools(beamai_kernel:kernel(), [map()]) ->
+    {ok, map(), beamai_context:t()} | {error, term()}.
+chat_with_tools(Kernel, Messages) ->
+    chat_with_tools(Kernel, Messages, #{}).
+
+%% @doc 发送带工具调用循环的 Chat 请求（自定义选项）
+-spec chat_with_tools(beamai_kernel:kernel(), [map()], beamai_kernel:chat_opts()) ->
+    {ok, map(), beamai_context:t()} | {error, term()}.
+chat_with_tools(Kernel, Messages, Opts) ->
+    beamai_kernel:invoke(Kernel, Messages, Opts).
+
+%%====================================================================
+%% Prompt
+%%====================================================================
+
+%% @doc 渲染提示词模板
+%%
+%% 将 {{variable}} 占位符替换为 Vars 中对应的值。
+%%
+%% @param Template 模板字符串
+%% @param Vars 变量 Map
+%% @returns {ok, 渲染后的二进制} | {error, 原因}
+-spec render(binary(), map()) -> {ok, binary()} | {error, term()}.
+render(Template, Vars) ->
+    Prompt = beamai_prompt:new(Template),
+    beamai_prompt:render(Prompt, Vars).
 
 %%====================================================================
 %% Query
 %%====================================================================
 
-%% @doc List all tools registered in a kernel.
--spec tools(kernel_ref()) -> [tool_def()].
-tools(KernelRef) ->
-    beamai_kernel:list_tools(KernelRef).
+%% @doc 获取所有工具的 tool schema（默认 OpenAI 格式）
+-spec tools(beamai_kernel:kernel()) -> [map()].
+tools(Kernel) ->
+    beamai_kernel:get_tool_schemas(Kernel).
 
-%% @doc List tools matching the given filter criteria.
--spec tools(kernel_ref(), map()) -> [tool_def()].
-tools(KernelRef, Filter) ->
-    beamai_kernel:list_tools(KernelRef, Filter).
+%% @doc 获取所有工具的 tool schema（指定提供商格式）
+-spec tools(beamai_kernel:kernel(), openai | anthropic | atom()) -> [map()].
+tools(Kernel, Provider) ->
+    beamai_kernel:get_tool_schemas(Kernel, Provider).
 
-%% @doc List tools matching a specific tag.
--spec tools_by_tag(kernel_ref(), binary()) -> [tool_def()].
-tools_by_tag(KernelRef, Tag) ->
-    beamai_kernel:tools_by_tag(KernelRef, Tag).
+%% @doc 按标签查找工具
+-spec tools_by_tag(beamai_kernel:kernel(), binary()) -> [beamai_tool:tool_spec()].
+tools_by_tag(Kernel, Tag) ->
+    beamai_kernel:get_tools_by_tag(Kernel, Tag).
 
 %%====================================================================
 %% Context
 %%====================================================================
 
-%% @doc Get the current execution context (default).
--spec context() -> context().
+%% @doc 创建空执行上下文
+-spec context() -> beamai_context:t().
 context() ->
-    beamai_kernel:context(kernel()).
+    beamai_context:new().
 
-%% @doc Get the execution context for a specific kernel.
--spec context(kernel_ref()) -> context().
-context(KernelRef) ->
-    beamai_kernel:context(KernelRef).
+%% @doc 创建带初始变量的执行上下文
+-spec context(map()) -> beamai_context:t().
+context(Vars) ->
+    beamai_context:new(Vars).

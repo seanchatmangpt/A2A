@@ -1,434 +1,473 @@
 %%%-------------------------------------------------------------------
-%%% @doc BeamAI A2A Protocol Client
+%%% @doc A2A Client 模块
 %%%
-%%% Client for making A2A protocol requests to remote agents.
-%%% Supports agent discovery via /.well-known/agent-card.json,
-%%% task management (send, get, cancel), and streaming subscriptions
-%%% via SSE.
+%%% 用于调用远程 A2A Agent 的客户端实现。
 %%%
-%%% Uses OTP's httpc client for HTTP requests and json module
-%%% for JSON processing.
+%%% == 功能 ==
 %%%
-%%% Example:
-%%%   {ok, Card} = beamai_a2a_client:discover("https://agent.example.com"),
-%%%   {ok, Task} = beamai_a2a_client:send_task(
-%%%       "https://agent.example.com",
-%%%       #{<<"message">> => #{
-%%%           <<"messageId">> => beamai_a2a_utils:generate_id(),
-%%%           <<"role">> => <<"user">>,
-%%%           <<"parts">> => [#{<<"text">> => <<"Hello">>}]
-%%%       }},
-%%%       #{}),
-%%%   {ok, TaskState} = beamai_a2a_client:get_task(
-%%%       "https://agent.example.com",
-%%%       maps:get(<<"id">>, Task)).
+%%% - Agent 发现：获取远程 Agent Card
+%%% - 消息发送：通过 JSON-RPC 发送消息
+%%% - 任务管理：查询和取消远程任务
+%%% - 流式响应：支持 SSE 流式通信
+%%%
+%%% == 使用示例 ==
+%%%
+%%% ```erlang
+%%% %% 发现远程 Agent
+%%% {ok, Card} = beamai_a2a_client:discover("https://agent.example.com").
+%%%
+%%% %% 发送消息
+%%% {ok, Task} = beamai_a2a_client:send_message(
+%%%     "https://agent.example.com/a2a",
+%%%     #{role => user, parts => [#{kind => text, text => <<"Hello">>}]}
+%%% ).
+%%%
+%%% %% 查询任务状态
+%%% {ok, Task} = beamai_a2a_client:get_task(
+%%%     "https://agent.example.com/a2a",
+%%%     <<"task-123">>
+%%% ).
+%%%
+%%% %% 流式消息
+%%% {ok, Result} = beamai_a2a_client:send_message_stream(
+%%%     "https://agent.example.com/a2a/stream",
+%%%     Message,
+%%%     fun(Event) -> io:format("Event: ~p~n", [Event]) end
+%%% ).
+%%% ```
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beamai_a2a_client).
 
--include("a2a.hrl").
-
-%% API
+%% API 导出
 -export([
+    %% Agent 发现
     discover/1,
     discover/2,
-    send_task/3,
-    send_task/4,
+    get_agent_card/1,
+    get_agent_card/2,
+
+    %% 消息发送
+    send_message/2,
+    send_message/3,
+    send_message/4,
+
+    %% 任务管理
     get_task/2,
     get_task/3,
     cancel_task/2,
     cancel_task/3,
-    subscribe/3,
-    subscribe/4,
-    set_push_notification/3,
-    get_push_notification/2
+
+    %% 流式请求
+    send_message_stream/3,
+    send_message_stream/4,
+
+    %% 便捷函数
+    create_text_message/1,
+    create_text_message/2
 ]).
 
-%% Low-level API
--export([
-    jsonrpc_request/4,
-    jsonrpc_request/5
-]).
-
-%% Default timeout for HTTP requests (30 seconds)
--define(DEFAULT_TIMEOUT, 30000).
--define(AGENT_CARD_PATH, "/.well-known/agent-card.json").
-
 %%====================================================================
-%% Discovery
+%% 类型定义
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Discover a remote agent by fetching its agent card.
+-type base_url() :: binary() | string().
+-type endpoint() :: binary() | string().
+-type message() :: map().
+-type task_id() :: binary().
+-type context_id() :: binary() | undefined.
+-type options() :: #{
+    timeout => pos_integer(),
+    headers => [{binary(), binary()}],
+    api_key => binary() | string()
+}.
+-type stream_callback() :: fun((map()) -> ok | {error, term()}).
+
+-export_type([base_url/0, endpoint/0, message/0, task_id/0, context_id/0, options/0]).
+
+%%====================================================================
+%% 默认配置
+%%====================================================================
+
+-define(CLIENT_DEFAULT_TIMEOUT, 30000).
+-define(AGENT_CARD_PATH, "/.well-known/agent.json").
+
+%%====================================================================
+%% Agent 发现 API
+%%====================================================================
+
+%% @doc 发现远程 Agent（获取 Agent Card）
 %%
-%% `BaseUrl' is the agent's base URL (e.g., "https://agent.example.com").
-%% Returns `{ok, AgentCardMap}' or `{error, Reason}'.
-%% @end
-%%--------------------------------------------------------------------
--spec discover(binary() | string()) -> {ok, map()} | {error, term()}.
+%% 从远程 Agent 的 well-known URL 获取 Agent Card。
+%%
+%% @param BaseUrl Agent 基础 URL（例如 "https://agent.example.com"）
+%% @returns {ok, AgentCard} | {error, Reason}
+-spec discover(base_url()) -> {ok, map()} | {error, term()}.
 discover(BaseUrl) ->
     discover(BaseUrl, #{}).
 
--spec discover(binary() | string(), map()) -> {ok, map()} | {error, term()}.
+%% @doc 发现远程 Agent（带选项）
+-spec discover(base_url(), options()) -> {ok, map()} | {error, term()}.
 discover(BaseUrl, Opts) ->
-    Url = to_list(BaseUrl) ++ ?AGENT_CARD_PATH,
-    Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
-    Headers = base_headers(Opts),
+    Url = build_agent_card_url(BaseUrl),
+    get_agent_card(Url, Opts).
 
-    case httpc:request(get, {Url, Headers},
-                       [{timeout, Timeout}], [{body_format, binary}]) of
-        {ok, {{_, 200, _}, _RespHeaders, Body}} ->
-            try
-                Decoded = json:decode(Body),
-                {ok, Decoded}
-            catch
-                _:_ -> {error, {invalid_json, Body}}
-            end;
-        {ok, {{_, StatusCode, _}, _, Body}} ->
-            {error, {http_error, StatusCode, Body}};
+%% @doc 获取 Agent Card
+%%
+%% 从指定 URL 获取 Agent Card。
+%%
+%% @param Url Agent Card 完整 URL
+%% @returns {ok, AgentCard} | {error, Reason}
+-spec get_agent_card(endpoint()) -> {ok, map()} | {error, term()}.
+get_agent_card(Url) ->
+    get_agent_card(Url, #{}).
+
+%% @doc 获取 Agent Card（带选项）
+-spec get_agent_card(endpoint(), options()) -> {ok, map()} | {error, term()}.
+get_agent_card(Url, Opts) ->
+    HttpOpts = build_http_opts(Opts),
+    case beamai_http:get(Url, #{}, HttpOpts) of
+        {ok, Body} when is_map(Body) ->
+            beamai_a2a_card:from_map(Body);
+        {ok, Body} when is_binary(Body) ->
+            beamai_a2a_card:from_json(Body);
         {error, Reason} ->
-            {error, {request_failed, Reason}}
+            {error, {discovery_failed, Reason}}
     end.
 
 %%====================================================================
-%% Task operations
+%% 消息发送 API
 %%====================================================================
 
-%%--------------------------------------------------------------------
-%% @doc Send a task (tasks/send) to a remote agent.
+%% @doc 发送消息到远程 Agent
 %%
-%% `BaseUrl' is the agent's base URL.
-%% `Params' is the JSON-RPC params map, expected to contain a
-%%   `message' key with the A2A message.
-%% `Opts' is a map of options:
-%%   `timeout'       - request timeout in ms (default 30000)
-%%   `auth_token'    - bearer token for authentication
-%%   `api_key'       - API key for authentication
-%%   `blocking'      - if true, wait for task completion
+%% 通过 JSON-RPC message/send 方法发送消息。
 %%
-%% Returns `{ok, TaskMap}' or `{error, Reason}'.
-%% @end
-%%--------------------------------------------------------------------
--spec send_task(binary() | string(), map(), map()) ->
-    {ok, map()} | {error, term()}.
-send_task(BaseUrl, Params, Opts) ->
-    send_task(BaseUrl, <<"tasks/send">>, Params, Opts).
+%% @param Endpoint A2A 端点 URL
+%% @param Message 消息内容
+%% @returns {ok, Task} | {error, Reason}
+-spec send_message(endpoint(), message()) -> {ok, map()} | {error, term()}.
+send_message(Endpoint, Message) ->
+    send_message(Endpoint, Message, undefined, #{}).
 
--spec send_task(binary() | string(), binary(), map(), map()) ->
-    {ok, map()} | {error, term()}.
-send_task(BaseUrl, Method, Params, Opts) ->
-    jsonrpc_request(BaseUrl, Method, Params, Opts).
+%% @doc 发送消息（带上下文 ID）
+-spec send_message(endpoint(), message(), context_id()) -> {ok, map()} | {error, term()}.
+send_message(Endpoint, Message, ContextId) ->
+    send_message(Endpoint, Message, ContextId, #{}).
 
-%%--------------------------------------------------------------------
-%% @doc Get the state of a task (tasks/get) from a remote agent.
+%% @doc 发送消息（带选项）
+-spec send_message(endpoint(), message(), context_id(), options()) -> {ok, map()} | {error, term()}.
+send_message(Endpoint, Message, ContextId, Opts) ->
+    %% 构建 JSON-RPC 请求
+    Params = build_message_params(Message, ContextId),
+    Request = beamai_a2a_jsonrpc:encode_request(generate_request_id(), <<"message/send">>, Params),
+
+    %% 发送请求
+    case do_rpc_request(Endpoint, Request, Opts) of
+        {ok, #{<<"result">> := Result}} ->
+            {ok, Result};
+        {ok, #{<<"error">> := Error}} ->
+            {error, {rpc_error, Error}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%====================================================================
+%% 任务管理 API
+%%====================================================================
+
+%% @doc 获取远程任务状态
 %%
-%% `BaseUrl' is the agent's base URL.
-%% `TaskId' is the task identifier.
-%% @end
-%%--------------------------------------------------------------------
--spec get_task(binary() | string(), binary()) ->
-    {ok, map()} | {error, term()}.
-get_task(BaseUrl, TaskId) ->
-    get_task(BaseUrl, TaskId, #{}).
+%% 通过 JSON-RPC tasks/get 方法查询任务状态。
+%%
+%% @param Endpoint A2A 端点 URL
+%% @param TaskId 任务 ID
+%% @returns {ok, Task} | {error, Reason}
+-spec get_task(endpoint(), task_id()) -> {ok, map()} | {error, term()}.
+get_task(Endpoint, TaskId) ->
+    get_task(Endpoint, TaskId, #{}).
 
--spec get_task(binary() | string(), binary(), map()) ->
+%% @doc 获取任务状态（带选项）
+-spec get_task(endpoint(), task_id(), options()) -> {ok, map()} | {error, term()}.
+get_task(Endpoint, TaskId, Opts) ->
+    Params = #{<<"taskId">> => TaskId},
+    Request = beamai_a2a_jsonrpc:encode_request(generate_request_id(), <<"tasks/get">>, Params),
+
+    case do_rpc_request(Endpoint, Request, Opts) of
+        {ok, #{<<"result">> := Result}} ->
+            {ok, Result};
+        {ok, #{<<"error">> := Error}} ->
+            {error, {rpc_error, Error}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @doc 取消远程任务
+%%
+%% 通过 JSON-RPC tasks/cancel 方法取消任务。
+%%
+%% @param Endpoint A2A 端点 URL
+%% @param TaskId 任务 ID
+%% @returns {ok, Task} | {error, Reason}
+-spec cancel_task(endpoint(), task_id()) -> {ok, map()} | {error, term()}.
+cancel_task(Endpoint, TaskId) ->
+    cancel_task(Endpoint, TaskId, #{}).
+
+%% @doc 取消任务（带选项）
+-spec cancel_task(endpoint(), task_id(), options()) -> {ok, map()} | {error, term()}.
+cancel_task(Endpoint, TaskId, Opts) ->
+    Params = #{<<"taskId">> => TaskId},
+    Request = beamai_a2a_jsonrpc:encode_request(generate_request_id(), <<"tasks/cancel">>, Params),
+
+    case do_rpc_request(Endpoint, Request, Opts) of
+        {ok, #{<<"result">> := Result}} ->
+            {ok, Result};
+        {ok, #{<<"error">> := Error}} ->
+            {error, {rpc_error, Error}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%====================================================================
+%% 流式请求 API
+%%====================================================================
+
+%% @doc 发送消息并流式接收响应
+%%
+%% 使用 SSE (Server-Sent Events) 流式接收响应。
+%% 每收到一个事件，会调用回调函数。
+%%
+%% @param Endpoint 流式端点 URL（通常是 /a2a/stream）
+%% @param Message 消息内容
+%% @param Callback 事件回调函数
+%% @returns {ok, FinalResult} | {error, Reason}
+-spec send_message_stream(endpoint(), message(), stream_callback()) ->
     {ok, map()} | {error, term()}.
-get_task(BaseUrl, TaskId, Opts) ->
-    Params = #{<<"id">> => TaskId},
-    ParamsWithHistory = case maps:get(history_length, Opts, undefined) of
-        undefined -> Params;
-        HL -> Params#{<<"historyLength">> => HL}
+send_message_stream(Endpoint, Message, Callback) ->
+    send_message_stream(Endpoint, Message, Callback, #{}).
+
+%% @doc 流式发送消息（带选项）
+-spec send_message_stream(endpoint(), message(), stream_callback(), options()) ->
+    {ok, map()} | {error, term()}.
+send_message_stream(Endpoint, Message, Callback, Opts) ->
+    %% 构建请求
+    Params = build_message_params(Message, undefined),
+    Request = beamai_a2a_jsonrpc:encode_request(generate_request_id(), <<"message/stream">>, Params),
+
+    %% 使用流式 HTTP 请求
+    Headers = build_request_headers(Opts),
+    HttpOpts = #{
+        timeout => maps:get(timeout, Opts, ?CLIENT_DEFAULT_TIMEOUT),
+        headers => Headers,
+        init_acc => #{events => [], last_task => undefined}
+    },
+
+    %% SSE 事件处理器
+    Handler = fun(Chunk, Acc) ->
+        handle_sse_chunk(Chunk, Acc, Callback)
     end,
-    jsonrpc_request(BaseUrl, <<"tasks/get">>, ParamsWithHistory, Opts).
 
-%%--------------------------------------------------------------------
-%% @doc Cancel a task (tasks/cancel) on a remote agent.
-%%
-%% `BaseUrl' is the agent's base URL.
-%% `TaskId' is the task identifier.
-%% @end
-%%--------------------------------------------------------------------
--spec cancel_task(binary() | string(), binary()) ->
-    {ok, map()} | {error, term()}.
-cancel_task(BaseUrl, TaskId) ->
-    cancel_task(BaseUrl, TaskId, #{}).
-
--spec cancel_task(binary() | string(), binary(), map()) ->
-    {ok, map()} | {error, term()}.
-cancel_task(BaseUrl, TaskId, Opts) ->
-    Params = #{<<"id">> => TaskId},
-    jsonrpc_request(BaseUrl, <<"tasks/cancel">>, Params, Opts).
-
-%%--------------------------------------------------------------------
-%% @doc Subscribe to task updates (tasks/sendSubscribe) and receive
-%% events via a callback function.
-%%
-%% `BaseUrl' is the agent's base URL.
-%% `Params' is the JSON-RPC params map (same as send_task).
-%% `Callback' is a function that receives SSE events:
-%%   fun(Event :: map()) -> ok | stop
-%%
-%% This function spawns a process that connects to the SSE endpoint
-%% and forwards events to the callback. Returns `{ok, Pid}' where
-%% Pid is the SSE listener process.
-%% @end
-%%--------------------------------------------------------------------
--spec subscribe(binary() | string(), map(),
-                fun((map()) -> ok | stop)) ->
-    {ok, pid()} | {error, term()}.
-subscribe(BaseUrl, Params, Callback) ->
-    subscribe(BaseUrl, Params, Callback, #{}).
-
--spec subscribe(binary() | string(), map(),
-                fun((map()) -> ok | stop), map()) ->
-    {ok, pid()} | {error, term()}.
-subscribe(BaseUrl, Params, Callback, Opts) ->
-    %% First send the task
-    case send_task(BaseUrl, <<"tasks/sendSubscribe">>, Params, Opts) of
-        {ok, Result} ->
-            TaskId = maps:get(<<"id">>, Result,
-                              maps:get(<<"taskId">>, Result, undefined)),
-            case TaskId of
-                undefined ->
-                    {error, no_task_id_in_response};
-                _ ->
-                    %% Start SSE listener process
-                    Pid = spawn_link(fun() ->
-                        sse_listener(BaseUrl, TaskId, Callback, Opts)
-                    end),
-                    {ok, Pid}
-            end;
-        {error, _} = Error ->
-            Error
-    end.
-
-%%--------------------------------------------------------------------
-%% @doc Set push notification config for a task.
-%% @end
-%%--------------------------------------------------------------------
--spec set_push_notification(binary() | string(), map(), map()) ->
-    {ok, map()} | {error, term()}.
-set_push_notification(BaseUrl, Params, Opts) ->
-    jsonrpc_request(BaseUrl, <<"tasks/pushNotification/set">>, Params, Opts).
-
-%%--------------------------------------------------------------------
-%% @doc Get push notification config for a task.
-%% @end
-%%--------------------------------------------------------------------
--spec get_push_notification(binary() | string(), map()) ->
-    {ok, map()} | {error, term()}.
-get_push_notification(BaseUrl, Params) ->
-    jsonrpc_request(BaseUrl, <<"tasks/pushNotification/get">>, Params, #{}).
-
-%%====================================================================
-%% Low-level JSON-RPC request
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% @doc Send a JSON-RPC request to a remote agent.
-%%
-%% Constructs a JSON-RPC 2.0 request, sends it via HTTP POST, and
-%% decodes the response.
-%% @end
-%%--------------------------------------------------------------------
--spec jsonrpc_request(binary() | string(), binary(), map(), map()) ->
-    {ok, term()} | {error, term()}.
-jsonrpc_request(BaseUrl, Method, Params, Opts) ->
-    RequestId = beamai_a2a_utils:generate_id(),
-    jsonrpc_request(BaseUrl, Method, Params, RequestId, Opts).
-
--spec jsonrpc_request(binary() | string(), binary(), map(),
-                      binary(), map()) ->
-    {ok, term()} | {error, term()}.
-jsonrpc_request(BaseUrl, Method, Params, RequestId, Opts) ->
-    Url = to_list(BaseUrl),
-    Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
-
-    RequestBody = iolist_to_binary(json:encode(#{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"method">>  => Method,
-        <<"params">>  => Params,
-        <<"id">>      => RequestId
-    })),
-
-    Headers = request_headers(Opts),
-    Request = {Url, Headers, "application/json", RequestBody},
-
-    case httpc:request(post, Request,
-                       [{timeout, Timeout}],
-                       [{body_format, binary}]) of
-        {ok, {{_, 200, _}, _RespHeaders, RespBody}} ->
-            decode_jsonrpc_response(RespBody);
-        {ok, {{_, StatusCode, _}, _RespHeaders, RespBody}} ->
-            %% Try to decode as JSON-RPC error
-            case decode_jsonrpc_response(RespBody) of
-                {error, _} = JsonRpcError ->
-                    JsonRpcError;
-                _ ->
-                    {error, {http_error, StatusCode, RespBody}}
-            end;
+    case beamai_http:stream_request(post, Endpoint, [{<<"Content-Type">>, <<"application/json">>}],
+                                   Request, HttpOpts, Handler) of
+        {ok, #{last_task := Task}} when Task =/= undefined ->
+            {ok, Task};
+        {ok, _} ->
+            {error, no_task_received};
         {error, Reason} ->
-            {error, {request_failed, Reason}}
+            {error, Reason}
     end.
 
 %%====================================================================
-%% Internal functions
+%% 便捷函数
 %%====================================================================
 
-%% @doc Decode a JSON-RPC response body.
--spec decode_jsonrpc_response(binary()) -> {ok, term()} | {error, term()}.
-decode_jsonrpc_response(Body) ->
-    try
-        Decoded = json:decode(Body),
-        case maps:get(<<"error">>, Decoded, undefined) of
-            undefined ->
-                {ok, maps:get(<<"result">>, Decoded, #{})};
-            ErrorObj ->
-                Code = maps:get(<<"code">>, ErrorObj, -32603),
-                Message = maps:get(<<"message">>, ErrorObj,
-                                   <<"Unknown error">>),
-                Data = maps:get(<<"data">>, ErrorObj, undefined),
-                {error, {jsonrpc_error, Code, Message, Data}}
-        end
-    catch
-        _:_ ->
-            {error, {invalid_response, Body}}
+%% @doc 创建文本消息
+%%
+%% 便捷函数，用于创建简单的文本消息。
+%%
+%% @param Text 文本内容
+%% @returns 消息 map
+-spec create_text_message(binary() | string()) -> message().
+create_text_message(Text) ->
+    create_text_message(Text, user).
+
+%% @doc 创建文本消息（指定角色）
+-spec create_text_message(binary() | string(), user | agent) -> message().
+create_text_message(Text, Role) ->
+    TextBin = beamai_utils:to_binary(Text),
+    #{
+        <<"role">> => atom_to_binary(Role, utf8),
+        <<"parts">> => [
+            #{<<"kind">> => <<"text">>, <<"text">> => TextBin}
+        ]
+    }.
+
+%%====================================================================
+%% 内部函数
+%%====================================================================
+
+%% @private 构建 Agent Card URL
+-spec build_agent_card_url(base_url()) -> binary().
+build_agent_card_url(BaseUrl) ->
+    Base = beamai_utils:to_binary(BaseUrl),
+    %% 移除尾部斜杠
+    CleanBase = case binary:last(Base) of
+        $/ -> binary:part(Base, 0, byte_size(Base) - 1);
+        _ -> Base
+    end,
+    <<CleanBase/binary, ?AGENT_CARD_PATH>>.
+
+%% @private 构建消息参数
+-spec build_message_params(message(), context_id()) -> map().
+build_message_params(Message, undefined) ->
+    #{<<"message">> => Message};
+build_message_params(Message, ContextId) ->
+    #{<<"message">> => Message, <<"contextId">> => ContextId}.
+
+%% @private 构建 HTTP 选项
+-spec build_http_opts(options()) -> map().
+build_http_opts(Opts) ->
+    HttpOpts = #{
+        timeout => maps:get(timeout, Opts, ?CLIENT_DEFAULT_TIMEOUT)
+    },
+    case maps:get(headers, Opts, undefined) of
+        undefined -> HttpOpts;
+        Headers -> HttpOpts#{headers => Headers}
     end.
 
-%% @doc Build request headers with authentication.
--spec request_headers(map()) -> [{string(), string()}].
-request_headers(Opts) ->
-    Base = base_headers(Opts),
-    WithContentType = [{"Content-Type", "application/json"} | Base],
-    WithContentType.
-
-%% @doc Build base headers with optional authentication.
--spec base_headers(map()) -> [{string(), string()}].
-base_headers(Opts) ->
-    Base = [{"Accept", "application/json"}],
-    WithAuth = case maps:get(auth_token, Opts, undefined) of
+%% @private 构建请求头
+-spec build_request_headers(options()) -> [{binary(), binary()}].
+build_request_headers(Opts) ->
+    BaseHeaders = [{<<"Accept">>, <<"text/event-stream">>}],
+    case maps:get(api_key, Opts, undefined) of
         undefined ->
-            case maps:get(api_key, Opts, undefined) of
-                undefined -> Base;
-                Key ->
-                    [{"Authorization",
-                      "ApiKey " ++ binary_to_list(Key)} | Base]
+            BaseHeaders;
+        ApiKey ->
+            ApiKeyBin = beamai_utils:to_binary(ApiKey),
+            [{<<"Authorization">>, <<"Bearer ", ApiKeyBin/binary>>} | BaseHeaders]
+    end.
+
+%% @private 执行 JSON-RPC 请求
+-spec do_rpc_request(endpoint(), binary(), options()) -> {ok, map()} | {error, term()}.
+do_rpc_request(Endpoint, RequestJson, Opts) ->
+    Headers = build_request_headers(Opts),
+    HttpOpts = #{
+        timeout => maps:get(timeout, Opts, ?CLIENT_DEFAULT_TIMEOUT),
+        headers => Headers
+    },
+
+    case beamai_http:post_json(Endpoint, jsx:decode(RequestJson, [return_maps]), HttpOpts) of
+        {ok, Response} when is_map(Response) ->
+            {ok, Response};
+        {ok, Response} when is_binary(Response) ->
+            case jsx:is_json(Response) of
+                true -> {ok, jsx:decode(Response, [return_maps])};
+                false -> {error, {invalid_response, Response}}
             end;
-        Token ->
-            [{"Authorization",
-              "Bearer " ++ binary_to_list(Token)} | Base]
-    end,
-    WithAuth.
-
-%% @doc SSE listener process that reads events from a streaming
-%% connection and forwards them to a callback function.
--spec sse_listener(binary() | string(), binary(),
-                   fun((map()) -> ok | stop), map()) -> ok.
-sse_listener(BaseUrl, TaskId, Callback, Opts) ->
-    Url = to_list(BaseUrl) ++ "/tasks/" ++
-          binary_to_list(TaskId) ++ ":subscribe",
-    Timeout = maps:get(timeout, Opts, 300000),  %% 5 min for SSE
-    Headers = base_headers(Opts),
-
-    %% Use httpc with streaming
-    case httpc:request(get, {Url, Headers},
-                       [{timeout, Timeout},
-                        {sync, false},
-                        {stream, self}],
-                       []) of
-        {ok, RequestId} ->
-            sse_receive_loop(RequestId, Callback, <<>>);
         {error, Reason} ->
-            logger:error("SSE connection failed: ~p", [Reason]),
-            ok
+            {error, {request_failed, Reason}}
     end.
 
-%% @doc Receive loop for SSE events from httpc streaming.
--spec sse_receive_loop(term(), fun((map()) -> ok | stop), binary()) -> ok.
-sse_receive_loop(RequestId, Callback, Buffer) ->
-    receive
-        {http, {RequestId, stream_start, _Headers}} ->
-            sse_receive_loop(RequestId, Callback, Buffer);
-        {http, {RequestId, stream, BinBodyPart}} ->
-            NewBuffer = <<Buffer/binary, BinBodyPart/binary>>,
-            {Events, Remaining} = parse_sse_events(NewBuffer),
-            Continue = lists:foldl(fun
-                (_Event, stop) -> stop;
-                (Event, ok) ->
-                    try Callback(Event) of
-                        stop -> stop;
-                        _ -> ok
-                    catch _:_ -> ok
-                    end
-            end, ok, Events),
-            case Continue of
-                stop ->
-                    httpc:cancel_request(RequestId),
-                    ok;
-                ok ->
-                    sse_receive_loop(RequestId, Callback, Remaining)
+%% @private 生成请求 ID
+-spec generate_request_id() -> binary().
+generate_request_id() ->
+    Timestamp = erlang:system_time(microsecond),
+    Random = rand:uniform(16#FFFF),
+    iolist_to_binary(io_lib:format("req-~.16b-~.4b", [Timestamp, Random])).
+
+%% @private 处理 SSE 数据块
+-spec handle_sse_chunk(binary(), map(), stream_callback()) ->
+    {continue, map()} | {done, map()}.
+handle_sse_chunk(Chunk, Acc, Callback) ->
+    %% 解析 SSE 事件
+    #{events := Events, last_task := LastTask} = Acc,
+    case parse_sse_events(Chunk) of
+        {ok, ParsedEvents} ->
+            %% 处理每个事件
+            {NewLastTask, Done} = process_sse_events(ParsedEvents, LastTask, Callback),
+            NewAcc = Acc#{
+                events => Events ++ ParsedEvents,
+                last_task => NewLastTask
+            },
+            case Done of
+                true -> {done, NewAcc};
+                false -> {continue, NewAcc}
             end;
-        {http, {RequestId, stream_end, _Headers}} ->
-            %% Connection closed by server
-            ok;
-        {http, {RequestId, {error, Reason}}} ->
-            logger:warning("SSE stream error: ~p", [Reason]),
-            ok
-    after 300000 ->
-        %% 5 minute timeout
-        httpc:cancel_request(RequestId),
-        ok
+        {error, _} ->
+            %% 忽略解析错误，继续接收
+            {continue, Acc}
     end.
 
-%% @doc Parse SSE events from a buffer.
-%%
-%% SSE events are separated by double newlines. Each event may have
-%% `event:' and `data:' fields.
--spec parse_sse_events(binary()) -> {[map()], binary()}.
-parse_sse_events(Buffer) ->
-    parse_sse_events(Buffer, []).
+%% @private 解析 SSE 事件
+-spec parse_sse_events(binary()) -> {ok, [map()]} | {error, term()}.
+parse_sse_events(Chunk) ->
+    %% SSE 格式: event: <type>\ndata: <json>\n\n
+    Lines = binary:split(Chunk, <<"\n">>, [global]),
+    parse_sse_lines(Lines, undefined, []).
 
-parse_sse_events(Buffer, Acc) ->
-    case binary:split(Buffer, <<"\n\n">>) of
-        [EventBlock, Rest] ->
-            Event = parse_sse_event_block(EventBlock),
-            case Event of
-                #{} when map_size(Event) > 0 ->
-                    parse_sse_events(Rest, [Event | Acc]);
-                _ ->
-                    parse_sse_events(Rest, Acc)
-            end;
-        [Incomplete] ->
-            {lists:reverse(Acc), Incomplete}
-    end.
-
-%% @doc Parse a single SSE event block into a map.
--spec parse_sse_event_block(binary()) -> map().
-parse_sse_event_block(Block) ->
-    Lines = binary:split(Block, <<"\n">>, [global]),
-    lists:foldl(fun parse_sse_line/2, #{}, Lines).
-
-%% @doc Parse a single SSE line.
--spec parse_sse_line(binary(), map()) -> map().
-parse_sse_line(<<"event: ", EventType/binary>>, Acc) ->
-    Acc#{<<"event">> => string:trim(EventType)};
-parse_sse_line(<<"data: ", Data/binary>>, Acc) ->
-    Trimmed = string:trim(Data),
-    try
-        Decoded = json:decode(Trimmed),
-        Acc#{<<"data">> => Decoded}
-    catch
-        _:_ -> Acc#{<<"data">> => Trimmed}
+%% @private 解析 SSE 行
+parse_sse_lines([], _CurrentEvent, Acc) ->
+    {ok, lists:reverse(Acc)};
+parse_sse_lines([<<>> | Rest], CurrentEvent, Acc) ->
+    %% 空行表示事件结束
+    parse_sse_lines(Rest, CurrentEvent, Acc);
+parse_sse_lines([<<"event: ", EventType/binary>> | Rest], _CurrentEvent, Acc) ->
+    parse_sse_lines(Rest, #{type => EventType}, Acc);
+parse_sse_lines([<<"data: ", Data/binary>> | Rest], CurrentEvent, Acc) ->
+    case CurrentEvent of
+        undefined ->
+            %% 没有事件类型，创建默认事件
+            Event = #{type => <<"message">>, data => parse_json_data(Data)},
+            parse_sse_lines(Rest, undefined, [Event | Acc]);
+        #{type := Type} ->
+            Event = #{type => Type, data => parse_json_data(Data)},
+            parse_sse_lines(Rest, undefined, [Event | Acc])
     end;
-parse_sse_line(<<"id: ", Id/binary>>, Acc) ->
-    Acc#{<<"id">> => string:trim(Id)};
-parse_sse_line(<<": ", _Comment/binary>>, Acc) ->
-    %% SSE comment (e.g., keepalive) - ignore
-    Acc;
-parse_sse_line(_, Acc) ->
-    Acc.
+parse_sse_lines([_ | Rest], CurrentEvent, Acc) ->
+    %% 忽略其他行
+    parse_sse_lines(Rest, CurrentEvent, Acc).
 
-%% @doc Convert a value to a list (string) for httpc.
--spec to_list(binary() | string()) -> string().
-to_list(V) when is_binary(V) -> binary_to_list(V);
-to_list(V) when is_list(V) -> V.
+%% @private 解析 JSON 数据
+-spec parse_json_data(binary()) -> term().
+parse_json_data(<<"[DONE]">>) ->
+    done;
+parse_json_data(Data) ->
+    case jsx:is_json(Data) of
+        true ->
+            try jsx:decode(Data, [return_maps])
+            catch _:_ -> Data
+            end;
+        false ->
+            Data
+    end.
+
+%% @private 处理 SSE 事件
+-spec process_sse_events([map()], map() | undefined, stream_callback()) ->
+    {map() | undefined, boolean()}.
+process_sse_events([], LastTask, _Callback) ->
+    {LastTask, false};
+process_sse_events([Event | Rest], LastTask, Callback) ->
+    #{type := Type, data := Data} = Event,
+
+    %% 调用回调
+    _ = Callback(Event),
+
+    %% 检查是否完成
+    case {Type, Data} of
+        {<<"done">>, _} ->
+            NewTask = case Data of
+                done -> LastTask;
+                TaskData when is_map(TaskData) -> TaskData;
+                _ -> LastTask
+            end,
+            {NewTask, true};
+        {_, done} ->
+            {LastTask, true};
+        {<<"task">>, TaskData} when is_map(TaskData) ->
+            process_sse_events(Rest, TaskData, Callback);
+        {<<"taskStatusUpdate">>, TaskData} when is_map(TaskData) ->
+            process_sse_events(Rest, TaskData, Callback);
+        _ ->
+            process_sse_events(Rest, LastTask, Callback)
+    end.
