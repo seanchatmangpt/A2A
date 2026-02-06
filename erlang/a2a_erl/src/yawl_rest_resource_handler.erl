@@ -14,7 +14,9 @@
 %%% - `PUT /resources/{id}` - Update resource
 %%% - `DELETE /resources/{id}` - Delete resource
 %%% - `GET /resources/{id}/capacity` - Get resource capacity
-%%% - `POST /resources/{id}/allocate` - Allocate resource
+%%% - `POST /resources/allocate` - Allocate a resource to a workitem
+%%% - `POST /resources/deallocate` - Deallocate a resource from a workitem
+%%% - `POST /resources/{id}/allocate` - Allocate specific resource to workitem
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -46,7 +48,8 @@
     method :: cowboy_http:method(),
     resource_id :: binary() | undefined,
     action :: binary() | undefined,
-    content_type :: {binary(), binary(), binary()} | undefined
+    content_type :: {binary(), binary(), binary()} | undefined,
+    auth_context :: yawl_auth_middleware:request_context() | undefined
 }).
 
 %%====================================================================
@@ -73,6 +76,12 @@ allowed_methods(Req, State) ->
         {undefined, undefined} ->
             %% /resources - GET, POST
             [<<"GET">>, <<"POST">>, <<"HEAD">>, <<"OPTIONS">>];
+        {undefined, <<"allocate">>} ->
+            %% /resources/allocate - POST (global allocation)
+            [<<"POST">>, <<"HEAD">>, <<"OPTIONS">>];
+        {undefined, <<"deallocate">>} ->
+            %% /resources/deallocate - POST (global deallocation)
+            [<<"POST">>, <<"HEAD">>, <<"OPTIONS">>];
         {undefined, _} ->
             %% Invalid path
             [<<"GET">>, <<"HEAD">>, <<"OPTIONS">>];
@@ -83,7 +92,7 @@ allowed_methods(Req, State) ->
             %% /resources/{id}/capacity - GET
             [<<"GET">>, <<"HEAD">>, <<"OPTIONS">>];
         {ResourceId, <<"allocate">>} ->
-            %% /resources/{id}/allocate - POST
+            %% /resources/{id}/allocate - POST (specific resource allocation)
             [<<"POST">>, <<"HEAD">>, <<"OPTIONS">>];
         _ ->
             %% Unknown action
@@ -106,9 +115,21 @@ content_types_accepted(Req, State) ->
 
 %% @private
 resource_exists(Req, State) ->
-    Exists = case State#state.resource_id of
-        undefined -> true;  %% Collection resource
-        ResourceId ->
+    Exists = case {State#state.resource_id, State#state.action} of
+        {undefined, undefined} ->
+            %% Collection resource - always exists
+            true;
+        {undefined, <<"allocate">>} ->
+            %% Global allocation endpoint - always exists
+            true;
+        {undefined, <<"deallocate">>} ->
+            %% Global deallocation endpoint - always exists
+            true;
+        {undefined, _} ->
+            %% Invalid path
+            false;
+        {ResourceId, _} ->
+            %% Check if specific resource exists
             case yawl_resource_manager:get_resource(ResourceId) of
                 {ok, _} -> true;
                 {error, _} -> false
@@ -178,35 +199,43 @@ to_json(Req, State) ->
 
 %% @private
 from_json(Req, State) ->
-    {ok, Body, Req2} = cowboy_req:read_body(Req),
-    Req3 = try
-        Data = jiffy:decode(Body, [return_maps]),
+    %% Validate request using the validation middleware
+    case validate_resource_request_body(Req, State) of
+        {error, ErrorResponse, Req2} ->
+            Req3 = send_error_response(Req2, ErrorResponse),
+            {true, Req3, State};
+        {ok, Data, Req2} ->
+            Response = case {State#state.method, State#state.resource_id, State#state.action} of
+                {<<"POST">>, undefined, undefined} ->
+                    %% Create resource
+                    handle_create_resource(Data);
+                {<<"POST">>, undefined, <<"allocate">>} ->
+                    %% Global allocation endpoint
+                    handle_global_allocate_resource(Data);
+                {<<"POST">>, undefined, <<"deallocate">>} ->
+                    %% Global deallocation endpoint
+                    handle_global_deallocate_resource(Data);
+                {<<"PUT">>, ResourceId, undefined} ->
+                    %% Update resource
+                    handle_update_resource(ResourceId, Data);
+                {<<"POST">>, ResourceId, <<"allocate">>} ->
+                    %% Specific resource allocation
+                    handle_specific_resource_allocate(ResourceId, Data);
+                _ ->
+                    #{error => <<"unknown_request">>}
+            end,
 
-        Response = case {State#state.method, State#state.resource_id} of
-            {<<"POST">>, undefined} ->
-                %% Create resource
-                handle_create_resource(Data);
-            {<<"PUT">>, ResourceId} ->
-                %% Update resource
-                handle_update_resource(ResourceId, Data);
-            _ ->
-                #{error => <<"unknown_request">>}
-        end,
-
-        ResponseBody = jiffy:encode(Response),
-        case Response of
-            #{error := _} ->
-                cowboy_req:reply(400, #{}, ResponseBody, Req2);
-            _ ->
-                cowboy_req:reply(201, #{}, ResponseBody, Req2)
-        end
-    catch
-        _:_ ->
-            ErrorResponse = #{error => <<"invalid_json">>},
-            ErrorBody = jiffy:encode(ErrorResponse),
-            cowboy_req:reply(400, #{}, ErrorBody, Req2)
-    end,
-    {true, Req3, State}.
+            ResponseBody = jiffy:encode(Response),
+            Req3 = case Response of
+                #{error := _} = ErrorResp ->
+                    send_error_response(Req2, ErrorResp);
+                _ ->
+                    cowboy_req:reply(201, #{
+                        <<"content-type">> => <<"application/json">>
+                    }, ResponseBody, Req2)
+            end,
+            {true, Req3, State}
+    end.
 
 %%====================================================================
 %% Handler Functions
@@ -367,9 +396,153 @@ handle_update_resource(ResourceId, Data) ->
             end
     end.
 
+%% @private
+%% Global allocation endpoint - allocates best matching resource for a workitem
+handle_global_allocate_resource(Data) ->
+    WorkitemId = maps_get(<<"workitem_id">>, Data, undefined),
+    Capabilities = maps_get(<<"capabilities">>, Data, []),
+    ResourceType = maps_get(<<"resource_type">>, Data, undefined),
+
+    case WorkitemId of
+        undefined ->
+            #{error => <<"missing_workitem_id">>, required => <<"workitem_id">>};
+        _ ->
+            %% Convert capabilities list from binary to atom if needed
+            CapabilitiesAtoms = convert_capabilities_to_atoms(Capabilities),
+
+            %% Allocate based on whether resource type is specified
+            Result = case ResourceType of
+                undefined ->
+                    %% Auto-select best resource
+                    yawl_resource_manager:allocate_resource(WorkitemId, CapabilitiesAtoms);
+                _ ->
+                    ResourceTypeAtom = binary_to_existing_atom(ResourceType, utf8),
+                    yawl_resource_manager:allocate_resource(WorkitemId, ResourceTypeAtom, CapabilitiesAtoms)
+            end,
+
+            case Result of
+                {ok, AllocatedResourceId, Resource} ->
+                    #{
+                        workitem_id => WorkitemId,
+                        allocated_resource_id => AllocatedResourceId,
+                        status => allocated,
+                        resource => resource_to_map(Resource),
+                        message => <<"Resource allocated successfully">>
+                    };
+                {error, no_available_resources} ->
+                    #{
+                        error => <<"no_available_resources">>,
+                        workitem_id => WorkitemId,
+                        required_capabilities => Capabilities
+                    };
+                {error, Reason} ->
+                    #{error => to_binary(Reason), workitem_id => WorkitemId}
+            end
+    end.
+
+%% @private
+%% Global deallocation endpoint - deallocates a resource from a workitem
+handle_global_deallocate_resource(Data) ->
+    WorkitemId = maps_get(<<"workitem_id">>, Data, undefined),
+    ResourceId = maps_get(<<"resource_id">>, Data, undefined),
+
+    case WorkitemId of
+        undefined ->
+            #{error => <<"missing_workitem_id">>, required => <<"workitem_id">>};
+        _ ->
+            Result = case ResourceId of
+                undefined ->
+                    %% Release by workitem ID only
+                    yawl_resource_manager:release_resource(WorkitemId);
+                _ ->
+                    %% Release specific resource for workitem
+                    yawl_resource_manager:release_resource(WorkitemId, ResourceId)
+            end,
+
+            case Result of
+                ok ->
+                    #{
+                        workitem_id => WorkitemId,
+                        resource_id => ResourceId,
+                        status => deallocated,
+                        message => <<"Resource deallocated successfully">>
+                    };
+                {error, allocation_not_found} ->
+                    #{
+                        error => <<"allocation_not_found">>,
+                        workitem_id => WorkitemId,
+                        resource_id => ResourceId
+                    };
+                {error, Reason} ->
+                    #{error => to_binary(Reason), workitem_id => WorkitemId}
+            end
+    end.
+
+%% @private
+%% Specific resource allocation endpoint - allocates a specific resource
+handle_specific_resource_allocate(ResourceId, Data) ->
+    WorkitemId = maps_get(<<"workitem_id">>, Data, undefined),
+
+    case WorkitemId of
+        undefined ->
+            #{error => <<"missing_workitem_id">>, required => <<"workitem_id">>};
+        _ ->
+            %% Get the resource to verify it exists and get its type/capabilities
+            case yawl_resource_manager:get_resource(ResourceId) of
+                {ok, ResourceMap} ->
+                    ResourceType = maps:get(resource_type, ResourceMap),
+                    Capabilities = maps_get(<<"capabilities">>, Data, []),
+
+                    %% Allocate the specific resource
+                    ResourceTypeAtom = binary_to_existing_atom(erlang:atom_to_binary(ResourceType, utf8), utf8),
+                    CapabilitiesAtoms = convert_capabilities_to_atoms(Capabilities),
+
+                    case yawl_resource_manager:allocate_resource(WorkitemId, ResourceTypeAtom, CapabilitiesAtoms) of
+                        {ok, AllocatedId, Resource} when AllocatedId =:= ResourceId ->
+                            #{
+                                workitem_id => WorkitemId,
+                                allocated_resource_id => ResourceId,
+                                status => allocated,
+                                resource => resource_to_map(Resource),
+                                message => <<"Specific resource allocated successfully">>
+                            };
+                        {ok, AllocatedId, Resource} ->
+                            %% A different resource was allocated (fallback)
+                            #{
+                                workitem_id => WorkitemId,
+                                requested_resource_id => ResourceId,
+                                allocated_resource_id => AllocatedId,
+                                status => allocated,
+                                resource => resource_to_map(Resource),
+                                message => <<"Alternative resource allocated">>
+                            };
+                        {error, Reason} ->
+                            #{error => to_binary(Reason), workitem_id => WorkitemId}
+                    end;
+                {error, not_found} ->
+                    #{error => <<"resource_not_found">>, resource_id => ResourceId}
+            end
+    end.
+
 %%====================================================================
 %% Helper Functions
 %%====================================================================
+
+%% @private
+%% Convert capabilities list from binary to atom if needed
+convert_capabilities_to_atoms(Capabilities) when is_list(Capabilities) ->
+    lists:map(fun(Cap) ->
+        case Cap of
+            Bin when is_binary(Bin) ->
+                try binary_to_existing_atom(Bin, utf8)
+                catch error:badarg -> Bin
+                end;
+            Atom when is_atom(Atom) -> Atom;
+            _ -> Cap
+        end
+    end, Capabilities);
+convert_capabilities_to_atoms(Capabilities) ->
+    Capabilities.
 
 %% @private
 update_resource_field(ResourceId, <<"status">>, Status) ->
@@ -416,7 +589,11 @@ resource_to_map(#yawl_resource_persist{} = R) ->
             0 -> 0.0;
             Max -> R#yawl_resource_persist.current_load / Max
         end
-    }.
+    };
+%% @private
+resource_to_map(Map) when is_map(Map) ->
+    %% Return as-is if already a map
+    Map.
 
 %% @private
 parse_query_string(<<>>) ->
@@ -457,3 +634,54 @@ to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
 to_binary(Term) -> io_lib:format("~p", [Term]).
+
+%% @private
+%% @doc Validate resource request body using the validation schema module.
+validate_resource_request_body(Req, State) ->
+    case {State#state.method, State#state.resource_id, State#state.action} of
+        {<<"POST">>, undefined, undefined} ->
+            case yawl_request_validator:validate_request(Req, resource_create) of
+                {ok, Data, Req2} -> {ok, Data, Req2};
+                {error, _, _} = Error -> Error
+            end;
+        {<<"PUT">>, _ResourceId, undefined} ->
+            case yawl_request_validator:validate_request(Req, resource_update) of
+                {ok, Data, Req2} -> {ok, Data, Req2};
+                {error, _, _} = Error -> Error
+            end;
+        _ ->
+            %% For allocation/deallocation, we do minimal validation
+            case yawl_request_validator:validate_json_body(Req, #{}) of
+                {ok, Data, Req2} -> {ok, Data, Req2};
+                {error, _, _} = Error -> Error
+            end
+    end.
+
+%% @private
+%% @doc Send error response with proper status code.
+send_error_response(Req, ErrorMap) ->
+    ErrorCode = case maps_get(error_code, ErrorMap, undefined) of
+        undefined ->
+            case maps_get(error, ErrorMap, undefined) of
+                <<"resource_not_found">> -> resource_not_found;
+                <<"not_implemented">> -> internal_server_error;
+                ErrorAtom when is_atom(ErrorAtom) -> ErrorAtom;
+                _ -> validation_failed
+            end;
+        Code when is_atom(Code) ->
+            Code;
+        CodeBin when is_binary(CodeBin) ->
+            try binary_to_existing_atom(CodeBin, utf8)
+            catch error:badarg -> validation_failed
+            end
+    end,
+    ErrorResponse = yawl_error_response:format_error(
+        ErrorCode,
+        maps_get(details, ErrorMap, #{}),
+        maps_get(message, ErrorMap, undefined)
+    ),
+    StatusCode = maps_get(http_status, ErrorResponse, 400),
+    Body = jiffy:encode(ErrorResponse),
+    cowboy_req:reply(StatusCode, #{
+        <<"content-type">> => <<"application/json">>
+    }, Body, Req).

@@ -1,0 +1,187 @@
+{# yawl-tdd-suite.tera: Generate Chicago TDD Erlang test suites for YAWL patterns #}
+{# Pattern: Arrange (real objects) -> Act -> Assert (observable behavior) #}
+
+%%%-------------------------------------------------------------------
+%%% @doc Chicago TDD Test Suite for {{ spec.name | title }}
+%%% Generated from {{ spec.uri }}
+%%% Hash: {{ spec.hash }}
+%%%
+%%% Pattern: Arrange (real objects) -> Act (observable behavior) -> Assert
+%%% No mocks. Real collaborators. Tests verify actual behavior.
+%%%
+%%% Regenerate with: ggen sync
+%%% @end
+%%%-------------------------------------------------------------------
+
+-module({{ spec.module_name }}_tests).
+-author("ggen-generated").
+-include_lib("eunit/include/eunit.hrl").
+-include("yawl_types.hrl").
+
+%%====================================================================
+%% Test Fixtures
+%%====================================================================
+
+%% Setup function - creates real objects (no mocks)
+setup() ->
+    {ok, Pid} = yawl_orchestrator:start_link(),
+    Pid.
+
+%% Teardown function - cleans up
+cleanup(_Pid) ->
+    yawl_orchestrator:stop(),
+    ok.
+
+%%====================================================================
+%% Pattern Tests
+%%====================================================================
+
+{% for pattern in spec.patterns %}
+
+%%% ===================================================================
+%%% Pattern: {{ pattern.name | title }}
+%%% ===================================================================
+
+{% for test in pattern.tests %}
+
+%%--------------------------------------------------------------------
+%% @doc Test Case: {{ test.title }}
+%% Arrange: {{ test.arrange }}
+%% Act: {{ test.act }}
+%% Assert: {{ test.assert }}
+%%--------------------------------------------------------------------
+{{ test.name }}_test_() ->
+    {foreach,
+     fun setup/0,
+     fun cleanup/1,
+     [
+         fun(_) -> test_{{ test.name }}_arrange() end,
+         fun(_) -> test_{{ test.name }}_act() end,
+         fun(_) -> test_{{ test.name }}_assert() end
+     ]
+    }.
+
+test_{{ test.name }}_arrange() ->
+    % ARRANGE: Create real objects (no mocks)
+    PatternType = {{ pattern.atom }},
+    Config = {{ test.config }},
+    % Verify ARRANGE state (no side effects yet)
+    ?assertNotEqual(undefined, whereis(yawl_orchestrator)).
+
+test_{{ test.name }}_act() ->
+    % ACT: Observable behavior (single logical step)
+    PatternType = {{ pattern.atom }},
+    Config = {{ test.config }},
+    Result = yawl_patterns:create_workflow(PatternType, Config),
+    % Verify action executed
+    ?assertMatch({ok, _}, Result).
+
+test_{{ test.name }}_assert() ->
+    % ASSERT: Verify observable state (not mocks, not side effects)
+    PatternType = {{ pattern.atom }},
+    {ok, Info} = yawl_patterns:get_pattern_info(PatternType),
+    ?assertEqual({{ test.expected_name }}, maps:get(name, Info)),
+    % Verify pattern complexity
+    ?assertEqual({{ test.complexity }}, maps:get(complexity, Info)).
+
+{% endfor %}
+{% endfor %}
+
+%%====================================================================
+%% Property-Based Tests
+%%====================================================================
+
+{% for property in spec.properties %}
+
+%%--------------------------------------------------------------------
+%% @doc Property: {{ property.name | title }}
+%% For all valid inputs, invariant should hold
+%%--------------------------------------------------------------------
+prop_{{ property.name | snake_case }}() ->
+    ?FORALL(Input, {{ property.input_type }},
+        begin
+            PatternType = {{ property.pattern }},
+            Result = yawl_patterns:validate_pattern(PatternType, Input),
+            {{ property.invariant }}
+        end
+    ).
+
+{% endfor %}
+
+%%====================================================================
+%% Integration Tests
+%%====================================================================
+
+pattern_execution_integration_test_() ->
+    {foreach,
+     fun setup/0,
+     fun cleanup/1,
+     [
+         fun(_) -> test_sequential_execution() end,
+         fun(_) -> test_parallel_execution() end,
+         fun(_) -> test_cancellation() end
+     ]
+    }.
+
+test_sequential_execution() ->
+    % ARRANGE: Create sequential workflow
+    Config = #{task1_name => "first", task2_name => "second"},
+    {ok, Workflow} = yawl_patterns:create_workflow(basic_sequential, Config),
+
+    % ACT: Execute workflow
+    Result = execute_workflow(Workflow),
+
+    % ASSERT: Verify sequential execution
+    ?assertMatch({ok, _}, Result),
+    {ok, State} = Result,
+    ?assertEqual(2, maps:get(tasks_completed, State)).
+
+test_parallel_execution() ->
+    % ARRANGE: Create parallel workflow
+    Config = #{branches => 3},
+    {ok, Workflow} = yawl_patterns:create_workflow(parallel_split, Config),
+
+    % ACT: Execute parallel branches
+    Result = execute_workflow(Workflow),
+
+    % ASSERT: Verify all branches executed
+    ?assertMatch({ok, _}, Result),
+    {ok, State} = Result,
+    ?assertEqual(3, maps:get(branches_completed, State)).
+
+test_cancellation() ->
+    % ARRANGE: Create cancellable workflow
+    Config = #{scope => all},
+    {ok, Workflow} = yawl_patterns:create_workflow(cancelation, Config),
+
+    % ACT: Cancel workflow
+    Result = cancel_workflow(Workflow),
+
+    % ASSERT: Verify cancellation
+    ?assertMatch({ok, cancelled}, Result).
+
+%%====================================================================
+%% Helper Functions
+%%====================================================================
+
+execute_workflow(Workflow) ->
+    % Real workflow execution (no mocks)
+    case yawl_orchestrator:start_workflow(Workflow) of
+        {ok, Pid} ->
+            monitor_workflow(Pid, 5000);
+        Error ->
+            Error
+    end.
+
+monitor_workflow(Pid, Timeout) ->
+    receive
+        {'DOWN', _, process, Pid, normal} ->
+            {ok, #{status => completed}};
+        {'DOWN', _, process, Pid, Reason} ->
+            {ok, #{status => terminated, reason => Reason}}
+    after Timeout ->
+        {error, timeout}
+    end.
+
+cancel_workflow(Workflow) ->
+    yawl_orchestrator:cancel_workflow(Workflow).

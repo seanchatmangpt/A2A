@@ -35,7 +35,9 @@
     method :: cowboy_http:method(),
     workflow_id :: binary() | undefined,
     action :: binary() | undefined,
-    content_type :: {binary(), binary(), binary()} | undefined
+    content_type :: {binary(), binary(), binary()} | undefined,
+    auth_context :: yawl_auth_middleware:request_context() | undefined,
+    validation_errors :: [binary()] | undefined
 }).
 
 %%====================================================================
@@ -140,6 +142,8 @@ to_json(Req, State) ->
             handle_cancel_workflow(WorkflowId);
         {<<"POST">>, WorkflowId, <<"suspend">>} ->
             handle_suspend_workflow(WorkflowId);
+        {<<"POST">>, WorkflowId, <<"pause">>} ->
+            handle_suspend_workflow(WorkflowId);
         {<<"POST">>, WorkflowId, <<"resume">>} ->
             handle_resume_workflow(WorkflowId);
         {<<"POST">>, WorkflowId, <<"checkpoint">>} ->
@@ -153,33 +157,32 @@ to_json(Req, State) ->
 
 %% @private
 from_json(Req, State) ->
-    {ok, Body, Req2} = cowboy_req:read_body(Req),
-    Req3 = try
-        Data = jiffy:decode(Body, [return_maps]),
+    %% Validate request using the validation middleware
+    case validate_request_body(Req, State) of
+        {error, ErrorResponse, Req2} ->
+            Req3 = send_error_response(Req2, ErrorResponse),
+            {true, Req3, State};
+        {ok, Data, Req2} ->
+            Response = case {State#state.method, State#state.workflow_id} of
+                {<<"POST">>, undefined} ->
+                    handle_create_workflow(Data);
+                {<<"PATCH">>, WorkflowId} ->
+                    handle_update_workflow(WorkflowId, Data);
+                _ ->
+                    #{error => <<"unknown_request">>}
+            end,
 
-        Response = case {State#state.method, State#state.workflow_id} of
-            {<<"POST">>, undefined} ->
-                handle_create_workflow(Data);
-            {<<"PATCH">>, WorkflowId} ->
-                handle_update_workflow(WorkflowId, Data);
-            _ ->
-                #{error => <<"unknown_request">>}
-        end,
-
-        ResponseBody = jiffy:encode(Response),
-        case Response of
-            #{error := _} ->
-                cowboy_req:reply(400, #{}, ResponseBody, Req2);
-            _ ->
-                cowboy_req:reply(201, #{}, ResponseBody, Req2)
-        end
-    catch
-        _:_ ->
-            ErrorResponse = #{error => <<"invalid_json">>},
-            ErrorBody = jiffy:encode(ErrorResponse),
-            cowboy_req:reply(400, #{}, ErrorBody, Req2)
-    end,
-    {true, Req3, State}.
+            ResponseBody = jiffy:encode(Response),
+            Req3 = case Response of
+                #{error := _} = ErrorResp ->
+                    send_error_response(Req2, ErrorResp);
+                _ ->
+                    cowboy_req:reply(201, #{
+                        <<"content-type">> => <<"application/json">>
+                    }, ResponseBody, Req2)
+            end,
+            {true, Req3, State}
+    end.
 
 %%====================================================================
 %% Handler Functions
@@ -264,16 +267,23 @@ handle_get_history(WorkflowId) ->
 
 %% @private
 handle_create_workflow(Data) ->
-    PatternType = try
-        binary_to_existing_atom(maps_get(<<"pattern_type">>, Data, <<"basic_sequential">>), utf8)
-    catch
-        error:badarg ->
-            %% Fallback to default pattern type if atom doesn't exist
-            basic_sequential
-    end,
+    %% Data has been validated and pattern_type is already an atom
+    PatternType = maps_get(<<"pattern_type">>, Data, basic_sequential),
     Config = maps_get(<<"config">>, Data, #{}),
+    Timeout = maps_get(<<"timeout">>, Data, undefined),
+    RetryPolicy = maps_get(<<"retry_policy">>, Data, undefined),
 
-    case yawl_orchestrator:create_workflow(PatternType, Config) of
+    %% Build final config with optional parameters
+    FinalConfig = case Timeout of
+        undefined -> Config;
+        _ -> Config#{timeout => Timeout}
+    end,
+    FinalConfig2 = case RetryPolicy of
+        undefined -> FinalConfig;
+        _ -> FinalConfig#{retry_policy => RetryPolicy}
+    end,
+
+    case yawl_orchestrator:create_workflow(PatternType, FinalConfig2) of
         {ok, WorkflowId} ->
             #{
                 workflow_id => WorkflowId,
@@ -288,10 +298,84 @@ handle_create_workflow(Data) ->
 handle_update_workflow(WorkflowId, Data) ->
     case maps:get(<<"data">>, Data, undefined) of
         undefined ->
-            #{error => <<"no_data">>};
-        WorkflowData ->
-            %% Update workflow data - this would require a workflow instance Pid
-            #{error => <<"not_implemented">>}
+            #{error => <<"no_data">>, message => <<"Missing 'data' field in request">>};
+        WorkflowData when is_map(WorkflowData) ->
+            %% Get workflow instance from orchestrator
+            case yawl_orchestrator:get_workflow_instance(WorkflowId) of
+                {ok, InstancePid} ->
+                    %% Update workflow data by setting each key-value pair
+                    UpdateResults = maps:fold(fun(Key, Value, Acc) ->
+                        case yawl_workflow_instance:update_data(InstancePid, Key, Value) of
+                            ok -> [ok | Acc];
+                            {error, Reason} -> [{error, Reason} | Acc]
+                        end
+                    end, [], WorkflowData),
+
+                    case lists:all(fun(R) -> R =:= ok end, UpdateResults) of
+                        true ->
+                            %% Also update persistence layer
+                            case yawl_persistence:load_workflow(WorkflowId) of
+                                {ok, Workflow} ->
+                                    %% Merge new data with existing workflow data
+                                    ExistingData = Workflow#yawl_workflow_persist.data,
+                                    MergedData = maps:merge(ExistingData, WorkflowData),
+                                    UpdatedWorkflow = Workflow#yawl_workflow_persist{
+                                        data = MergedData,
+                                        updated_at = erlang:monotonic_time(millisecond)
+                                    },
+                                    case yawl_persistence:save_workflow(UpdatedWorkflow) of
+                                        ok ->
+                                            #{
+                                                workflow_id => WorkflowId,
+                                                status => updated,
+                                                message => <<"Workflow data updated successfully">>,
+                                                updated_keys => maps:keys(WorkflowData)
+                                            };
+                                        {error, Reason} ->
+                                            #{
+                                                error => to_binary(Reason),
+                                                workflow_id => WorkflowId,
+                                                message => <<"Workflow instance updated but persistence failed">>
+                                            }
+                                    end;
+                                {error, _} ->
+                                    #{
+                                        workflow_id => WorkflowId,
+                                        status => updated,
+                                        message => <<"Workflow data updated (persistence sync pending)">>
+                                    }
+                            end;
+                        false ->
+                            Errors = [R || R <- UpdateResults, R =/= ok],
+                            #{error => <<"update_failed">>, reasons => Errors}
+                    end;
+                {error, workflow_instance_not_found} ->
+                    %% Workflow not running, try updating persistence directly
+                    case yawl_persistence:load_workflow(WorkflowId) of
+                        {ok, Workflow} ->
+                            ExistingData = Workflow#yawl_workflow_persist.data,
+                            MergedData = maps:merge(ExistingData, WorkflowData),
+                            UpdatedWorkflow = Workflow#yawl_workflow_persist{
+                                data = MergedData,
+                                updated_at = erlang:monotonic_time(millisecond)
+                            },
+                            case yawl_persistence:save_workflow(UpdatedWorkflow) of
+                                ok ->
+                                    #{
+                                        workflow_id => WorkflowId,
+                                        status => updated,
+                                        message => <<"Workflow data updated in storage">>,
+                                        updated_keys => maps:keys(WorkflowData)
+                                    };
+                                {error, Reason} ->
+                                    #{error => to_binary(Reason), workflow_id => WorkflowId}
+                            end;
+                        {error, Reason} ->
+                            #{error => to_binary(Reason), workflow_id => WorkflowId}
+                    end;
+                {error, Reason} ->
+                    #{error => to_binary(Reason), workflow_id => WorkflowId}
+            end
     end.
 
 %% @private
@@ -319,18 +403,77 @@ handle_cancel_workflow(WorkflowId) ->
 
 %% @private
 handle_suspend_workflow(WorkflowId) ->
-    %% Would need workflow instance Pid
-    #{error => <<"not_implemented">>, workflow_id => WorkflowId}.
+    case yawl_orchestrator:pause_workflow(WorkflowId) of
+        ok ->
+            #{workflow_id => WorkflowId, status => paused, message => <<"Workflow paused">>};
+        {error, Reason} ->
+            #{error => to_binary(Reason), workflow_id => WorkflowId}
+    end.
 
 %% @private
 handle_resume_workflow(WorkflowId) ->
-    %% Would need workflow instance Pid
-    #{error => <<"not_implemented">>, workflow_id => WorkflowId}.
+    case yawl_orchestrator:resume_workflow(WorkflowId) of
+        ok ->
+            #{workflow_id => WorkflowId, status => resumed, message => <<"Workflow resumed">>};
+        {error, Reason} ->
+            #{error => to_binary(Reason), workflow_id => WorkflowId}
+    end.
 
 %% @private
 handle_checkpoint(WorkflowId) ->
-    %% Would need workflow instance Pid
-    #{error => <<"not_implemented">>, workflow_id => WorkflowId}.
+    %% Try to create a checkpoint via workflow instance if running
+    case yawl_orchestrator:get_workflow_instance(WorkflowId) of
+        {ok, InstancePid} ->
+            case yawl_workflow_instance:checkpoint(InstancePid) of
+                {ok, CheckpointId} ->
+                    Timestamp = erlang:monotonic_time(millisecond),
+                    #{
+                        workflow_id => WorkflowId,
+                        checkpoint_id => CheckpointId,
+                        timestamp => Timestamp,
+                        message => <<"Checkpoint created successfully">>
+                    };
+                {error, Reason} ->
+                    #{error => to_binary(Reason), workflow_id => WorkflowId}
+            end;
+        {error, workflow_instance_not_found} ->
+            %% Workflow instance not running, try creating checkpoint from persistence
+            case yawl_persistence:load_workflow(WorkflowId) of
+                {ok, Workflow} ->
+                    %% Create a checkpoint from the persisted workflow state
+                    CheckpointId = <<WorkflowId/binary, "_cp_",
+                                   (integer_to_binary(erlang:monotonic_time(millisecond)))/binary>>,
+                    Checkpoint = #yawl_checkpoint{
+                        checkpoint_id = CheckpointId,
+                        workflow_id = WorkflowId,
+                        checkpoint_state = #{
+                            workflow_id => WorkflowId,
+                            status => Workflow#yawl_workflow_persist.status,
+                            current_place => Workflow#yawl_workflow_persist.current_place,
+                            pattern_type => Workflow#yawl_workflow_persist.pattern_type
+                        },
+                        marking = Workflow#yawl_workflow_persist.marking,
+                        data = Workflow#yawl_workflow_persist.data,
+                        timestamp = erlang:monotonic_time(millisecond),
+                        sequence_num = 1
+                    },
+                    case yawl_persistence:save_checkpoint(WorkflowId, Checkpoint) of
+                        ok ->
+                            #{
+                                workflow_id => WorkflowId,
+                                checkpoint_id => CheckpointId,
+                                timestamp => Checkpoint#yawl_checkpoint.timestamp,
+                                message => <<"Checkpoint created from persisted state">>
+                            };
+                        {error, Reason} ->
+                            #{error => to_binary(Reason), workflow_id => WorkflowId}
+                    end;
+                {error, Reason} ->
+                    #{error => to_binary(Reason), workflow_id => WorkflowId}
+            end;
+        {error, Reason} ->
+            #{error => to_binary(Reason), workflow_id => WorkflowId}
+    end.
 
 %%====================================================================
 %% Helper Functions
@@ -404,3 +547,63 @@ to_binary(Term) when is_binary(Term) -> Term;
 to_binary(Term) when is_atom(Term) -> atom_to_binary(Term, utf8);
 to_binary(Term) when is_list(Term) -> list_to_binary(Term);
 to_binary(Term) -> io_lib:format("~p", [Term]).
+
+%% @private
+%% @doc Validate request body using the validation schema module.
+validate_request_body(Req, State) ->
+    case State#state.method of
+        <<"POST">> ->
+            case yawl_request_validator:validate_request(Req, workflow_create) of
+                {ok, Data, Req2} ->
+                    {ok, Data, Req2};
+                {error, _ErrorResponse, Req2} = Error ->
+                    Error
+            end;
+        <<"PATCH">> ->
+            case yawl_request_validator:validate_request(Req, workflow_update) of
+                {ok, Data, Req2} ->
+                    {ok, Data, Req2};
+                {error, _ErrorResponse, Req2} = Error ->
+                    Error
+            end;
+        _ ->
+            {ok, #{}, Req}
+    end.
+
+%% @private
+%% @doc Send error response with proper status code.
+send_error_response(Req, ErrorMap) ->
+    ErrorCode = case maps_get(error_code, ErrorMap, undefined) of
+        undefined ->
+            case maps_get(error, ErrorMap, undefined) of
+                <<"workflow_not_found">> -> workflow_not_found;
+                <<"not_implemented">> -> internal_server_error;
+                ErrorAtom when is_atom(ErrorAtom) -> ErrorAtom;
+                _ -> validation_failed
+            end;
+        Code when is_atom(Code) ->
+            Code;
+        CodeBin when is_binary(CodeBin) ->
+            try binary_to_existing_atom(CodeBin, utf8)
+            catch error:badarg -> validation_failed
+            end
+    end,
+    ErrorResponse = yawl_error_response:format_error(
+        ErrorCode,
+        maps:get(details, ErrorMap, #{}),
+        maps:get(message, ErrorMap, undefined)
+    ),
+    StatusCode = maps:get(http_status, ErrorResponse, 400),
+    Body = jiffy:encode(ErrorResponse),
+    cowboy_req:reply(StatusCode, #{
+        <<"content-type">> => <<"application/json">>
+    }, Body, Req).
+
+%% @private
+%% @doc Generate a unique request ID.
+generate_request_id() ->
+    UniqueId = erlang:unique_integer([positive, monotonic]),
+    Time = erlang:monotonic_time(millisecond),
+    NodeId = erlang:phash2(node()),
+    IdBin = <<UniqueId:32, Time:32, NodeId:32>>,
+    binary:encode_hex(IdBin).

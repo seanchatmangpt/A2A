@@ -21,7 +21,8 @@
            get_status/1, list_patterns/0, list_workflows/0,
            cancel_workflow/1, cleanup_workflow/1, get_pattern_info/1,
            get_workflow_result/1, subscribe_to_workflow/2,
-           unsubscribe_from_workflow/2]).
+           unsubscribe_from_workflow/2, pause_workflow/1, resume_workflow/1,
+           get_workflow_instance/1, complete_workitem/3]).
 
 -include("yawl_types.hrl").
 -include("yawl_schema.hrl").
@@ -75,6 +76,18 @@ subscribe_to_workflow(WorkflowId, SubscriberPid) ->
 
 unsubscribe_from_workflow(WorkflowId, SubscriberPid) ->
     gen_server:call(?MODULE, {unsubscribe, WorkflowId, SubscriberPid}).
+
+pause_workflow(WorkflowId) ->
+    gen_server:call(?MODULE, {pause_workflow, WorkflowId}, infinity).
+
+resume_workflow(WorkflowId) ->
+    gen_server:call(?MODULE, {resume_workflow, WorkflowId}, infinity).
+
+get_workflow_instance(WorkflowId) ->
+    gen_server:call(?MODULE, {get_workflow_instance, WorkflowId}).
+
+complete_workitem(WorkflowId, TaskId, Result) ->
+    gen_server:call(?MODULE, {complete_workitem, WorkflowId, TaskId, Result}, infinity).
 
 %% gen_server callbacks
 init([]) ->
@@ -136,6 +149,22 @@ handle_call({unsubscribe, WorkflowId, SubscriberPid}, _From, State) ->
     {Reply, NewState} = do_unsubscribe(WorkflowId, SubscriberPid, State),
     {reply, Reply, NewState};
 
+handle_call({pause_workflow, WorkflowId}, _From, State) ->
+    {Reply, NewState} = do_pause_workflow(WorkflowId, State),
+    {reply, Reply, NewState};
+
+handle_call({resume_workflow, WorkflowId}, _From, State) ->
+    {Reply, NewState} = do_resume_workflow(WorkflowId, State),
+    {reply, Reply, NewState};
+
+handle_call({get_workflow_instance, WorkflowId}, _From, State) ->
+    Reply = do_get_workflow_instance(WorkflowId, State),
+    {reply, Reply, State};
+
+handle_call({complete_workitem, WorkflowId, TaskId, Result}, _From, State) ->
+    Reply = do_complete_workitem(WorkflowId, TaskId, Result, State),
+    {reply, Reply, State};
+
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -144,7 +173,7 @@ handle_cast(_Msg, State) ->
 
 handle_info({'DOWN', MonitorRef, process, _Pid, _Info}, State) ->
     %% Find the workflow with this monitor ref
-    WorkflowId = lists:foldl(fun({Wid, {_Pid, Ref}}, Acc) ->
+    WorkflowId = lists:foldl(fun({Wid, {_InstPid, Ref}}, Acc) ->
         case Ref of
             MonitorRef -> Wid;
             _ -> Acc
@@ -307,6 +336,82 @@ do_unsubscribe(WorkflowId, SubscriberPid, State) ->
                 _ -> maps:put(WorkflowId, NewSubscribersList, State#state.subscribers)
             end,
             {ok, State#state{subscribers = NewSubscribers}}
+    end.
+
+do_pause_workflow(WorkflowId, State) ->
+    case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
+        undefined ->
+            {error, workflow_instance_not_found};
+        {InstancePid, _Ref} ->
+            case yawl_workflow_instance:suspend_workflow(InstancePid) of
+                ok ->
+                    %% Update workflow status in persistence
+                    case yawl_persistence:load_workflow(WorkflowId) of
+                        {ok, Workflow} ->
+                            UpdatedWorkflow = Workflow#yawl_workflow_persist{
+                                status = waiting,
+                                updated_at = erlang:monotonic_time(millisecond)
+                            },
+                            yawl_persistence:save_workflow(UpdatedWorkflow);
+                        {error, _} ->
+                            ok
+                    end,
+                    {ok, State};
+                {error, Reason} ->
+                    {{error, Reason}, State}
+            end
+    end.
+
+do_resume_workflow(WorkflowId, State) ->
+    case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
+        undefined ->
+            {error, workflow_instance_not_found};
+        {InstancePid, _Ref} ->
+            case yawl_workflow_instance:resume_workflow(InstancePid) of
+                ok ->
+                    %% Update workflow status in persistence
+                    case yawl_persistence:load_workflow(WorkflowId) of
+                        {ok, Workflow} ->
+                            UpdatedWorkflow = Workflow#yawl_workflow_persist{
+                                status = running,
+                                updated_at = erlang:monotonic_time(millisecond)
+                            },
+                            yawl_persistence:save_workflow(UpdatedWorkflow);
+                        {error, _} ->
+                            ok
+                    end,
+                    {ok, State};
+                {error, Reason} ->
+                    {{error, Reason}, State}
+            end
+    end.
+
+do_get_workflow_instance(WorkflowId, State) ->
+    case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
+        undefined -> {error, workflow_instance_not_found};
+        {InstancePid, _Ref} -> {ok, InstancePid}
+    end.
+
+do_complete_workitem(WorkflowId, TaskId, Result, State) ->
+    case maps:get(WorkflowId, State#state.workflow_instances, undefined) of
+        undefined ->
+            {error, workflow_instance_not_found};
+        {InstancePid, _Ref} ->
+            case yawl_workflow_instance:complete_task(InstancePid, TaskId, Result) of
+                ok ->
+                    %% Update workitem status in persistence
+                    {ok, Workitems} = yawl_persistence:list_workitems(WorkflowId),
+                    CompletedWorkitem = lists:filter(fun(W) ->
+                        W#yawl_workitem_persist.task_id =:= TaskId
+                    end, Workitems),
+                    lists:foreach(fun(W) ->
+                        yawl_persistence:update_workitem_status(
+                            W#yawl_workitem_persist.workitem_id, completed)
+                    end, CompletedWorkitem),
+                    ok;
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 generate_workflow_id() ->

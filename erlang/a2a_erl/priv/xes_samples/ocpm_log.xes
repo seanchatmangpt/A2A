@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<log xes.version="1.0" xmlns="http://www.xes-standard.org/"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xmlns:ocel="http://www.ocel-standard.org/"
+     id="ocpm_object_centric_log">
+  <extension name="Concept" prefix="concept" uri="http://www.xes-standard.org/concept.xesext"/>
+  <extension name="Time" prefix="time" uri="http://www.xes-standard.org/time.xesext"/>
+  <!-- Object-Centric Event Log Extension (Paper 2508.00116) -->
+  <extension name="Object-Centric" prefix="ocel" uri="http://www.ocel-standard.org/"/>
+
+  <global scope="trace">
+    <string key="concept:name" value="OCEL Trace"/>
+  </global>
+  <global scope="event">
+    <string key="concept:name" value=""/>
+    <date key="time:timestamp" value="1970-01-01T00:00:00.000+00:00"/>
+  </global>
+
+  <!-- Object type definitions -->
+  <ocel:object-types>
+    <string key="type" value="order"/>
+    <string key="type" value="customer"/>
+    <string key="type" value="item"/>
+    <string key="type" value="payment"/>
+  </ocel:object-types>
+
+  <!-- Event 1: Order creation involving multiple objects -->
+  <event>
+    <string key="concept:name" value="order_created"/>
+    <date key="time:timestamp" value="2024-01-01T10:00:00.000Z"/>
+    <list key="ocel:object-types" value="order,customer,item"/>
+    <string key="ocel:object-id" value="order123"/>
+    <string key="ocel:lifecycle-transition" value="create"/>
+    <map key="ocel:objects">
+      <string key="order" value="order123"/>
+      <string key="customer" value="cust456"/>
+      <list key="item" value="item789,item790"/>
+    </map>
+  </event>
+
+  <!-- Event 2: Payment processing -->
+  <event>
+    <string key="concept:name" value="payment_processed"/>
+    <date key="time:timestamp" value="2024-01-01T10:01:00.000Z"/>
+    <list key="ocel:object-types" value="order,payment"/>
+    <string key="ocel:object-id" value="pay101"/>
+    <string key="ocel:lifecycle-transition" value="complete"/>
+    <map key="ocel:objects">
+      <string key="order" value="order123"/>
+      <string key="payment" value="pay101"/>
+      <float key="amount" value="99.99"/>
+    </map>
+  </event>
+
+  <!-- Event 3: Item reservation -->
+  <event>
+    <string key="concept:name" value="item_reserved"/>
+    <date key="time:timestamp" value="2024-01-01T10:01:30.000Z"/>
+    <list key="ocel:object-types" value="item"/>
+    <string key="ocel:object-id" value="item789"/>
+    <string key="ocel:lifecycle-transition" value="reserve"/>
+    <map key="ocel:objects">
+      <string key="item" value="item789"/>
+      <string key="order" value="order123"/>
+    </map>
+  </event>
+
+  <!-- Event 4: Shipment -->
+  <event>
+    <string key="concept:name" value="order_shipped"/>
+    <date key="time:timestamp" value="2024-01-01T10:05:00.000Z"/>
+    <list key="ocel:object-types" value="order,item"/>
+    <string key="ocel:object-id" value="order123"/>
+    <string key="ocel:lifecycle-transition" value="ship"/>
+    <map key="ocel:objects">
+      <string key="order" value="order123"/>
+      <list key="item" value="item789,item790"/>
+    </map>
+  </event>
+
+  <!-- Object attribute definitions -->
+  <ocel:object-attributes>
+    <object>
+      <string key="ocel:oid" value="order123"/>
+      <string key="ocel:type" value="order"/>
+      <map key="ocel:ovmap">
+        <string key="status" value="pending"/>
+        <float key="total" value="99.99"/>
+      </map>
+    </object>
+    <object>
+      <string key="ocel:oid" value="cust456"/>
+      <string key="ocel:type" value="customer"/>
+      <map key="ocel:ovmap">
+        <string key="name" value="John Doe"/>
+        <string key="email" value="john@example.com"/>
+      </map>
+    </object>
+    <object>
+      <string key="ocel:oid" value="item789"/>
+      <string key="ocel:type" value="item"/>
+      <map key="ocel:ovmap">
+        <string key="sku" value="SKU-789"/>
+        <float key="price" value="49.99"/>
+      </map>
+    </object>
+  </ocel:object-attributes>
+
+</log>

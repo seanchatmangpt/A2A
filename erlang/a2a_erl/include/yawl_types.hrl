@@ -204,3 +204,66 @@
 -define(DEFAULT_TIMEOUT, 30000).
 -define(MAX_RETRY_ATTEMPTS, 3).
 -define(DEFAULT_RETRY_DELAY, 1000).
+
+%%====================================================================
+%% van der Aalst 2025-2026 Research Integration Type Definitions
+%%====================================================================
+
+%% Colored Petri Net (CPN) Types - Paper 2506.12238
+-type cpn_color_set() :: boolean | integer | float | string | list | record | product.
+-type cpn_token() :: #{data := term(), color_set := cpn_color_set(), timestamp => integer(), attributes => map()}.
+-type cpn_marking() :: #{atom() => [cpn_token()]}.
+-type cpn_guard() :: #{expression := binary(), variables := [atom()], predicate := function()}.
+
+%% Object-Centric Process Mining (OCPM) Types - Paper 2508.00116
+-type ocpm_object_id() :: binary().
+-type ocpm_object_type() :: binary().
+-type ocpm_event() :: #{
+    event_id := binary(),
+    timestamp := integer(),
+    activity := binary(),
+    objects := #{ocpm_object_type() => [ocpm_object_id()]},
+    attributes := map()
+}.
+-type ocpm_log() :: #{
+    log_id := binary(),
+    events := [ocpm_event()],
+    object_types := [ocpm_object_type()],
+    metadata := map()
+}.
+
+%% Partial Order Types - Paper 2509.15346
+-type partial_order() :: #{
+    events := [map()],
+    order := #{binary() => [binary()]},
+    concurrent := sets:set({binary(), binary()}),
+    trace_id := binary()
+}.
+-type abstraction_level() :: 0..10.
+
+%% Reachability Diagnostics Types - Paper 2602.02447
+-type reachability_diagnostics() :: #{
+    is_reachable := boolean(),
+    complexity := atom(),
+    is_admissible := boolean(),
+    maximum_admissible => cpn_marking(),
+    diverging_transitions => [atom()],
+    concurrent_pairs => [{atom(), atom()}],
+    structural_conflicts => map()
+}.
+
+%% LLM Validation Types - Paper 2509.15336
+-type llm_model() :: #{
+    model_type := binary(),
+    activities := [binary()],
+    transitions := [map()],
+    metadata => map()
+}.
+-type llm_validation_result() :: #{
+    is_valid := boolean(),
+    fidelity_score := float(),
+    contradictions := [map()],
+    warnings := [map()],
+    confidence := float()
+}.
+-type hallucination_type() :: knowledge_driven | confidence_mismatch | structural_invalid | semantic_drift.

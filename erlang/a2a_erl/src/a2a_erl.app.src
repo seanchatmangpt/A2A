@@ -1,10 +1,31 @@
 {application, a2a_erl,
  [{description, "A2A Agent-to-Agent Protocol Implementation in Erlang/OTP"},
-  {vsn, "0.2.0"},
+  {vsn, "0.3.0"},
   {registered, [
       a2a_task_store,
       a2a_agent_card,
-      a2a_task_sup
+      a2a_task_sup,
+      yawl_orchestrator,
+      yawl_test_runner,
+      yawl_persistence,
+      yawl_service_registry,
+      yawl_resource_manager,
+      yawl_human_task,
+      yawl_workitem_processor,
+      yawl_workflow_instance_sup,
+      yawl_rest_resource_handler,
+      yawl_rest_task_handler,
+      yawl_a2a_bridge,
+      yawl_a2a_events,
+      yawl_a2a_resource_integration,
+      yawl_error_recovery,
+      yawl_metrics,
+      yawl_workflow_templates,
+      yawl_workflow_definition_storage,
+      %% Claude Headless & Human-in-the-Loop
+      yawl_claude_headless,
+      yawl_human_in_loop,
+      yawl_sse_hitl
   ]},
   {mod, {a2a_erl_app, []}},
   {applications, [
@@ -12,7 +33,9 @@
       stdlib,
       crypto,
       inets,
-      cowboy
+      cowboy,
+      gen_pnet,
+      mnesia
   ]},
   {env, [
       {port, 8080},
@@ -29,7 +52,62 @@
       a2a_http_handler,
       a2a_sse_handler,
       a2a_push_notifier,
-      a2a_json
+      a2a_json,
+      %% YAWL Workflow Pattern Modules
+      yawl_patterns,
+      yawl_orchestrator,
+      yawl_business_scenarios,
+      yawl_test_runner,
+      %% YAWL Execution Engine
+      yawl_workflow_instance,
+      yawl_workflow_instance_sup,
+      yawl_workitem_processor,
+      %% YAWL Persistence
+      yawl_persistence,
+      %% YAWL XML
+      yawl_xml_parser,
+      %% YAWL Resource Management
+      yawl_resource_manager,
+      yawl_mock_resource_manager,
+      yawl_human_task,
+      yawl_service_registry,
+      %% YAWL-A2A Integration
+      yawl_a2a_bridge,
+      yawl_a2a_events,
+      yawl_a2a_resource_integration,
+      yawl_error_recovery,
+      %% YAWL REST API
+      yawl_rest,
+      yawl_rest_handler,
+      yawl_rest_pattern_handler,
+      yawl_rest_template_handler,
+      yawl_rest_definition_handler,
+      yawl_rest_resource_handler,
+      yawl_rest_task_handler,
+      yawl_rest_workitem_handler,
+      yawl_rest_service_handler,
+      yawl_rest_metrics_handler,
+      yawl_health_handler,
+      yawl_metrics,
+      %% YAWL Templates and Definitions
+      yawl_workflow_templates,
+      yawl_workflow_definition_storage,
+      %% Claude Headless & Human-in-the-Loop
+      yawl_claude_headless,
+      yawl_human_in_loop,
+      yawl_sse_hitl,
+      %% YAWL Tests
+      yawl_patterns_test,
+      yawl_orchestrator_test,
+      yawl_xml_parser_tests,
+      yawl_patterns_prop_test,
+      yawl_cancellation_after_sim_tests,
+      yawl_cancellation_base_sim_tests,
+      yawl_cancellation_or_sim_tests,
+      yawl_resource_patterns_sim_tests,
+      %% YAWL-A2A Integration Tests
+      yawl_a2a_integration_tests,
+      test_yawl_a2a_bridge
   ]},
   {licenses, ["Apache-2.0"]},
   {links, [

@@ -604,7 +604,7 @@ error_handling_test_() ->
       fun test_error_invalid_workflow_creation/0},
      {"Invalid pattern validation",
       fun test_error_invalid_pattern_validation/0},
-     "Edge case configurations",
+     {"Edge case configurations",
       fun test_edge_case_configurations/0}].
 
 test_error_invalid_workflow_creation() ->
@@ -632,7 +632,7 @@ test_edge_case_configurations() ->
         {parallel_split, #{branches => 2}},  % Minimum valid
         {parallel_split, #{branches => 100}}, % Maximum reasonable
         {multi_instance, #{num_instances => 1, data => [1]}}, % Minimum instances
-        {multi_instance, #{num_instances => 50, data lists:seq(1, 50)}} % Maximum instances
+        {multi_instance, #{num_instances => 50, data => lists:seq(1, 50)}} % Maximum instances
     ],
     lists:foreach(fun({Pattern, Config}) ->
         case Pattern of
@@ -669,7 +669,7 @@ test_pattern_creation_performance() ->
     end, Patterns),
     End = erlang:monotonic_time(microsecond),
     Duration = End - Start,
-    ?assert(Duration < 1000000, "Pattern creation took too long: ~p μs", [Duration]).
+    ?assert(Duration < 1000000).
 
 test_pattern_validation_performance() ->
     %% Test that validation is reasonably fast
@@ -679,7 +679,7 @@ test_pattern_validation_performance() ->
     _ = yawl_patterns:validate_pattern(parallel_split, Config),
     End = erlang:monotonic_time(microsecond),
     Duration = End - Start,
-    ?assert(Duration < 50000, "Pattern validation took too long: ~p μs", [Duration]).
+    ?assert(Duration < 50000).
 
 test_pattern_info_performance() ->
     %% Test that info retrieval is reasonably fast
@@ -690,4 +690,4 @@ test_pattern_info_performance() ->
     end, Patterns),
     End = erlang:monotonic_time(microsecond),
     Duration = End - Start,
-    ?assert(Duration < 500000, "Pattern info retrieval took too long: ~p μs", [Duration]).
+    ?assert(Duration < 500000).

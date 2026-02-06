@@ -71,7 +71,15 @@
     load_latest_checkpoint/1,
     list_checkpoints/1,
     delete_checkpoint/1,
-    restore_from_checkpoint/1
+    restore_from_checkpoint/1,
+    rollback_to_checkpoint/2,
+    list_recovery_points/1,
+    validate_checkpoint_integrity/1,
+    cleanup_old_checkpoints/2,
+    get_recovery_status/1,
+    enable_periodic_checkpoints/1,
+    disable_periodic_checkpoints/0,
+    set_checkpoint_interval/1
 ]).
 
 %% API exports - History operations
@@ -91,7 +99,11 @@
 -record(state, {
     table_status :: map(),
     backup_interval :: integer() | undefined,
-    checkpoint_interval :: integer() | undefined
+    checkpoint_interval :: integer() | undefined,
+    periodic_checkpoints_enabled :: boolean(),
+    checkpoint_timer :: reference() | undefined,
+    max_checkpoints_per_workflow :: pos_integer(),
+    recovery_status :: map()
 }).
 
 %%====================================================================
@@ -619,22 +631,85 @@ init([]) ->
             end
     end,
 
+    %% Recover any in-flight workflows from previous session
+    recover_running_workflows(),
+
     State = #state{
         table_status = #{},
         backup_interval = undefined,
-        checkpoint_interval = undefined
+        checkpoint_interval = 60000,  %% Default: 60 seconds
+        periodic_checkpoints_enabled = false,
+        checkpoint_timer = undefined,
+        max_checkpoints_per_workflow = 10,
+        recovery_status = #{}
     },
     {ok, State}.
 
 %% @private
+handle_call(enable_periodic_checkpoints, _From, State) ->
+    {Reply, NewState} = do_enable_periodic_checkpoints(State),
+    {reply, Reply, NewState};
+
+handle_call(disable_periodic_checkpoints, _From, State) ->
+    NewState = do_disable_periodic_checkpoints(State),
+    {reply, ok, NewState};
+
+handle_call({set_checkpoint_interval, Interval}, _From, State) when is_integer(Interval), Interval > 0 ->
+    NewState = State#state{checkpoint_interval = Interval},
+    %% Restart timer if periodic checkpoints are enabled
+    FinalState = case State#state.periodic_checkpoints_enabled of
+        true ->
+            do_disable_periodic_checkpoints(NewState),
+            {_, EnabledState} = do_enable_periodic_checkpoints(NewState),
+            EnabledState;
+        false ->
+            NewState
+    end,
+    {reply, ok, FinalState};
+
+handle_call({get_recovery_status, WorkflowId}, _From, State) ->
+    Status = maps:get(WorkflowId, State#state.recovery_status, #{status => unknown}),
+    {reply, {ok, Status}, State};
+
+handle_call({rollback_to_checkpoint, WorkflowId, CheckpointId}, _From, State) ->
+    Reply = do_rollback_to_checkpoint(WorkflowId, CheckpointId, State),
+    {reply, Reply, State};
+
+handle_call({list_recovery_points, WorkflowId}, _From, State) ->
+    Reply = do_list_recovery_points(WorkflowId),
+    {reply, Reply, State};
+
+handle_call({validate_checkpoint_integrity, CheckpointId}, _From, State) ->
+    Reply = do_validate_checkpoint_integrity(CheckpointId),
+    {reply, Reply, State};
+
+handle_call({cleanup_old_checkpoints, WorkflowId, KeepCount}, _From, State) ->
+    Reply = do_cleanup_old_checkpoints(WorkflowId, KeepCount),
+    {reply, Reply, State};
+
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 %% @private
+handle_cast({save_periodic_checkpoint, WorkflowId}, State) ->
+    NewState = do_save_periodic_checkpoint(WorkflowId, State),
+    {noreply, NewState};
+
+handle_cast({update_recovery_status, WorkflowId, Status}, State) ->
+    NewRecoveryStatus = maps:put(WorkflowId, Status, State#state.recovery_status),
+    {noreply, State#state{recovery_status = NewRecoveryStatus}};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+handle_info({checkpoint_timer, Interval}, State) ->
+    %% Time to create periodic checkpoints for all running workflows
+    NewState = create_periodic_checkpoints_for_running_workflows(State),
+    %% Schedule next checkpoint
+    TimerRef = erlang:send_after(Interval, self(), {checkpoint_timer, Interval}),
+    {noreply, NewState#state{checkpoint_timer = TimerRef}};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -729,3 +804,369 @@ map_to_history_record(Map) ->
         timestamp = maps:get(timestamp, Map, erlang:monotonic_time(millisecond)),
         source = maps:get(source, Map, undefined)
     }.
+
+%%====================================================================
+%% Periodic Checkpoint API Functions
+%%====================================================================
+
+%% @doc Enable periodic checkpoint saving for all running workflows.
+%% @param IntervalMs Checkpoint interval in milliseconds
+-spec enable_periodic_checkpoints(pos_integer()) -> ok | {error, term()}.
+enable_periodic_checkpoints(IntervalMs) when is_integer(IntervalMs), IntervalMs > 0 ->
+    gen_server:call(?MODULE, {set_checkpoint_interval, IntervalMs}),
+    gen_server:call(?MODULE, enable_periodic_checkpoints).
+
+%% @doc Disable periodic checkpoint saving.
+-spec disable_periodic_checkpoints() -> ok.
+disable_periodic_checkpoints() ->
+    gen_server:call(?MODULE, disable_periodic_checkpoints).
+
+%% @doc Set the checkpoint interval.
+-spec set_checkpoint_interval(pos_integer()) -> ok.
+set_checkpoint_interval(IntervalMs) when is_integer(IntervalMs), IntervalMs > 0 ->
+    gen_server:call(?MODULE, {set_checkpoint_interval, IntervalMs}).
+
+%%====================================================================
+%% Enhanced Recovery API Functions
+%%====================================================================
+
+%% @doc Rollback workflow to a specific checkpoint.
+%% This restores the workflow to the exact state captured in the checkpoint.
+-spec rollback_to_checkpoint(binary(), binary()) -> ok | {error, term()}.
+rollback_to_checkpoint(WorkflowId, CheckpointId) ->
+    gen_server:call(?MODULE, {rollback_to_checkpoint, WorkflowId, CheckpointId}, infinity).
+
+%% @doc List all available recovery points (checkpoints) for a workflow.
+-spec list_recovery_points(binary()) -> {ok, [map()]} | {error, term()}.
+list_recovery_points(WorkflowId) ->
+    gen_server:call(?MODULE, {list_recovery_points, WorkflowId}).
+
+%% @doc Validate the integrity of a checkpoint.
+%% Ensures the checkpoint data is complete and consistent.
+-spec validate_checkpoint_integrity(binary()) -> {ok, boolean(), map()} | {error, term()}.
+validate_checkpoint_integrity(CheckpointId) ->
+    gen_server:call(?MODULE, {validate_checkpoint_integrity, CheckpointId}).
+
+%% @doc Cleanup old checkpoints, keeping only the most recent N checkpoints.
+-spec cleanup_old_checkpoints(binary(), pos_integer()) -> {ok, non_neg_integer()} | {error, term()}.
+cleanup_old_checkpoints(WorkflowId, KeepCount) when is_integer(KeepCount), KeepCount >= 0 ->
+    gen_server:call(?MODULE, {cleanup_old_checkpoints, WorkflowId, KeepCount}).
+
+%% @doc Get the recovery status of a workflow.
+-spec get_recovery_status(binary()) -> {ok, map()} | {error, term()}.
+get_recovery_status(WorkflowId) ->
+    gen_server:call(?MODULE, {get_recovery_status, WorkflowId}).
+
+%%====================================================================
+%% Internal Recovery Functions
+%%====================================================================
+
+%% @private
+%% Enable periodic checkpoint saving
+do_enable_periodic_checkpoints(State) ->
+    case State#state.periodic_checkpoints_enabled of
+        true ->
+            {ok, State};
+        false ->
+            Interval = State#state.checkpoint_interval,
+            TimerRef = erlang:send_after(Interval, self(), {checkpoint_timer, Interval}),
+            NewState = State#state{
+                periodic_checkpoints_enabled = true,
+                checkpoint_timer = TimerRef
+            },
+            error_logger:info_msg("YAWL Persistence: Periodic checkpoints enabled (interval: ~p ms)~n", [Interval]),
+            {ok, NewState}
+    end.
+
+%% @private
+%% Disable periodic checkpoint saving
+do_disable_periodic_checkpoints(State) ->
+    case State#state.checkpoint_timer of
+        undefined -> ok;
+        TimerRef -> erlang:cancel_timer(TimerRef)
+    end,
+    error_logger:info_msg("YAWL Persistence: Periodic checkpoints disabled~n", []),
+    State#state{periodic_checkpoints_enabled = false, checkpoint_timer = undefined}.
+
+%% @private
+%% Save periodic checkpoint for a workflow
+do_save_periodic_checkpoint(WorkflowId, State) ->
+    case load_workflow(WorkflowId) of
+        {ok, Workflow} ->
+            CheckpointId = <<WorkflowId/binary, "_cp_",
+                           (integer_to_binary(erlang:monotonic_time(millisecond)))/binary>>,
+            Checkpoint = #yawl_checkpoint{
+                checkpoint_id = CheckpointId,
+                workflow_id = WorkflowId,
+                checkpoint_state = #{
+                    workflow_id => WorkflowId,
+                    status => Workflow#yawl_workflow_persist.status,
+                    current_place => Workflow#yawl_workflow_persist.current_place
+                },
+                marking = Workflow#yawl_workflow_persist.marking,
+                data = Workflow#yawl_workflow_persist.data,
+                timestamp = erlang:monotonic_time(millisecond),
+                sequence_num = 0  %% Will be updated by save_checkpoint
+            },
+            case save_checkpoint(WorkflowId, Checkpoint) of
+                ok ->
+                    %% Update recovery status
+                    RecoveryStatus = #{
+                        last_checkpoint => CheckpointId,
+                        last_checkpoint_time => erlang:monotonic_time(millisecond),
+                        status => checkpointed
+                    },
+                    maps:put(WorkflowId, RecoveryStatus, State#state.recovery_status);
+                {error, Reason} ->
+                    error_logger:error_msg("Failed to save periodic checkpoint for workflow ~p: ~p~n",
+                                          [WorkflowId, Reason]),
+                    State
+            end;
+        {error, Reason} ->
+            error_logger:error_msg("Failed to load workflow ~p for periodic checkpoint: ~p~n",
+                                  [WorkflowId, Reason]),
+            State
+    end.
+
+%% @private
+%% Create periodic checkpoints for all running workflows
+create_periodic_checkpoints_for_running_workflows(State) ->
+    case list_workflows_by_status(running) of
+        {ok, RunningWorkflows} ->
+            lists:foldl(fun(Workflow, AccState) ->
+                WorkflowId = Workflow#yawl_workflow_persist.workflow_id,
+                do_save_periodic_checkpoint(WorkflowId, AccState)
+            end, State, RunningWorkflows);
+        {error, Reason} ->
+            error_logger:error_msg("Failed to list running workflows for periodic checkpoint: ~p~n",
+                                  [Reason]),
+            State
+    end.
+
+%% @private
+%% Rollback workflow to a specific checkpoint
+do_rollback_to_checkpoint(WorkflowId, CheckpointId, _State) ->
+    Trans = fun() ->
+        %% Load the checkpoint
+        case mnesia:read(yawl_checkpoint, CheckpointId) of
+            [Checkpoint] ->
+                %% Verify checkpoint belongs to workflow
+                case Checkpoint#yawl_checkpoint.workflow_id of
+                    WorkflowId ->
+                        %% Restore workflow state
+                        case mnesia:read(yawl_workflow_persist, WorkflowId) of
+                            [Workflow] ->
+                                %% Create rollback history entry
+                                HistoryId = <<WorkflowId/binary, "_rollback_",
+                                               (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+                                History = #yawl_execution_history{
+                                    history_id = HistoryId,
+                                    workflow_id = WorkflowId,
+                                    event_type = rollback,
+                                    event_data = #{
+                                        from_checkpoint => CheckpointId,
+                                        previous_status => Workflow#yawl_workflow_persist.status,
+                                        previous_marking => Workflow#yawl_workflow_persist.marking
+                                    },
+                                    timestamp = erlang:monotonic_time(millisecond),
+                                    source = yawl_persistence
+                                },
+                                mnesia:write(History),
+
+                                %% Update workflow with checkpoint data
+                                RestoredWorkflow = Workflow#yawl_workflow_persist{
+                                    marking = Checkpoint#yawl_checkpoint.marking,
+                                    data = Checkpoint#yawl_checkpoint.data,
+                                    status = running,
+                                    updated_at = erlang:monotonic_time(millisecond)
+                                },
+                                mnesia:write(RestoredWorkflow),
+                                {ok, Checkpoint};
+                            [] ->
+                                {error, workflow_not_found}
+                        end;
+                    _ ->
+                        {error, checkpoint_mismatch}
+                end;
+            [] ->
+                {error, checkpoint_not_found}
+        end
+    end,
+    case mnesia:transaction(Trans) of
+        {atomic, Result} -> Result;
+        {aborted, Reason} -> {error, Reason}
+    end.
+
+%% @private
+%% List all recovery points for a workflow
+do_list_recovery_points(WorkflowId) ->
+    case list_checkpoints(WorkflowId) of
+        {ok, Checkpoints} ->
+            %% Format checkpoints as recovery points with metadata
+            RecoveryPoints = lists:map(fun(CP) ->
+                #{
+                    checkpoint_id => CP#yawl_checkpoint.checkpoint_id,
+                    sequence_num => CP#yawl_checkpoint.sequence_num,
+                    timestamp => CP#yawl_checkpoint.timestamp,
+                    marking_summary => maps:keys(CP#yawl_checkpoint.marking),
+                    data_keys => maps:keys(CP#yawl_checkpoint.data),
+                    is_valid => validate_checkpoint_data_integrity(CP)
+                }
+            end, Checkpoints),
+            %% Sort by sequence number descending (newest first)
+            SortedPoints = lists:sort(fun(A, B) ->
+                maps:get(sequence_num, A) > maps:get(sequence_num, B)
+            end, RecoveryPoints),
+            {ok, SortedPoints};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private
+%% Validate checkpoint integrity
+do_validate_checkpoint_integrity(CheckpointId) ->
+    Trans = fun() ->
+        case mnesia:read(yawl_checkpoint, CheckpointId) of
+            [Checkpoint] ->
+                %% Perform integrity checks
+                Checks = [
+                    {has_workflow_id, Checkpoint#yawl_checkpoint.workflow_id =/= <<>>},
+                    {has_marking, map_size(Checkpoint#yawl_checkpoint.marking) >= 0},
+                    {has_sequence, Checkpoint#yawl_checkpoint.sequence_num > 0},
+                    {has_timestamp, Checkpoint#yawl_checkpoint.timestamp > 0},
+                    {data_integrity, validate_checkpoint_data_integrity(Checkpoint)}
+                ],
+                AllValid = lists:all(fun({_, Valid}) -> Valid end, Checks),
+                {ok, AllValid, #{
+                    checks => maps:from_list(Checks),
+                    checkpoint_id => CheckpointId,
+                    sequence_num => Checkpoint#yawl_checkpoint.sequence_num
+                }};
+            [] ->
+                {error, checkpoint_not_found}
+        end
+    end,
+    case mnesia:transaction(Trans) of
+        {atomic, Result} -> Result;
+        {aborted, Reason} -> {error, Reason}
+    end.
+
+%% @private
+%% Validate checkpoint data integrity
+validate_checkpoint_data_integrity(Checkpoint) ->
+    %% Check that checkpoint has required fields
+    try
+        %% Validate marking structure (should be a map)
+        is_map(Checkpoint#yawl_checkpoint.marking) andalso
+        %% Validate data structure
+        is_map(Checkpoint#yawl_checkpoint.data) andalso
+        %% Validate checkpoint_state exists
+        Checkpoint#yawl_checkpoint.checkpoint_state =/= undefined andalso
+        %% Validate sequence number
+        Checkpoint#yawl_checkpoint.sequence_num > 0
+    catch
+        _:_ -> false
+    end.
+
+%% @private
+%% Cleanup old checkpoints, keeping only the most recent N
+do_cleanup_old_checkpoints(WorkflowId, KeepCount) ->
+    Trans = fun() ->
+        %% Get all checkpoints for this workflow
+        Checkpoints = mnesia:index_read(yawl_checkpoint, WorkflowId, #yawl_checkpoint.workflow_id),
+
+        %% Sort by sequence number descending
+        SortedCheckpoints = lists:sort(fun(A, B) ->
+            A#yawl_checkpoint.sequence_num > B#yawl_checkpoint.sequence_num
+        end, Checkpoints),
+
+        %% Identify checkpoints to delete
+        CheckpointsToDelete = case length(SortedCheckpoints) > KeepCount of
+            true -> lists:nthtail(KeepCount, SortedCheckpoints);
+            false -> []
+        end,
+
+        %% Delete old checkpoints
+        lists:foreach(fun(CP) ->
+            mnesia:delete({yawl_checkpoint, CP#yawl_checkpoint.checkpoint_id})
+        end, CheckpointsToDelete),
+
+        {ok, length(CheckpointsToDelete)}
+    end,
+    case mnesia:transaction(Trans) of
+        {atomic, Result} -> Result;
+        {aborted, Reason} -> {error, Reason}
+    end.
+
+%% @private
+%% Recover running workflows from previous session
+recover_running_workflows() ->
+    Trans = fun() ->
+        %% Find all workflows that were in running state
+        RunningWorkflows = mnesia:index_read(yawl_workflow_persist, running, #yawl_workflow_persist.status),
+
+        lists:foreach(fun(Workflow) ->
+            WorkflowId = Workflow#yawl_workflow_persist.workflow_id,
+
+            %% Log recovery attempt
+            error_logger:info_msg("YAWL Persistence: Recovering workflow ~p from running state~n", [WorkflowId]),
+
+            %% Try to find latest checkpoint
+            case mnesia:index_read(yawl_checkpoint, WorkflowId, #yawl_checkpoint.workflow_id) of
+                [] ->
+                    %% No checkpoint exists, mark workflow as failed for manual recovery
+                    FailedWorkflow = Workflow#yawl_workflow_persist{
+                        status = failed,
+                        error = no_checkpoint_available,
+                        updated_at = erlang:monotonic_time(millisecond)
+                    },
+                    mnesia:write(FailedWorkflow),
+                    error_logger:warning_msg("YAWL Persistence: No checkpoint for workflow ~p, marked as failed~n",
+                                           [WorkflowId]);
+                Checkpoints ->
+                    %% Get latest checkpoint by sequence number
+                    [LatestCP | _] = lists:sort(fun(A, B) ->
+                        A#yawl_checkpoint.sequence_num > B#yawl_checkpoint.sequence_num
+                    end, Checkpoints),
+
+                    %% Create recovery history entry
+                    HistoryId = <<WorkflowId/binary, "_recovery_",
+                                   (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+                    History = #yawl_execution_history{
+                        history_id = HistoryId,
+                        workflow_id = WorkflowId,
+                        event_type = auto_recovery,
+                        event_data = #{
+                            checkpoint_id => LatestCP#yawl_checkpoint.checkpoint_id,
+                            sequence_num => LatestCP#yawl_checkpoint.sequence_num
+                        },
+                        timestamp = erlang:monotonic_time(millisecond),
+                        source = yawl_persistence
+                    },
+                    mnesia:write(History),
+
+                    %% Restore workflow to checkpoint state
+                    RestoredWorkflow = Workflow#yawl_workflow_persist{
+                        marking = LatestCP#yawl_checkpoint.marking,
+                        data = LatestCP#yawl_checkpoint.data,
+                        status = running,
+                        updated_at = erlang:monotonic_time(millisecond)
+                    },
+                    mnesia:write(RestoredWorkflow),
+                    error_logger:info_msg("YAWL Persistence: Recovered workflow ~p from checkpoint ~p (sequence: ~p)~n",
+                                         [WorkflowId, LatestCP#yawl_checkpoint.checkpoint_id,
+                                          LatestCP#yawl_checkpoint.sequence_num])
+            end
+        end, RunningWorkflows),
+
+        {ok, length(RunningWorkflows)}
+    end,
+
+    case mnesia:transaction(Trans) of
+        {atomic, {ok, Count}} when Count > 0 ->
+            error_logger:info_msg("YAWL Persistence: Recovered ~p running workflows from previous session~n", [Count]);
+        {atomic, _} ->
+            ok;
+        {aborted, Reason} ->
+            error_logger:error_msg("YAWL Persistence: Failed to recover running workflows: ~p~n", [Reason])
+    end.

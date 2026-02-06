@@ -1,0 +1,46 @@
+# YAWL Workflow Patterns - ggen Configuration
+
+[project]
+name = "yawl_patterns"
+version = "1.0.0"
+description = "Complete YAWL workflow patterns implementation with Chicago TDD tests"
+authors = ["A2A Team"]
+license = "MIT"
+
+# Ontology configuration
+[ontology]
+source = "spec/yawl_patterns_with_tests.ttl"
+base_uri = "http://yawl.org/patterns#"
+format = "turtle"
+
+# Template configuration
+[templates]
+directory = "templates/ggen"
+backup_enabled = true
+idempotent = true
+
+# RDF configuration
+[rdf]
+base_uri = "http://yawl.org/"
+default_format = "turtle"
+cache_queries = true
+store_path = ".ggen/rdf-store"
+
+[rdf.prefixes]
+yawl = "http://yawl.org/patterns#"
+test = "http://test.ggen.org#"
+rdfs = "http://www.w3.org/2000/01/rdf-schema#"
+owl = "http://www.w3.org/2002/07/owl#"
+xsd = "http://www.w3.org/2001/XMLSchema#"
+
+# Output configuration
+[output]
+directory = "tests/generated"
+language = "erlang"
+test_framework = "eunit"
+
+# Test generation
+[tests]
+framework = "eunit"
+pattern = "chicago_tdd"
+coverage_target = 100
