@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""
+Demo: Fortune 5 Cloud Cost Estimation Tool
+Demonstrates cost estimation capabilities with sample data
+
+Author: A2A Team
+Version: 1.0.0
+"""
+
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
+
+
+def generate_sample_infracost_data():
+    """Generate realistic sample cost data for Fortune 5 deployment"""
+    return {
+        "version": "0.2",
+        "currency": "USD",
+        "projects": [
+            {
+                "name": "fortune5-infrastructure",
+                "metadata": {
+                    "path": "/home/user/A2A/terraform",
+                    "type": "terraform_dir"
+                },
+                "pastBreakdown": {
+                    "resources": [],
+                    "totalHourlyCost": "0",
+                    "totalMonthlyCost": "0"
+                },
+                "breakdown": {
+                    "resources": [
+                        {
+                            "name": "google_container_cluster.primary",
+                            "resourceType": "google_container_cluster",
+                            "tags": {},
+                            "hourlyCost": "34.25",
+                            "monthlyCost": "25000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Cluster management fee",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "1",
+                                    "monthlyQuantity": "730",
+                                    "price": "0.10",
+                                    "hourlyCost": "0.10",
+                                    "monthlyCost": "73.00"
+                                },
+                                {
+                                    "name": "Instance usage (n2-standard-8, 100 nodes)",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "100",
+                                    "monthlyQuantity": "73000",
+                                    "price": "0.34",
+                                    "hourlyCost": "34.00",
+                                    "monthlyCost": "24927.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_sql_database_instance.primary",
+                            "resourceType": "google_sql_database_instance",
+                            "tags": {},
+                            "hourlyCost": "20.55",
+                            "monthlyCost": "15000.00",
+                            "costComponents": [
+                                {
+                                    "name": "SQL instance (db-n1-highmem-32)",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "1",
+                                    "monthlyQuantity": "730",
+                                    "price": "2.99",
+                                    "hourlyCost": "2.99",
+                                    "monthlyCost": "2183.00"
+                                },
+                                {
+                                    "name": "Storage (SSD, 5TB)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "5000",
+                                    "monthlyQuantity": "5000",
+                                    "price": "0.17",
+                                    "hourlyCost": "11.64",
+                                    "monthlyCost": "850.00"
+                                },
+                                {
+                                    "name": "Network egress",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "500",
+                                    "monthlyQuantity": "500000",
+                                    "price": "0.12",
+                                    "hourlyCost": "6.85",
+                                    "monthlyCost": "12000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_storage_bucket.data_lake",
+                            "resourceType": "google_storage_bucket",
+                            "tags": {},
+                            "hourlyCost": "6.85",
+                            "monthlyCost": "5000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Standard storage (250TB)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "250000",
+                                    "monthlyQuantity": "250000",
+                                    "price": "0.020",
+                                    "hourlyCost": "6.85",
+                                    "monthlyCost": "5000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_compute_instance.app_servers",
+                            "resourceType": "google_compute_instance",
+                            "tags": {},
+                            "hourlyCost": "13.70",
+                            "monthlyCost": "10000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Instance usage (n2-standard-4, 50 instances)",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "50",
+                                    "monthlyQuantity": "36500",
+                                    "price": "0.19",
+                                    "hourlyCost": "9.50",
+                                    "monthlyCost": "6935.00"
+                                },
+                                {
+                                    "name": "Standard persistent disk (SSD, 10TB total)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "10000",
+                                    "monthlyQuantity": "10000",
+                                    "price": "0.17",
+                                    "hourlyCost": "2.33",
+                                    "monthlyCost": "1700.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_compute_global_address.lb",
+                            "resourceType": "google_compute_global_address",
+                            "tags": {},
+                            "hourlyCost": "0.247",
+                            "monthlyCost": "180.00",
+                            "costComponents": [
+                                {
+                                    "name": "Global external IP address",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "1",
+                                    "monthlyQuantity": "730",
+                                    "price": "0.247",
+                                    "hourlyCost": "0.247",
+                                    "monthlyCost": "180.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_kms_crypto_key.main",
+                            "resourceType": "google_kms_crypto_key",
+                            "tags": {},
+                            "hourlyCost": "0.068",
+                            "monthlyCost": "50.00",
+                            "costComponents": [
+                                {
+                                    "name": "Key versions",
+                                    "unit": "key_versions",
+                                    "hourlyQuantity": "10",
+                                    "monthlyQuantity": "10",
+                                    "price": "0.06",
+                                    "hourlyCost": "0.0082",
+                                    "monthlyCost": "6.00"
+                                },
+                                {
+                                    "name": "Cryptographic operations",
+                                    "unit": "operations",
+                                    "hourlyQuantity": "10000",
+                                    "monthlyQuantity": "7300000",
+                                    "price": "0.00003",
+                                    "hourlyCost": "0.041",
+                                    "monthlyCost": "30.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_logging_project_sink.audit",
+                            "resourceType": "google_logging_project_sink",
+                            "tags": {},
+                            "hourlyCost": "2.74",
+                            "monthlyCost": "2000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Logging data ingestion (50TB/month)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "68.49",
+                                    "monthlyQuantity": "50000",
+                                    "price": "0.50",
+                                    "hourlyCost": "2.74",
+                                    "monthlyCost": "2000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_monitoring_dashboard.main",
+                            "resourceType": "google_monitoring_dashboard",
+                            "tags": {},
+                            "hourlyCost": "0.685",
+                            "monthlyCost": "500.00",
+                            "costComponents": [
+                                {
+                                    "name": "Monitoring data (10TB/month)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "13.70",
+                                    "monthlyQuantity": "10000",
+                                    "price": "0.05",
+                                    "hourlyCost": "0.685",
+                                    "monthlyCost": "500.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_compute_network.vpc",
+                            "resourceType": "google_compute_network",
+                            "tags": {},
+                            "hourlyCost": "4.11",
+                            "monthlyCost": "3000.00",
+                            "costComponents": [
+                                {
+                                    "name": "VPC peering (cross-region, 20TB)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "27.40",
+                                    "monthlyQuantity": "20000",
+                                    "price": "0.05",
+                                    "hourlyCost": "1.37",
+                                    "monthlyCost": "1000.00"
+                                },
+                                {
+                                    "name": "Internet egress (premium tier, 30TB)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "41.10",
+                                    "monthlyQuantity": "30000",
+                                    "price": "0.12",
+                                    "hourlyCost": "2.74",
+                                    "monthlyCost": "2000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_compute_firewall.allow_http",
+                            "resourceType": "google_compute_firewall",
+                            "tags": {},
+                            "hourlyCost": "0",
+                            "monthlyCost": "0",
+                            "costComponents": []
+                        },
+                        {
+                            "name": "google_dns_managed_zone.main",
+                            "resourceType": "google_dns_managed_zone",
+                            "tags": {},
+                            "hourlyCost": "0.274",
+                            "monthlyCost": "200.00",
+                            "costComponents": [
+                                {
+                                    "name": "Managed zone",
+                                    "unit": "zones",
+                                    "hourlyQuantity": "1",
+                                    "monthlyQuantity": "1",
+                                    "price": "0.20",
+                                    "hourlyCost": "0.0027",
+                                    "monthlyCost": "0.20"
+                                },
+                                {
+                                    "name": "DNS queries (1B/month)",
+                                    "unit": "queries",
+                                    "hourlyQuantity": "1369863",
+                                    "monthlyQuantity": "1000000000",
+                                    "price": "0.0004",
+                                    "hourlyCost": "0.271",
+                                    "monthlyCost": "199.80"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_bigquery_dataset.analytics",
+                            "resourceType": "google_bigquery_dataset",
+                            "tags": {},
+                            "hourlyCost": "27.40",
+                            "monthlyCost": "20000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Active storage (100TB)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "100000",
+                                    "monthlyQuantity": "100000",
+                                    "price": "0.020",
+                                    "hourlyCost": "2.74",
+                                    "monthlyCost": "2000.00"
+                                },
+                                {
+                                    "name": "Analysis (5PB processed/month)",
+                                    "unit": "TB",
+                                    "hourlyQuantity": "6.85",
+                                    "monthlyQuantity": "5000",
+                                    "price": "5.00",
+                                    "hourlyCost": "24.66",
+                                    "monthlyCost": "18000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_pubsub_topic.events",
+                            "resourceType": "google_pubsub_topic",
+                            "tags": {},
+                            "hourlyCost": "13.70",
+                            "monthlyCost": "10000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Message throughput (100TB/month)",
+                                    "unit": "GB",
+                                    "hourlyQuantity": "136.99",
+                                    "monthlyQuantity": "100000",
+                                    "price": "0.06",
+                                    "hourlyCost": "8.22",
+                                    "monthlyCost": "6000.00"
+                                },
+                                {
+                                    "name": "Message delivery (seeks)",
+                                    "unit": "operations",
+                                    "hourlyQuantity": "1369863",
+                                    "monthlyQuantity": "1000000000",
+                                    "price": "0.01",
+                                    "hourlyCost": "5.48",
+                                    "monthlyCost": "4000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_redis_instance.cache",
+                            "resourceType": "google_redis_instance",
+                            "tags": {},
+                            "hourlyCost": "6.85",
+                            "monthlyCost": "5000.00",
+                            "costComponents": [
+                                {
+                                    "name": "Redis instance (M5, 100GB)",
+                                    "unit": "hours",
+                                    "hourlyQuantity": "1",
+                                    "monthlyQuantity": "730",
+                                    "price": "6.85",
+                                    "hourlyCost": "6.85",
+                                    "monthlyCost": "5000.00"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "google_compute_autoscaler.app",
+                            "resourceType": "google_compute_autoscaler",
+                            "tags": {},
+                            "hourlyCost": "0",
+                            "monthlyCost": "0",
+                            "costComponents": []
+                        },
+                        {
+                            "name": "google_cloud_run_service.api",
+                            "resourceType": "google_cloud_run_service",
+                            "tags": {},
+                            "hourlyCost": "4.11",
+                            "monthlyCost": "3000.00",
+                            "costComponents": [
+                                {
+                                    "name": "CPU (100vCPU-seconds/request, 10M requests/month)",
+                                    "unit": "vCPU-seconds",
+                                    "hourlyQuantity": "1369863",
+                                    "monthlyQuantity": "1000000000",
+                                    "price": "0.000024",
+                                    "hourlyCost": "3.29",
+                                    "monthlyCost": "2400.00"
+                                },
+                                {
+                                    "name": "Memory (512MB/request, 10M requests/month)",
+                                    "unit": "GB-seconds",
+                                    "hourlyQuantity": "685000",
+                                    "monthlyQuantity": "500000000",
+                                    "price": "0.0000025",
+                                    "hourlyCost": "0.82",
+                                    "monthlyCost": "600.00"
+                                }
+                            ]
+                        }
+                    ],
+                    "totalHourlyCost": "136.00",
+                    "totalMonthlyCost": "99200.00"
+                },
+                "diff": {
+                    "resources": [],
+                    "totalHourlyCost": "136.00",
+                    "totalMonthlyCost": "99200.00"
+                }
+            }
+        ],
+        "totalHourlyCost": "136.00",
+        "totalMonthlyCost": "99200.00",
+        "timeGenerated": datetime.now().isoformat()
+    }
+
+
+def main():
+    """Run demo cost estimation"""
+    print("\n" + "="*80)
+    print("FORTUNE 5 CLOUD COST ESTIMATION TOOL - DEMONSTRATION")
+    print("="*80)
+    print("\nNote: Running with sample data for demonstration purposes")
+    print("In production, this would analyze actual Terraform configurations\n")
+
+    # Import the estimator
+    sys.path.insert(0, '/home/user/A2A')
+    from cost_estimator import InfracostEstimator
+
+    # Create estimator
+    estimator = InfracostEstimator('/home/user/A2A/terraform')
+
+    # Generate sample data
+    print("📊 Generating sample cost data for Fortune 5 deployment...")
+    cost_data = generate_sample_infracost_data()
+
+    # Analyze costs
+    print("\n📈 Analyzing costs...")
+    analysis = estimator.analyze_costs(cost_data)
+
+    # Calculate projections
+    print("\n🔮 Calculating Fortune 5 scale projections...")
+    projections = estimator.calculate_fortune5_projections(analysis)
+
+    # Generate report
+    print("\n📝 Generating comprehensive report...")
+    report = estimator.generate_report(cost_data, analysis, projections)
+
+    # Display report
+    print("\n" + report)
+
+    # Save results
+    print("\n💾 Saving results...")
+    files = estimator.save_results(cost_data, analysis, projections, report)
+
+    print("\n" + "="*80)
+    print("✓ DEMO COST ESTIMATION COMPLETE")
+    print("="*80)
+    print(f"\nReport saved to: {files['report_file']}")
+    print(f"Analysis saved to: {files['analysis_file']}")
+    print(f"Raw data saved to: {files['cost_file']}")
+
+    print("\n" + "="*80)
+    print("NEXT STEPS FOR PRODUCTION USE")
+    print("="*80)
+    print("\n1. Get Infracost API key from https://dashboard.infracost.io")
+    print("2. Set environment variable: export INFRACOST_API_KEY=<your-key>")
+    print("3. Fix duplicate resources in Terraform configuration")
+    print("4. Run: python3 cost_estimator.py --terraform-dir /path/to/terraform")
+    print("\n" + "="*80)
+
+
+if __name__ == '__main__':
+    main()

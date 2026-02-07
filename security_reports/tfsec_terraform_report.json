@@ -1,0 +1,141 @@
+{
+	"results": [
+		{
+			"rule_id": "AVD-AWS-0104",
+			"long_id": "aws-ec2-no-public-egress-sgr",
+			"rule_description": "An egress security group rule allows traffic to /0.",
+			"rule_provider": "aws",
+			"rule_service": "ec2",
+			"impact": "Your port is egressing data to the internet",
+			"resolution": "Set a more restrictive cidr range",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/ec2/no-public-egress-sgr/",
+				"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group"
+			],
+			"description": "Security group rule allows egress to multiple public internet addresses.",
+			"severity": "CRITICAL",
+			"warning": false,
+			"status": 0,
+			"resource": "module.eks",
+			"location": {
+				"filename": "terraform-aws-modules/eks/aws/node_groups.tf",
+				"start_line": 222,
+				"end_line": 222
+			}
+		},
+		{
+			"rule_id": "AVD-AWS-0178",
+			"long_id": "aws-ec2-require-vpc-flow-logs-for-all-vpcs",
+			"rule_description": "VPC Flow Logs is a feature that enables you to capture information about the IP traffic going to and from network interfaces in your VPC. After you've created a flow log, you can view and retrieve its data in Amazon CloudWatch Logs. It is recommended that VPC Flow Logs be enabled for packet \"Rejects\" for VPCs.",
+			"rule_provider": "aws",
+			"rule_service": "ec2",
+			"impact": "Without VPC flow logs, you risk not having enough information about network traffic flow to investigate incidents or identify security issues.",
+			"resolution": "Enable flow logs for VPC",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/ec2/require-vpc-flow-logs-for-all-vpcs/"
+			],
+			"description": "VPC Flow Logs is not enabled for VPC ",
+			"severity": "MEDIUM",
+			"warning": false,
+			"status": 0,
+			"resource": "module.vpc",
+			"location": {
+				"filename": "terraform-aws-modules/vpc/aws/main.tf",
+				"start_line": 28,
+				"end_line": 51
+			}
+		},
+		{
+			"rule_id": "AVD-AWS-0038",
+			"long_id": "aws-eks-enable-control-plane-logging",
+			"rule_description": "EKS Clusters should have cluster control plane logging turned on",
+			"rule_provider": "aws",
+			"rule_service": "eks",
+			"impact": "Logging provides valuable information about access and usage",
+			"resolution": "Enable logging for the EKS control plane",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/enable-control-plane-logging/",
+				"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#enabled_cluster_log_types"
+			],
+			"description": "Control plane scheduler logging is not enabled.",
+			"severity": "MEDIUM",
+			"warning": false,
+			"status": 0,
+			"resource": "module.eks",
+			"location": {
+				"filename": "terraform-aws-modules/eks/aws/main.tf",
+				"start_line": 27,
+				"end_line": 105
+			}
+		},
+		{
+			"rule_id": "AVD-AWS-0038",
+			"long_id": "aws-eks-enable-control-plane-logging",
+			"rule_description": "EKS Clusters should have cluster control plane logging turned on",
+			"rule_provider": "aws",
+			"rule_service": "eks",
+			"impact": "Logging provides valuable information about access and usage",
+			"resolution": "Enable logging for the EKS control plane",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/enable-control-plane-logging/",
+				"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#enabled_cluster_log_types"
+			],
+			"description": "Control plane controller manager logging is not enabled.",
+			"severity": "MEDIUM",
+			"warning": false,
+			"status": 0,
+			"resource": "module.eks",
+			"location": {
+				"filename": "terraform-aws-modules/eks/aws/main.tf",
+				"start_line": 27,
+				"end_line": 105
+			}
+		},
+		{
+			"rule_id": "AVD-AWS-0040",
+			"long_id": "aws-eks-no-public-cluster-access",
+			"rule_description": "EKS Clusters should have the public access disabled",
+			"rule_provider": "aws",
+			"rule_service": "eks",
+			"impact": "EKS can be access from the internet",
+			"resolution": "Don't enable public access to EKS Clusters",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/no-public-cluster-access/",
+				"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#endpoint_public_access"
+			],
+			"description": "Public cluster access is enabled.",
+			"severity": "CRITICAL",
+			"warning": false,
+			"status": 0,
+			"resource": "module.eks",
+			"location": {
+				"filename": "terraform-aws-modules/eks/aws/main.tf",
+				"start_line": 50,
+				"end_line": 50
+			}
+		},
+		{
+			"rule_id": "AVD-AWS-0041",
+			"long_id": "aws-eks-no-public-cluster-access-to-cidr",
+			"rule_description": "EKS cluster should not have open CIDR range for public access",
+			"rule_provider": "aws",
+			"rule_service": "eks",
+			"impact": "EKS can be accessed from the internet",
+			"resolution": "Don't enable public access to EKS Clusters",
+			"links": [
+				"https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/no-public-cluster-access-to-cidr/",
+				"https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#vpc_config"
+			],
+			"description": "Cluster allows access from a public CIDR: 0.0.0.0/0.",
+			"severity": "CRITICAL",
+			"warning": false,
+			"status": 0,
+			"resource": "module.eks",
+			"location": {
+				"filename": "terraform-aws-modules/eks/aws/main.tf",
+				"start_line": 51,
+				"end_line": 51
+			}
+		}
+	]
+}

@@ -1,0 +1,466 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A2A Performance Benchmark Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .metric-card.success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .metric-card.warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .metric-value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .metric-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .pass {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .fail {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .critical {
+            background-color: #e74c3c;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .timestamp {
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        .chart-container {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>A2A Protocol - Performance Benchmark Report</h1>
+        <p class="timestamp">Generated: {timestamp}</p>
+<p class='timestamp'>Report generated: 2026-02-07 05:54:26</p>
+        <h2>Performance Benchmark Results</h2>
+        <div class="summary">
+            <div class="metric-card">
+                <div class="metric-label">Total Tests</div>
+                <div class="metric-value">17</div>
+            </div>
+            <div class="metric-card success">
+                <div class="metric-label">Passed SLA</div>
+                <div class="metric-value">13</div>
+            </div>
+            <div class="metric-card warning">
+                <div class="metric-label">Failed SLA</div>
+                <div class="metric-value">4</div>
+            </div>
+        </div>
+
+        <h3>Test Results</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Test Name</th>
+                    <th>Requests</th>
+                    <th>Success Rate</th>
+                    <th>Avg Latency</th>
+                    <th>P95 Latency</th>
+                    <th>P99 Latency</th>
+                    <th>Throughput</th>
+                    <th>SLA</th>
+                </tr>
+            </thead>
+            <tbody>
+        
+                <tr>
+                    <td>health_check_latency</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>2.76ms</td>
+                    <td>1.77ms</td>
+                    <td>102.73ms</td>
+                    <td>360.53 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__health</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.63ms</td>
+                    <td>1.49ms</td>
+                    <td>102.63ms</td>
+                    <td>378.56 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__bridge_status</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.65ms</td>
+                    <td>1.56ms</td>
+                    <td>102.19ms</td>
+                    <td>375.43 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__agents</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.40ms</td>
+                    <td>1.39ms</td>
+                    <td>102.65ms</td>
+                    <td>414.51 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__workflows</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.39ms</td>
+                    <td>1.40ms</td>
+                    <td>102.38ms</td>
+                    <td>415.92 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__metrics</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.35ms</td>
+                    <td>1.36ms</td>
+                    <td>102.57ms</td>
+                    <td>422.87 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__config</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.38ms</td>
+                    <td>1.44ms</td>
+                    <td>102.14ms</td>
+                    <td>418.55 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>endpoint_latency__system_info</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>2.32ms</td>
+                    <td>1.30ms</td>
+                    <td>102.42ms</td>
+                    <td>429.00 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>concurrent_throughput_10</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>9.18ms</td>
+                    <td>17.80ms</td>
+                    <td>107.88ms</td>
+                    <td>732.92 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>concurrent_throughput_50</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>32.09ms</td>
+                    <td>120.72ms</td>
+                    <td>121.91ms</td>
+                    <td>982.27 req/s</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+                <tr>
+                    <td>concurrent_throughput_100</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>68.82ms</td>
+                    <td>144.98ms</td>
+                    <td>147.03ms</td>
+                    <td>923.30 req/s</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+                <tr>
+                    <td>concurrent_throughput_200</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>229.49ms</td>
+                    <td>496.26ms</td>
+                    <td>543.04ms</td>
+                    <td>633.97 req/s</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+                <tr>
+                    <td>burst_load</td>
+                    <td>500</td>
+                    <td>100.00%</td>
+                    <td>28.54ms</td>
+                    <td>81.89ms</td>
+                    <td>89.72ms</td>
+                    <td>233.57 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>sustained_load</td>
+                    <td>1500</td>
+                    <td>100.00%</td>
+                    <td>21.86ms</td>
+                    <td>29.57ms</td>
+                    <td>121.09ms</td>
+                    <td>49.54 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>resource_usage</td>
+                    <td>1000</td>
+                    <td>100.00%</td>
+                    <td>99.63ms</td>
+                    <td>314.08ms</td>
+                    <td>340.36ms</td>
+                    <td>656.92 req/s</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+                <tr>
+                    <td>agent_discovery</td>
+                    <td>300</td>
+                    <td>100.00%</td>
+                    <td>2.62ms</td>
+                    <td>1.52ms</td>
+                    <td>102.72ms</td>
+                    <td>379.81 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>workflow_orchestration</td>
+                    <td>300</td>
+                    <td>100.00%</td>
+                    <td>2.54ms</td>
+                    <td>1.38ms</td>
+                    <td>102.44ms</td>
+                    <td>390.83 req/s</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+            </tbody>
+        </table>
+        
+        <h2>SLA Validation Results</h2>
+        <div class="summary">
+            <div class="metric-card">
+                <div class="metric-label">Total SLAs</div>
+                <div class="metric-value">14</div>
+            </div>
+            <div class="metric-card success">
+                <div class="metric-label">Passed</div>
+                <div class="metric-value">12</div>
+            </div>
+            <div class="metric-card warning">
+                <div class="metric-label">Failed</div>
+                <div class="metric-value">2</div>
+            </div>
+            <div class="metric-card warning">
+                <div class="metric-label">Critical Failures</div>
+                <div class="metric-value">1</div>
+            </div>
+        </div>
+
+        <h3>SLA Validation Details</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>SLA Name</th>
+                    <th>Measured Value</th>
+                    <th>Threshold</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+        
+                <tr>
+                    <td>System Availability </td>
+                    <td>100.00</td>
+                    <td>99.90</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Health Check Success Rate </td>
+                    <td>100.00</td>
+                    <td>99.95</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Health Check P50 Latency </td>
+                    <td>1.22</td>
+                    <td>20.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Health Check P95 Latency </td>
+                    <td>1.42</td>
+                    <td>100.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Health Check P99 Latency </td>
+                    <td>2.20</td>
+                    <td>200.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>API Endpoint P95 Latency </td>
+                    <td>1.38</td>
+                    <td>150.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Agent Discovery P95 Latency </td>
+                    <td>1.43</td>
+                    <td>200.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Workflow Query P95 Latency </td>
+                    <td>1.60</td>
+                    <td>200.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Minimum Throughput </td>
+                    <td>702.37</td>
+                    <td>100.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Burst Throughput </td>
+                    <td>481.13</td>
+                    <td>500.00</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+                <tr>
+                    <td>CPU Utilization </td>
+                    <td>1.00</td>
+                    <td>80.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Memory Usage </td>
+                    <td>49.40</td>
+                    <td>512.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Peak Memory Usage </td>
+                    <td>49.40</td>
+                    <td>1024.00</td>
+                    <td><span class="pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td>Error Rate <span class="critical">CRITICAL</span></td>
+                    <td>100.00</td>
+                    <td>0.10</td>
+                    <td><span class="fail">FAIL</span></td>
+                </tr>
+            
+            </tbody>
+        </table>
+        
+    </div>
+</body>
+</html>

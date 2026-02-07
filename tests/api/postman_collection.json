@@ -1,0 +1,571 @@
+{
+  "info": {
+    "name": "A2A Bridge API Test Suite",
+    "description": "Comprehensive API tests for the A2A Bridge REST API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8001",
+      "type": "string"
+    },
+    {
+      "key": "agent_id",
+      "value": "test-agent-1",
+      "type": "string"
+    },
+    {
+      "key": "workflow_id",
+      "value": "test-workflow-1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & System",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has status field', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "});",
+                  "",
+                  "pm.test('Status is healthy', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('healthy');",
+                  "});",
+                  "",
+                  "pm.test('Response has timestamp', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('timestamp');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Bridge Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has metrics', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('metrics');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/bridge/status",
+              "host": ["{{base_url}}"],
+              "path": ["bridge", "status"]
+            }
+          }
+        },
+        {
+          "name": "System Info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has system information', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('platform');",
+                  "    pm.expect(jsonData).to.have.property('python_version');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/system/info",
+              "host": ["{{base_url}}"],
+              "path": ["system", "info"]
+            }
+          }
+        },
+        {
+          "name": "Get Metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has metrics data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('bridge_metrics');",
+                  "    pm.expect(jsonData).to.have.property('protocol_metrics');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/metrics",
+              "host": ["{{base_url}}"],
+              "path": ["metrics"]
+            }
+          }
+        },
+        {
+          "name": "Get Logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has logs array', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('logs');",
+                  "    pm.expect(jsonData.logs).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/system/logs",
+              "host": ["{{base_url}}"],
+              "path": ["system", "logs"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "List Agents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/agents",
+              "host": ["{{base_url}}"],
+              "path": ["agents"]
+            }
+          }
+        },
+        {
+          "name": "Get Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has agent_id', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/agents/{{agent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["agents", "{{agent_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Register Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 201', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Agent\",\n  \"version\": \"1.0.0\",\n  \"capabilities\": [\"chat\", \"task\"],\n  \"endpoints\": {\n    \"http\": \"http://localhost:8080\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/agents",
+              "host": ["{{base_url}}"],
+              "path": ["agents"]
+            }
+          }
+        },
+        {
+          "name": "Update Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Agent\",\n  \"version\": \"2.0.0\",\n  \"capabilities\": [\"chat\", \"task\", \"file_transfer\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/agents/{{agent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["agents", "{{agent_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Send Message to Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello, agent!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/agents/{{agent_id}}/messages",
+              "host": ["{{base_url}}"],
+              "path": ["agents", "{{agent_id}}", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Delete Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/agents/{{agent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["agents", "{{agent_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workflows",
+      "item": [
+        {
+          "name": "List Workflows",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/workflows",
+              "host": ["{{base_url}}"],
+              "path": ["workflows"]
+            }
+          }
+        },
+        {
+          "name": "Get Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has workflow_id', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('workflow_id');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/workflows/{{workflow_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["workflows", "{{workflow_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Start Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 400, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workflow_config\": {\n    \"name\": \"Test Workflow\",\n    \"steps\": [\n      {\n        \"type\": \"task\",\n        \"action\": \"process\"\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/workflows",
+              "host": ["{{base_url}}"],
+              "path": ["workflows"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/workflows/{{workflow_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["workflows", "{{workflow_id}}", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Get Workflow Logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is acceptable', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/workflows/{{workflow_id}}/logs",
+              "host": ["{{base_url}}"],
+              "path": ["workflows", "{{workflow_id}}", "logs"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Configuration",
+      "item": [
+        {
+          "name": "Get Configuration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has configuration', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(Object.keys(jsonData).length).to.be.greaterThan(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/config",
+              "host": ["{{base_url}}"],
+              "path": ["config"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

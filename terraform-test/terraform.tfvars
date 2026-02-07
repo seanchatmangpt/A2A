@@ -1,0 +1,9 @@
+project_id      = "mock-project-123456"
+region          = "us-central1"
+deployment_name = "a2a-test"
+node_count      = 3
+min_node_count  = 1
+max_node_count  = 5
+machine_type    = "n1-standard-4"
+disk_size_gb    = 100
+preemptible     = false

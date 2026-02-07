@@ -1,0 +1,179 @@
+{
+  "timestamp": "2026-02-07T05:50:14.526753",
+  "summary": {
+    "total_slas": 14,
+    "passed": 12,
+    "failed": 2,
+    "critical_failures": 1
+  },
+  "results": [
+    {
+      "sla_name": "System Availability",
+      "measured_value": 100.0,
+      "threshold": 99.9,
+      "passed": true,
+      "timestamp": "2026-02-07T05:49:58.585717",
+      "details": {
+        "metric_type": "availability",
+        "operator": "gte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Health Check Success Rate",
+      "measured_value": 100.0,
+      "threshold": 99.95,
+      "passed": true,
+      "timestamp": "2026-02-07T05:49:59.779702",
+      "details": {
+        "metric_type": "availability",
+        "operator": "gte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Health Check P50 Latency",
+      "measured_value": 1.2225359998865315,
+      "threshold": 20.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:00.033565",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "Health Check P95 Latency",
+      "measured_value": 1.4231410000320466,
+      "threshold": 100.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:00.285148",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Health Check P99 Latency",
+      "measured_value": 2.195973999960188,
+      "threshold": 200.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:00.536696",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "API Endpoint P95 Latency",
+      "measured_value": 1.381385000058799,
+      "threshold": 150.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:00.781607",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Agent Discovery P95 Latency",
+      "measured_value": 1.4263570001276094,
+      "threshold": 200.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:01.031599",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "Workflow Query P95 Latency",
+      "measured_value": 1.5989569999419473,
+      "threshold": 200.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:01.295639",
+      "details": {
+        "metric_type": "latency",
+        "operator": "lte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "Minimum Throughput",
+      "measured_value": 702.3674238946357,
+      "threshold": 100.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:06.309010",
+      "details": {
+        "metric_type": "throughput",
+        "operator": "gte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Burst Throughput",
+      "measured_value": 481.1338878059272,
+      "threshold": 500.0,
+      "passed": false,
+      "timestamp": "2026-02-07T05:50:11.327492",
+      "details": {
+        "metric_type": "throughput",
+        "operator": "gte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "CPU Utilization",
+      "measured_value": 1.0,
+      "threshold": 80.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:13.367651",
+      "details": {
+        "metric_type": "resource",
+        "operator": "lte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "Memory Usage",
+      "measured_value": 49.40234375,
+      "threshold": 512.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:13.368700",
+      "details": {
+        "metric_type": "resource",
+        "operator": "lte",
+        "critical": false
+      }
+    },
+    {
+      "sla_name": "Peak Memory Usage",
+      "measured_value": 49.40234375,
+      "threshold": 1024.0,
+      "passed": true,
+      "timestamp": "2026-02-07T05:50:13.369817",
+      "details": {
+        "metric_type": "resource",
+        "operator": "lte",
+        "critical": true
+      }
+    },
+    {
+      "sla_name": "Error Rate",
+      "measured_value": 100.0,
+      "threshold": 0.1,
+      "passed": false,
+      "timestamp": "2026-02-07T05:50:14.525793",
+      "details": {
+        "metric_type": "availability",
+        "operator": "lte",
+        "critical": true
+      }
+    }
+  ]
+}

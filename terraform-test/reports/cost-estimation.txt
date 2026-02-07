@@ -1,0 +1,337 @@
+================================================================================
+TERRAFORM INFRASTRUCTURE COST ESTIMATION
+================================================================================
+Generated: $(date '+%Y-%m-%d %H:%M:%S')
+Project: mock-project-123456
+Region: us-central1
+Environment: Test
+
+================================================================================
+RESOURCE SUMMARY
+================================================================================
+
+Google Cloud Platform Resources:
+  ✓ VPC Network (google_compute_network)
+  ✓ Subnet with secondary ranges (google_compute_subnetwork)
+  ✓ Cloud Router (google_compute_router)
+  ✓ Cloud NAT (google_compute_router_nat)
+  ✓ GKE Regional Cluster (google_container_cluster)
+  ✓ GKE Node Pool with autoscaling (google_container_node_pool)
+  ✓ Firewall rules (google_compute_firewall) x2
+
+================================================================================
+DETAILED COST BREAKDOWN
+================================================================================
+
+1. NETWORKING
+─────────────────────────────────────────────────────────────────────
+
+VPC Network (google_compute_network.vpc)
+  Description: Custom VPC with regional routing
+  Cost: FREE (no charge for VPC networks)
+
+Subnet (google_compute_subnetwork.gke_subnet)
+  Description: Subnet with secondary IP ranges for GKE
+  - Primary CIDR: 10.0.0.0/24 (256 IPs)
+  - Pods CIDR: 10.1.0.0/16 (65,536 IPs)
+  - Services CIDR: 10.2.0.0/16 (65,536 IPs)
+  Cost: FREE (no charge for subnets)
+
+Cloud Router (google_compute_router.router)
+  Description: Router for NAT gateway
+  Cost: $0.015/hour = $10.95/month
+
+Cloud NAT (google_compute_router_nat.nat)
+  Description: NAT gateway for private cluster egress
+  - NAT Gateway: $0.045/hour = $32.85/month
+  - Data Processing: $0.045/GB
+  - Estimated data transfer: 100 GB/month = $4.50/month
+  Total NAT Cost: $37.35/month
+
+Firewall Rules (2 rules)
+  Description: Internal communication + health check
+  Cost: FREE (included with VPC)
+
+  Subtotal - Networking: $48.30/month
+
+================================================================================
+
+2. GOOGLE KUBERNETES ENGINE (GKE)
+─────────────────────────────────────────────────────────────────────
+
+GKE Cluster (google_container_cluster.primary)
+  Description: Regional GKE cluster with private nodes
+  Configuration:
+    - Location: us-central1 (regional)
+    - Master version: 1.28+ (REGULAR channel)
+    - Private cluster with Workload Identity
+    - Network policy enabled
+    - HTTP load balancing enabled
+    - Horizontal pod autoscaling enabled
+
+  Cluster Management Fee:
+    - Regional cluster: $0.10/hour
+    - Monthly cost: $73.00/month
+
+  Master Features (included in management fee):
+    ✓ High availability (multi-zonal control plane)
+    ✓ Automated upgrades and patches
+    ✓ Workload Identity
+    ✓ Network policy enforcement
+    ✓ Integrated logging & monitoring
+
+GKE Node Pool (google_container_node_pool.primary_nodes)
+  Description: Autoscaling node pool
+  Configuration:
+    - Machine type: n1-standard-4
+      * vCPUs: 4
+      * Memory: 15 GB
+      * Architecture: x86_64
+    - Nodes per zone: 3 (for regional cluster = 9 total)
+    - Autoscaling: 1-5 nodes per zone
+    - Disk: 100 GB pd-standard per node
+    - Features: Auto-repair, auto-upgrade, shielded nodes
+
+  Compute Costs (per node):
+    - n1-standard-4: $0.190/hour
+    - Monthly (730 hours): $138.70/node
+    - With 3 nodes/zone × 3 zones = 9 nodes: $1,248.30/month
+    - With 3 nodes total (single zone): $416.10/month
+
+  Note: Regional cluster deploys nodes across 3 zones.
+  For testing/dev, use zonal cluster to reduce cost by 67%.
+
+  Storage Costs (per node):
+    - pd-standard 100GB: $0.04/GB/month = $4.00/node/month
+    - 9 nodes (regional): $36.00/month
+    - 3 nodes (zonal): $12.00/month
+
+  Security Features (included):
+    ✓ Shielded nodes with Secure Boot
+    ✓ Integrity monitoring
+    ✓ Workload Identity integration
+    ✓ Metadata concealment
+
+  Subtotal - GKE (Regional with 9 nodes): $1,357.30/month
+  Subtotal - GKE (Zonal with 3 nodes): $501.10/month
+
+================================================================================
+
+3. OPERATIONS & MONITORING
+─────────────────────────────────────────────────────────────────────
+
+Cloud Logging
+  Description: Kubernetes control plane & workload logs
+  Allowance: First 50 GB/month FREE
+  Cost: $0.50/GB for additional logs
+  Estimated: 20 GB/month = FREE
+
+Cloud Monitoring
+  Description: Cluster and workload metrics
+  Allowance: First 150 MB/month FREE
+  Metrics ingestion: Included for GKE metrics
+  Estimated cost: $0-5/month
+
+  Subtotal - Operations: $0-5/month
+
+================================================================================
+
+MONTHLY COST SUMMARY
+================================================================================
+
+OPTION A: REGIONAL CLUSTER (High Availability - Production)
+────────────────────────────────────────────────────────────
+
+Networking:
+  Cloud Router:                     $    10.95
+  Cloud NAT (gateway + 100GB):      $    37.35
+                                    ──────────
+  Subtotal:                         $    48.30
+
+GKE Regional Cluster:
+  Cluster management:               $    73.00
+  Compute (9 nodes):                $ 1,248.30
+  Storage (9 × 100GB disks):        $    36.00
+                                    ──────────
+  Subtotal:                         $ 1,357.30
+
+Operations:
+  Logging & Monitoring:             $     2.00
+                                    ──────────
+  Subtotal:                         $     2.00
+
+════════════════════════════════════════════
+TOTAL (Regional):                   $ 1,407.60/month
+════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────────
+
+OPTION B: ZONAL CLUSTER (Cost-Optimized - Dev/Test)
+────────────────────────────────────────────────────────────
+
+Networking:
+  Cloud Router:                     $    10.95
+  Cloud NAT (gateway + 100GB):      $    37.35
+                                    ──────────
+  Subtotal:                         $    48.30
+
+GKE Zonal Cluster:
+  Cluster management:               $    73.00
+  Compute (3 nodes):                $   416.10
+  Storage (3 × 100GB disks):        $    12.00
+                                    ──────────
+  Subtotal:                         $   501.10
+
+Operations:
+  Logging & Monitoring:             $     2.00
+                                    ──────────
+  Subtotal:                         $     2.00
+
+════════════════════════════════════════════
+TOTAL (Zonal):                      $   551.40/month
+════════════════════════════════════════════
+
+================================================================================
+COST OPTIMIZATION RECOMMENDATIONS
+================================================================================
+
+1. USE PREEMPTIBLE NODES (Save ~80%)
+   ┌────────────────────────────────────────────────────────────┐
+   │ Preemptible n1-standard-4: $0.042/hour vs $0.190/hour     │
+   │ Monthly savings: $96.23/node × 3 nodes = $288.69/month    │
+   │ New monthly cost: $262.71 (zonal) vs $551.40 (standard)   │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Dev, test, batch workloads
+   Trade-off: Nodes may be terminated with 30-second notice
+
+2. COMMITTED USE DISCOUNTS (Save ~57%)
+   ┌────────────────────────────────────────────────────────────┐
+   │ 3-year commitment: 57% discount on compute                 │
+   │ 1-year commitment: 37% discount on compute                 │
+   │ Savings: ~$238/month on 3-node cluster                     │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Stable production workloads
+
+3. RIGHT-SIZE MACHINE TYPES
+   ┌────────────────────────────────────────────────────────────┐
+   │ n1-standard-2 (2vCPU, 7.5GB): $0.095/hour                  │
+   │ Savings: $47.63/node/month × 3 = $142.89/month             │
+   │ e2-standard-4 (4vCPU, 16GB): $0.134/hour                   │
+   │ Savings: $40.88/node/month × 3 = $122.64/month             │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Most workloads (E2 offers better price/performance)
+
+4. ENABLE CLUSTER AUTOSCALER TO MIN
+   ┌────────────────────────────────────────────────────────────┐
+   │ Scale to 1 node during off-hours (16 hours/day)           │
+   │ Savings: 2 nodes × 16hrs × 30 days = 960 hours            │
+   │ Monthly savings: ~$182/month                               │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Dev/test environments with predictable usage
+
+5. USE pd-balanced INSTEAD OF pd-ssd
+   ┌────────────────────────────────────────────────────────────┐
+   │ pd-standard: $0.040/GB (current)                           │
+   │ pd-balanced: $0.100/GB (2.5× faster)                       │
+   │ pd-ssd: $0.170/GB (not needed for most workloads)          │
+   └────────────────────────────────────────────────────────────┘
+   Recommendation: Keep pd-standard for cost optimization
+
+6. DISABLE CLOUD NAT FOR TESTING
+   ┌────────────────────────────────────────────────────────────┐
+   │ If using public endpoints for dev/test                     │
+   │ Savings: $37.35/month                                      │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Non-production without compliance requirements
+
+7. USE AUTOPILOT GKE (Alternative)
+   ┌────────────────────────────────────────────────────────────┐
+   │ Pay only for pod CPU/memory requests                       │
+   │ No cluster management fee                                  │
+   │ Typical savings: 30-50% for variable workloads             │
+   └────────────────────────────────────────────────────────────┘
+   Best for: Workloads with variable resource needs
+
+================================================================================
+OPTIMIZED COST SCENARIOS
+================================================================================
+
+Scenario 1: Maximum Cost Savings (Dev/Test)
+  - Zonal cluster in us-central1-a
+  - Preemptible nodes (e2-standard-2)
+  - Scale to 1 node off-hours
+  - Public endpoints (no NAT)
+
+  Estimated cost: $125-175/month (75% savings)
+
+Scenario 2: Balanced (Staging)
+  - Zonal cluster
+  - Standard nodes (e2-standard-4)
+  - Autoscaling enabled
+  - Cloud NAT for private access
+
+  Estimated cost: $350-450/month (35% savings)
+
+Scenario 3: Production (High Availability)
+  - Regional cluster
+  - Standard nodes (n1-standard-4)
+  - 1-year committed use
+  - Full monitoring & backup
+
+  Estimated cost: $800-900/month (with CUD)
+
+================================================================================
+ADDITIONAL VARIABLE COSTS (Not Included)
+================================================================================
+
+Traffic Costs:
+  - Internet egress: $0.12-0.23/GB (first 1TB/month free)
+  - Inter-region egress: $0.01-0.08/GB
+  - Load balancer data processing: $0.008-0.016/GB
+
+Storage (if added):
+  - Persistent volumes: $0.04-0.17/GB/month
+  - Cloud Storage buckets: $0.020-0.026/GB/month
+  - Snapshots: $0.026/GB/month
+
+Database (if added):
+  - Cloud SQL PostgreSQL: $95-800/month (depending on size/HA)
+  - Memorystore Redis: $40-600/month
+
+Security & Compliance (if added):
+  - Cloud Armor policies: $5/policy + $1/rule/month
+  - Binary Authorization: FREE
+  - Security Command Center: $0-5,000/month (Standard tier free)
+
+================================================================================
+PRICING NOTES & DISCLAIMERS
+================================================================================
+
+1. All prices are in USD and based on GCP pricing as of February 2026
+2. Sustained use discounts automatically applied (up to 30% for monthly usage)
+3. Preemptible VM pricing may vary based on demand
+4. Regional clusters deploy resources across 3 zones
+5. Free tier allowances applied where applicable
+6. Prices vary by region (us-central1 used for estimates)
+7. Enterprise support: $150/month minimum + % of spend
+
+Official Pricing Resources:
+  - GCP Pricing Calculator: https://cloud.google.com/products/calculator
+  - GKE Pricing: https://cloud.google.com/kubernetes-engine/pricing
+  - Compute Engine Pricing: https://cloud.google.com/compute/pricing
+  - Network Pricing: https://cloud.google.com/vpc/network-pricing
+
+================================================================================
+COST MONITORING RECOMMENDATIONS
+================================================================================
+
+1. Enable budget alerts in GCP Console
+2. Set up cost anomaly detection
+3. Use Labels for cost attribution:
+   - environment: dev/staging/prod
+   - team: engineering/data/ops
+   - project: a2a
+4. Review Cloud Billing reports weekly
+5. Enable recommendations in Cost Management
+
+================================================================================

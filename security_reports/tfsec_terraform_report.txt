@@ -1,0 +1,144 @@
+
+Result #1 CRITICAL Public cluster access is enabled. 
+────────────────────────────────────────────────────────────────────────────────
+  git::https:/github.com/terraform-aws-modules/terraform-aws-eks?ref=a68aac6cf29011e95405207d409d03360d3af56d/main.tf:50
+   via main.tf:81-149 (module.eks)
+────────────────────────────────────────────────────────────────────────────────
+   27    resource "aws_eks_cluster" "this" {
+   ..  
+   50  [     endpoint_public_access  = var.cluster_endpoint_public_access (true)
+  ...  
+  105    }
+────────────────────────────────────────────────────────────────────────────────
+          ID aws-eks-no-public-cluster-access
+      Impact EKS can be access from the internet
+  Resolution Don't enable public access to EKS Clusters
+
+  More Information
+  - https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/no-public-cluster-access/
+  - https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#endpoint_public_access
+────────────────────────────────────────────────────────────────────────────────
+
+
+Result #2 CRITICAL Cluster allows access from a public CIDR: 0.0.0.0/0. 
+────────────────────────────────────────────────────────────────────────────────
+  git::https:/github.com/terraform-aws-modules/terraform-aws-eks?ref=a68aac6cf29011e95405207d409d03360d3af56d/main.tf:51
+   via main.tf:81-149 (module.eks)
+────────────────────────────────────────────────────────────────────────────────
+   27    resource "aws_eks_cluster" "this" {
+   ..  
+   51  [     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
+  ...  
+  105    }
+────────────────────────────────────────────────────────────────────────────────
+          ID aws-eks-no-public-cluster-access-to-cidr
+      Impact EKS can be accessed from the internet
+  Resolution Don't enable public access to EKS Clusters
+
+  More Information
+  - https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/no-public-cluster-access-to-cidr/
+  - https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#vpc_config
+────────────────────────────────────────────────────────────────────────────────
+
+
+Result #3 CRITICAL Security group rule allows egress to multiple public internet addresses. 
+────────────────────────────────────────────────────────────────────────────────
+  git::https:/github.com/terraform-aws-modules/terraform-aws-eks?ref=a68aac6cf29011e95405207d409d03360d3af56d/node_groups.tf:222
+   via main.tf:81-149 (module.eks)
+────────────────────────────────────────────────────────────────────────────────
+  206    resource "aws_security_group_rule" "node" {
+  ...  
+  222  [   cidr_blocks              = lookup(each.value, "cidr_blocks", null)
+  ...  
+  227    }
+────────────────────────────────────────────────────────────────────────────────
+          ID aws-ec2-no-public-egress-sgr
+      Impact Your port is egressing data to the internet
+  Resolution Set a more restrictive cidr range
+
+  More Information
+  - https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/ec2/no-public-egress-sgr/
+  - https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group
+────────────────────────────────────────────────────────────────────────────────
+
+
+Results #4-5 MEDIUM Control plane scheduler logging is not enabled. (2 similar results)
+────────────────────────────────────────────────────────────────────────────────
+  git::https:/github.com/terraform-aws-modules/terraform-aws-eks?ref=a68aac6cf29011e95405207d409d03360d3af56d/main.tf:27-105
+   via main.tf:81-149 (module.eks)
+────────────────────────────────────────────────────────────────────────────────
+   27  ┌ resource "aws_eks_cluster" "this" {
+   28  │   count = local.create ? 1 : 0
+   29  │ 
+   30  │   name                      = var.cluster_name
+   31  │   role_arn                  = local.cluster_role
+   32  │   version                   = var.cluster_version
+   33  │   enabled_cluster_log_types = var.cluster_enabled_log_types
+   34  │ 
+   35  └   access_config {
+   ..  
+────────────────────────────────────────────────────────────────────────────────
+  Individual Causes
+  - git::https:/github.com/terraform-aws-modules/terraform-aws-eks?ref=a68aac6cf29011e95405207d409d03360d3af56d/main.tf:81-149 (module.eks) 2 instances
+────────────────────────────────────────────────────────────────────────────────
+          ID aws-eks-enable-control-plane-logging
+      Impact Logging provides valuable information about access and usage
+  Resolution Enable logging for the EKS control plane
+
+  More Information
+  - https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/eks/enable-control-plane-logging/
+  - https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster#enabled_cluster_log_types
+────────────────────────────────────────────────────────────────────────────────
+
+
+Result #6 MEDIUM VPC Flow Logs is not enabled for VPC  
+────────────────────────────────────────────────────────────────────────────────
+  git::https:/github.com/terraform-aws-modules/terraform-aws-vpc?ref=acadfc42ba1ec23404eec03b69603a2cc52679b1/main.tf:28-51
+   via main.tf:152-172 (module.vpc)
+────────────────────────────────────────────────────────────────────────────────
+   28  ┌ resource "aws_vpc" "this" {
+   29  │   count = local.create_vpc ? 1 : 0
+   30  │ 
+   31  │   cidr_block          = var.use_ipam_pool ? null : var.cidr
+   32  │   ipv4_ipam_pool_id   = var.ipv4_ipam_pool_id
+   33  │   ipv4_netmask_length = var.ipv4_netmask_length
+   34  │ 
+   35  │   assign_generated_ipv6_cidr_block     = var.enable_ipv6 && !var.use_ipam_pool ? true : null
+   36  └   ipv6_cidr_block                      = var.ipv6_cidr
+   ..  
+────────────────────────────────────────────────────────────────────────────────
+          ID aws-ec2-require-vpc-flow-logs-for-all-vpcs
+      Impact Without VPC flow logs, you risk not having enough information about network traffic flow to investigate incidents or identify security issues.
+  Resolution Enable flow logs for VPC
+
+  More Information
+  - https://aquasecurity.github.io/tfsec/v1.28.14/checks/aws/ec2/require-vpc-flow-logs-for-all-vpcs/
+────────────────────────────────────────────────────────────────────────────────
+
+
+  timings
+  ──────────────────────────────────────────
+  disk i/o             6.038307ms
+  parsing              15.001396291s
+  adaptation           3.659981ms
+  checks               5.658909ms
+  total                15.016753488s
+
+  counts
+  ──────────────────────────────────────────
+  modules downloaded   5
+  modules processed    4
+  blocks processed     741
+  files read           17
+
+  results
+  ──────────────────────────────────────────
+  passed               40
+  ignored              0
+  critical             3
+  high                 0
+  medium               3
+  low                  0
+
+  40 passed, 6 potential problem(s) detected.
+

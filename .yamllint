@@ -1,0 +1,56 @@
+---
+# yamllint configuration file for A2A project
+# See: https://yamllint.readthedocs.io/en/stable/configuration.html
+
+extends: default
+
+rules:
+  # Allow longer lines (common in CI/CD workflows and Kubernetes manifests)
+  line-length:
+    max: 120
+    level: warning
+
+  # Document start is optional
+  document-start:
+    present: false
+
+  # Allow various truthy values (common in GitHub Actions)
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false
+
+  # Be more lenient with indentation in some cases
+  indentation:
+    spaces: 2
+    indent-sequences: true
+
+  # Allow some flexibility with braces spacing
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Allow some flexibility with brackets spacing
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Comments are important but don't enforce strict indentation
+  comments-indentation: disable
+
+  # Allow trailing spaces occasionally
+  trailing-spaces: enable
+
+  # Require newline at end of file
+  new-line-at-end-of-file: enable
+
+  # Empty values are sometimes intentional
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+
+# Ignore specific paths if needed
+ignore: |
+  /node_modules/
+  /.git/
+  /venv/
+  /.venv/

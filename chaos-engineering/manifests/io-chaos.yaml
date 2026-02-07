@@ -1,0 +1,56 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: io-delay-test
+  namespace: default
+spec:
+  action: latency
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'postgres'
+  volumePath: /var/lib/postgresql/data
+  path: '**/*'
+  delay: '100ms'
+  percent: 50
+  duration: '1m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: io-fault-test
+  namespace: default
+spec:
+  action: fault
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'redis'
+  volumePath: /data
+  path: '**/*'
+  errno: 5
+  percent: 10
+  duration: '30s'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: io-attribution-test
+  namespace: default
+spec:
+  action: attrOverride
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'minio'
+  volumePath: /data
+  path: '**/*'
+  attr:
+    perm: 72
+  duration: '30s'

@@ -1,0 +1,29 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: TimeChaos
+metadata:
+  name: time-skew-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  timeOffset: '-1h'
+  duration: '1m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: TimeChaos
+metadata:
+  name: time-future-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'craftplan'
+  timeOffset: '+2h'
+  duration: '30s'

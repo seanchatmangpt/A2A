@@ -1,0 +1,326 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>A2A Load Test Results</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
+    h1 { color: #333; border-bottom: 3px solid #007bff; padding-bottom: 10px; }
+    .metric { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #007bff; }
+    .metric-name { font-weight: bold; color: #555; }
+    .metric-value { font-size: 24px; color: #007bff; margin: 5px 0; }
+    .pass { color: #28a745; }
+    .fail { color: #dc3545; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+    .summary-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; }
+    .summary-card h3 { margin: 0 0 10px 0; font-size: 14px; opacity: 0.9; }
+    .summary-card .value { font-size: 32px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>A2A Protocol - Load Test Results</h1>
+    <p>Test completed at: 2026-02-07T06:00:36.293Z</p>
+
+    <div class="summary">
+      <div class="summary-card">
+        <h3>Total Requests</h3>
+        <div class="value">13905</div>
+      </div>
+      <div class="summary-card">
+        <h3>Requests/sec</h3>
+        <div class="value">112.87</div>
+      </div>
+      <div class="summary-card">
+        <h3>Avg Response Time</h3>
+        <div class="value">3.15ms</div>
+      </div>
+      <div class="summary-card">
+        <h3>P95 Response Time</h3>
+        <div class="value">7.65ms</div>
+      </div>
+    </div>
+
+    <h2>Detailed Metrics</h2>
+    
+      <div class="metric">
+        <div class="metric-name">vus</div>
+        <div class="metric-value">
+          
+           | Min: 2.00
+           | Max: 100.00
+          
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">iteration_duration</div>
+        <div class="metric-value">
+          Avg: 2186.60
+           | Min: 1103.56
+           | Max: 3348.69
+           | P95: 3210.74
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_connecting</div>
+        <div class="metric-value">
+          Avg: 0.02
+           | Min: 0.00
+           | Max: 7.75
+           | P95: 0.00
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">successful_requests</div>
+        <div class="metric-value">
+          
+          
+          
+          
+           | Count: 13905
+           | Rate: 112.87
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">agent_registration_duration</div>
+        <div class="metric-value">
+          Avg: 2.94
+           | Min: 0.60
+           | Max: 104.97
+           | P95: 5.21
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">vus_max</div>
+        <div class="metric-value">
+          
+           | Min: 100.00
+           | Max: 100.00
+          
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_tls_handshaking</div>
+        <div class="metric-value">
+          Avg: 0.00
+           | Min: 0.00
+           | Max: 0.00
+           | P95: 0.00
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">errors</div>
+        <div class="metric-value">
+          
+          
+          
+          
+          
+           | Rate: 0.00
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_reqs</div>
+        <div class="metric-value">
+          
+          
+          
+          
+           | Count: 13905
+           | Rate: 112.87
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_sending</div>
+        <div class="metric-value">
+          Avg: 0.05
+           | Min: 0.00
+           | Max: 2.91
+           | P95: 0.15
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">checks</div>
+        <div class="metric-value">
+          
+          
+          
+          
+          
+           | Rate: 1.00
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">data_sent</div>
+        <div class="metric-value">
+          
+          
+          
+          
+           | Count: 2400483
+           | Rate: 19485.88
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">iterations</div>
+        <div class="metric-value">
+          
+          
+          
+          
+           | Count: 5543
+           | Rate: 45.00
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">health_check_duration</div>
+        <div class="metric-value">
+          Avg: 3.20
+           | Min: 0.46
+           | Max: 107.44
+           | P95: 5.25
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">workflow_execution_duration</div>
+        <div class="metric-value">
+          Avg: 1.56
+           | Min: 0.58
+           | Max: 13.01
+           | P95: 4.95
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_duration</div>
+        <div class="metric-value">
+          Avg: 3.15
+           | Min: 0.44
+           | Max: 107.44
+           | P95: 7.65
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_failed</div>
+        <div class="metric-value">
+          
+          
+          
+          
+          
+           | Rate: 0.00
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_waiting</div>
+        <div class="metric-value">
+          Avg: 2.95
+           | Min: 0.32
+           | Max: 107.33
+           | P95: 7.34
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">data_received</div>
+        <div class="metric-value">
+          
+          
+          
+          
+           | Count: 1073811130
+           | Rate: 8716641.59
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_receiving</div>
+        <div class="metric-value">
+          Avg: 0.15
+           | Min: 0.03
+           | Max: 5.18
+           | P95: 0.36
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_blocked</div>
+        <div class="metric-value">
+          Avg: 0.02
+           | Min: 0.00
+           | Max: 7.79
+           | P95: 0.01
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">group_duration</div>
+        <div class="metric-value">
+          Avg: 189.53
+           | Min: 102.63
+           | Max: 348.38
+           | P95: 214.69
+          
+          
+        </div>
+      </div>
+    
+      <div class="metric">
+        <div class="metric-name">http_req_duration{expected_response:true}</div>
+        <div class="metric-value">
+          Avg: 3.15
+           | Min: 0.44
+           | Max: 107.44
+           | P95: 7.65
+          
+          
+        </div>
+      </div>
+    
+  </div>
+</body>
+</html>
+  

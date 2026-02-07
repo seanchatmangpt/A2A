@@ -1,0 +1,26 @@
+# Cloud SQL Testing Dependencies
+
+# Core testing framework (from parent)
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+
+# Cloud SQL connector
+cloud-sql-python-connector[pg8000]>=1.7.0
+pg8000>=1.30.0
+sqlalchemy>=2.0.0
+
+# Google Cloud dependencies
+google-cloud-sql>=0.1.0
+google-cloud-monitoring>=2.15.0
+google-api-core>=2.14.0
+google-auth>=2.23.0
+
+# Database drivers
+psycopg2-binary>=2.9.9
+pymysql>=1.1.0
+
+# Async support
+asyncio>=3.4.3
+aiohttp>=3.9.0

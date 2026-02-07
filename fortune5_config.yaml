@@ -1,0 +1,266 @@
+# Fortune 5 Enterprise Cloud Cost Estimation Configuration
+# This configuration defines parameters for enterprise-scale cloud deployments
+
+deployment:
+  name: "Fortune 5 Enterprise Deployment"
+  version: "1.0.0"
+  environment: "production"
+
+  # Scale multipliers for different deployment sizes
+  scale_factors:
+    small: 5      # Small Fortune 5 deployment
+    medium: 15    # Medium Fortune 5 deployment
+    large: 50     # Large Fortune 5 deployment
+    global: 100   # Global Fortune 5 deployment
+
+# Multi-region deployment configuration
+multi_region:
+  enabled: true
+  primary_region: "us-east1"
+  secondary_regions:
+    - "us-west1"
+    - "europe-west1"
+    - "asia-southeast1"
+
+  # Cost multiplier for multi-region (includes replication, networking, etc.)
+  cost_multiplier: 3.0
+
+  # Data transfer costs between regions (GB/month)
+  estimated_cross_region_transfer_tb: 100
+
+  # Compliance requirements per region
+  compliance:
+    us: ["SOC2", "HIPAA", "PCI-DSS"]
+    eu: ["GDPR", "SOC2", "ISO27001"]
+    asia: ["SOC2", "ISO27001"]
+
+# Disaster Recovery configuration
+disaster_recovery:
+  enabled: true
+  rpo_hours: 1        # Recovery Point Objective
+  rto_hours: 2        # Recovery Time Objective
+
+  # DR cost multiplier (hot standby)
+  cost_multiplier: 2.5
+
+  # Backup configuration
+  backup:
+    frequency: "hourly"
+    retention_days: 90
+    cross_region: true
+    estimated_size_tb: 500
+
+# High Availability requirements
+high_availability:
+  sla_percentage: 99.99
+  availability_zones: 3
+  load_balancing: "global"
+  auto_scaling:
+    min_instances: 10
+    max_instances: 1000
+    target_cpu_utilization: 70
+
+# Security and Compliance
+security:
+  encryption:
+    at_rest: true
+    in_transit: true
+    key_management: "customer_managed"
+
+  monitoring:
+    log_retention_days: 365
+    audit_logs: true
+    security_information_event_management: true
+
+  compliance_certifications:
+    - "SOC2 Type II"
+    - "ISO27001"
+    - "PCI-DSS"
+    - "HIPAA"
+    - "FedRAMP"
+
+  # Additional security cost multiplier
+  cost_multiplier: 1.2
+
+# Performance requirements
+performance:
+  compute:
+    cpu_tier: "high_performance"
+    memory_tier: "optimized"
+    gpu_enabled: true
+
+  storage:
+    iops_tier: "extreme"
+    throughput_tier: "high"
+
+  network:
+    bandwidth_gbps: 100
+    cdn_enabled: true
+    global_accelerator: true
+
+# Cost optimization settings
+cost_optimization:
+  reserved_instances:
+    enabled: true
+    commitment_years: 3
+    coverage_percentage: 70
+    estimated_savings: 40
+
+  spot_instances:
+    enabled: true
+    coverage_percentage: 20
+    estimated_savings: 70
+
+  auto_shutdown:
+    dev_environments: true
+    non_production_hours: "nights_and_weekends"
+
+  resource_right_sizing:
+    enabled: true
+    review_frequency_days: 30
+    estimated_savings: 15
+
+  storage_lifecycle:
+    enabled: true
+    archive_after_days: 90
+    delete_after_days: 365
+    estimated_savings: 30
+
+# Budget and cost tracking
+budgeting:
+  annual_budget_usd: 50000000  # $50M for Fortune 5
+
+  # Alert thresholds
+  alerts:
+    warning_percentage: 75
+    critical_percentage: 90
+
+  # Cost allocation tags
+  cost_centers:
+    - engineering
+    - operations
+    - data_science
+    - analytics
+    - security
+
+  # Chargeback model
+  chargeback:
+    enabled: true
+    frequency: "monthly"
+    granularity: "resource_level"
+
+# Growth projections
+growth:
+  annual_growth_rate: 15  # 15% year-over-year
+  projection_years: 5
+
+  # Seasonal variations
+  seasonal_factors:
+    q1: 1.0
+    q2: 1.1
+    q3: 1.0
+    q4: 1.3  # Peak season
+
+# Enterprise support
+support:
+  level: "enterprise_premium"
+  cost_percentage: 10  # 10% of infrastructure cost
+
+  professional_services:
+    enabled: true
+    annual_hours: 2000
+    hourly_rate_usd: 300
+
+# Reporting configuration
+reporting:
+  frequency: "daily"
+
+  stakeholders:
+    - cfo
+    - cto
+    - infrastructure_lead
+    - finance_team
+
+  formats:
+    - json
+    - pdf
+    - html
+    - excel
+
+  dashboards:
+    - cost_trends
+    - resource_utilization
+    - optimization_opportunities
+    - compliance_status
+    - forecast_vs_actual
+
+# Infracost specific settings
+infracost:
+  api_key_env: "INFRACOST_API_KEY"
+
+  # Usage estimates for resources
+  usage_estimates:
+    compute:
+      hours_per_month: 730  # Full time
+      utilization_percentage: 80
+
+    storage:
+      growth_rate_monthly: 5  # 5% monthly growth
+
+    network:
+      egress_tb_monthly: 50
+      ingress_tb_monthly: 100
+
+    database:
+      connections_average: 500
+      queries_per_second: 10000
+
+  # Currency and locale
+  currency: "USD"
+  locale: "en-US"
+
+# Integration settings
+integrations:
+  terraform:
+    version: ">= 1.0"
+    backend: "gcs"
+
+  cloud_providers:
+    - gcp
+    - aws
+    - azure
+
+  monitoring:
+    - prometheus
+    - grafana
+    - datadog
+
+  cicd:
+    - github_actions
+    - jenkins
+    - gitlab_ci
+
+# Risk management
+risk_management:
+  # Buffer for unexpected costs
+  contingency_percentage: 20
+
+  # Known risks and mitigations
+  risks:
+    - name: "Unexpected traffic surge"
+      probability: "medium"
+      impact: "high"
+      mitigation: "Auto-scaling with budget caps"
+      cost_buffer: 25
+
+    - name: "Data transfer cost overrun"
+      probability: "high"
+      impact: "medium"
+      mitigation: "CDN and caching implementation"
+      cost_buffer: 15
+
+    - name: "Compliance requirement changes"
+      probability: "low"
+      impact: "high"
+      mitigation: "Regular compliance audits"
+      cost_buffer: 10

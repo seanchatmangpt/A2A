@@ -1,0 +1,54 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-delay-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  target: Request
+  port: 8080
+  path: '/.well-known/agent-card.json'
+  delay: '500ms'
+  duration: '1m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-abort-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'craftplan'
+  target: Request
+  port: 8080
+  path: '/api/*'
+  abort: true
+  duration: '30s'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-patch-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  target: Response
+  port: 8080
+  path: '/api/tasks'
+  replace:
+    body: 'eyJlcnJvciI6ICJzZXJ2aWNlIHVuYXZhaWxhYmxlIn0='  # base64: {"error": "service unavailable"}
+  duration: '30s'

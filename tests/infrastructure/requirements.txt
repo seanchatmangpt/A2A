@@ -1,0 +1,36 @@
+# Infrastructure Testing Requirements
+# Tests for network policies, firewall rules, and VPC connectivity
+
+# Core testing framework
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.1
+pytest-timeout>=2.2.0
+
+# Google Cloud SDK
+google-cloud-compute>=1.15.0
+google-cloud-container>=2.35.0
+google-cloud-dns>=0.35.0
+google-cloud-logging>=3.8.0
+google-api-core>=2.15.0
+google-auth>=2.25.2
+
+# Kubernetes Python Client
+kubernetes>=28.1.0
+
+# Network testing utilities
+ipaddress>=1.0.23
+netaddr>=0.10.1
+
+# Configuration and validation
+pydantic>=2.5.0
+pyyaml>=6.0.1
+
+# Reporting
+pytest-html>=3.1.1
+pytest-json-report>=1.5.0
+
+# Mocking for unit tests
+pytest-mock>=3.12.0
+responses>=0.24.1

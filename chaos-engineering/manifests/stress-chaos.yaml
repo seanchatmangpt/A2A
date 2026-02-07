@@ -1,0 +1,58 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cpu-stress-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  stressors:
+    cpu:
+      workers: 2
+      load: 80
+  duration: '2m'
+  scheduler:
+    cron: '@every 15m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: memory-stress-test
+  namespace: default
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'craftplan'
+  stressors:
+    memory:
+      workers: 2
+      size: '256MB'
+  duration: '1m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: combined-stress-test
+  namespace: default
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'elrmcp-bridge'
+  stressors:
+    cpu:
+      workers: 1
+      load: 50
+    memory:
+      workers: 1
+      size: '128MB'
+  duration: '1m30s'

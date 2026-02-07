@@ -1,0 +1,73 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-delay-test
+  namespace: default
+spec:
+  action: delay
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  delay:
+    latency: '100ms'
+    correlation: '25'
+    jitter: '20ms'
+  duration: '2m'
+  scheduler:
+    cron: '@every 10m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-loss-test
+  namespace: default
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'elrmcp-bridge'
+  loss:
+    loss: '25'
+    correlation: '25'
+  duration: '1m'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-partition-test
+  namespace: default
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'craftplan'
+  direction: both
+  duration: '30s'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-bandwidth-test
+  namespace: default
+spec:
+  action: bandwidth
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  bandwidth:
+    rate: '1mbps'
+    limit: 20000
+    buffer: 10000
+  duration: '1m'

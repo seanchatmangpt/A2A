@@ -1,0 +1,35 @@
+{
+  "test_type": "fortune5_scale",
+  "timestamp": "2026-02-07T06:06:54.194Z",
+  "scale_config": {
+    "peak_concurrent_users": 50000,
+    "daily_active_users": 5000000,
+    "peak_rps": 100000,
+    "response_time_sla": 200,
+    "p95_response_time_sla": 500,
+    "p99_response_time_sla": 1000,
+    "error_rate_threshold": 0.1
+  },
+  "test_results": {
+    "total_requests": 53613,
+    "requests_per_second": 288.3668968740235,
+    "data_transferred_mb": 0,
+    "avg_response_time": 3020.4545964325926,
+    "p95_response_time": 4222.876142999992,
+    "p99_response_time": 0,
+    "error_rate": 0,
+    "success_rate": 1
+  },
+  "business_metrics": {
+    "agent_discovery_p95": 4773.799999999999,
+    "workflow_orchestration_p95": 4287.9,
+    "metrics_aggregation_p95": 4195.599999999999
+  },
+  "sla_compliance": {
+    "response_time_sla_met": false,
+    "p95_sla_met": false,
+    "p99_sla_met": true,
+    "error_rate_sla_met": true
+  },
+  "passed": false
+}

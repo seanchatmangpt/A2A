@@ -1,0 +1,10 @@
+# Python requirements for GCP Marketplace Integration Tests
+
+# HTTP requests
+requests>=2.31.0
+
+# Optional: For enhanced testing capabilities
+# google-cloud-container>=2.40.0
+# google-cloud-sql>=1.6.0
+# google-cloud-compute>=1.15.0
+# kubernetes>=28.1.0

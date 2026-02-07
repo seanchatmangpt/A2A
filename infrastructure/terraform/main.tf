@@ -7,7 +7,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.0.0"
+      version = "~> 5.0"
     }
     google = {
       source  = "hashicorp/google"
@@ -28,6 +28,10 @@ terraform {
     random = {
       source  = "hashicorp/random"
       version = ">= 3.5.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = ">= 4.0.0"
     }
   }
 }
@@ -85,24 +89,25 @@ module "eks" {
   cluster_name    = "craftplan-${var.environment}-${random_string.suffix.result}"
   cluster_version = "1.28"
 
-  vpc_id     = module.vpc.vpc_id
-  subnets    = module.vpc.public_subnets
+  vpc_id                         = module.vpc.vpc_id
+  subnet_ids                     = module.vpc.private_subnets
+  control_plane_subnet_ids       = module.vpc.public_subnets
   cluster_endpoint_public_access = true
 
-  cluster_tags = {
+  tags = {
     Environment = var.environment
     Project     = "craftplan-mcp-a2a"
   }
 
-  # Node Groups
-  node_groups = {
+  # EKS Managed Node Groups (v20.0.0 uses eks_managed_node_groups instead of node_groups)
+  eks_managed_node_groups = {
     main = {
-      name           = "craftplan-node-group"
-      desired_size   = var.node_group_size
-      max_size       = var.node_group_max_size
-      min_size       = 1
+      name         = "craftplan-node-group"
+      min_size     = 1
+      max_size     = var.node_group_max_size
+      desired_size = var.node_group_size
 
-      instance_type = var.instance_type
+      instance_types = [var.instance_type]
       capacity_type  = "ON_DEMAND"
 
       subnet_ids = module.vpc.private_subnets
@@ -119,7 +124,7 @@ module "eks" {
         node-type   = "craftplan"
       }
 
-      taint = {
+      taints = {
         dedicated = {
           key    = "craftplan"
           value  = "main"
@@ -129,14 +134,7 @@ module "eks" {
     }
   }
 
-  # IAM Roles and Policies
-  iam_role_name = "craftplan-eks-role"
-  iam_role_additional_policies = {
-    AmazonEKSClusterPolicy = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-    AmazonEKSServicePolicy = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
-  }
-
-  # Additional Security Groups
+  # Cluster Security Group
   cluster_security_group_tags = {
     Environment = var.environment
     Project     = "craftplan-mcp-a2a"
@@ -172,49 +170,51 @@ module "vpc" {
 }
 
 # Module: EKS Add-ons
-module "eks_addons" {
-  source  = "terraform-aws-modules/eks/aws//modules/kubernetes-addons"
-  version = "20.0.0"
-
-  cluster_name      = module.eks.cluster_name
-  cluster_version   = module.eks.cluster_version
-  cluster_endpoint  = module.eks.cluster_endpoint
-  cluster_token     = data.aws_eks_cluster_auth.this.token
-
-  # VPC CNI
-  vpc_cni = {
-    most_recent = true
-    before      = null
-    after       = null
-    version     = "v1.12.0-eksbuild.1"
-  }
-
-  # Metrics Server
-  metrics_server = {
-    most_recent = true
-    before      = null
-    after       = null
-    version     = "v0.6.2"
-  }
-
-  # Cluster Autoscaler
-  cluster_autoscaler = {
-    most_recent = true
-    before      = null
-    after       = null
-    version     = "v1.23.0"
-    values      = [file("${path.module}/configs/cluster-autoscaler.yaml")]
-  }
-
-  # AWS Load Balancer Controller
-  aws_load_balancer_controller = {
-    most_recent = true
-    before      = null
-    after       = null
-    version     = "v1.4.7"
-    values      = [file("${path.module}/configs/aws-load-balancer-controller.yaml")]
-  }
-}
+# Note: kubernetes-addons submodule is not available in eks module v20.0.0
+# Consider using helm or kubernetes provider resources directly for add-ons
+# module "eks_addons" {
+#   source  = "terraform-aws-modules/eks/aws//modules/kubernetes-addons"
+#   version = "20.0.0"
+#
+#   cluster_name     = module.eks.cluster_name
+#   cluster_version  = module.eks.cluster_version
+#   cluster_endpoint = module.eks.cluster_endpoint
+#   cluster_token    = data.aws_eks_cluster_auth.this.token
+#
+#   # VPC CNI
+#   vpc_cni = {
+#     most_recent = true
+#     before      = null
+#     after       = null
+#     version     = "v1.12.0-eksbuild.1"
+#   }
+#
+#   # Metrics Server
+#   metrics_server = {
+#     most_recent = true
+#     before      = null
+#     after       = null
+#     version     = "v0.6.2"
+#   }
+#
+#   # Cluster Autoscaler
+#   cluster_autoscaler = {
+#     most_recent = true
+#     before      = null
+#     after       = null
+#     version     = "v1.23.0"
+#     values      = [file("${path.module}/configs/cluster-autoscaler.yaml")]
+#   }
+#
+#   # AWS Load Balancer Controller
+#   aws_load_balancer_controller = {
+#     most_recent = true
+#     before      = null
+#     after       = null
+#     version     = "v1.4.7"
+#     values      = [file("${path.module}/configs/aws-load-balancer-controller.yaml")]
+#   }
+# }
 
 # Kubernetes Namespace
 resource "kubernetes_namespace" "craftplan" {
@@ -238,32 +238,34 @@ resource "kubernetes_service_account" "craftplan" {
     name      = "craftplan-service-account"
     namespace = kubernetes_namespace.craftplan.metadata[0].name
 
-    annotations = {
-      "eks.amazonaws.com/role-arn" = module.iam_oidc_provider.iam_role_arn
-    }
+    # annotations = {
+    #   "eks.amazonaws.com/role-arn" = module.iam_oidc_provider.iam_role_arn
+    # }
   }
 }
 
 # IAM OIDC Provider
-module "iam_oidc_provider" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-openid-connect-provider"
-  version = "5.5.0"
-
-  create_iam_role             = true
-  create_iam_role_policy      = true
-  iam_role_policy_name_prefix = "craftplan"
-  iam_role_policy_description  = "Craftplan EKS IAM Policy"
-  iam_role_name               = "craftplan-${var.environment}-${random_string.suffix.result}"
-  iam_role_path               = "/"
-  iam_role_tags = {
-    Environment = var.environment
-    Project     = "craftplan-mcp-a2a"
-  }
-
-  url            = module.eks.cluster_oidc_issuer_url
-  client_id_list = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.eks.root_certificates]
-}
+# Note: iam-openid-connect-provider submodule not available in iam module v5.5.0
+# Consider creating OIDC provider resources directly
+# module "iam_oidc_provider" {
+#   source  = "terraform-aws-modules/iam/aws//modules/iam-openid-connect-provider"
+#   version = "5.5.0"
+#
+#   create_iam_role             = true
+#   create_iam_role_policy      = true
+#   iam_role_policy_name_prefix = "craftplan"
+#   iam_role_policy_description = "Craftplan EKS IAM Policy"
+#   iam_role_name               = "craftplan-${var.environment}-${random_string.suffix.result}"
+#   iam_role_path               = "/"
+#   iam_role_tags = {
+#     Environment = var.environment
+#     Project     = "craftplan-mcp-a2a"
+#   }
+#
+#   url             = module.eks.cluster_oidc_issuer_url
+#   client_id_list  = ["sts.amazonaws.com"]
+#   thumbprint_list = [data.tls_certificate.eks.root_certificates]
+# }
 
 # Outputs
 output "cluster_name" {
@@ -283,7 +285,7 @@ output "cluster_certificate_authority_data" {
 
 output "node_group_name" {
   description = "EKS node group name"
-  value       = module.eks.node_groups["main"].name
+  value       = try(module.eks.eks_managed_node_groups["main"].node_group_id, "")
 }
 
 output "vpc_id" {
@@ -312,10 +314,11 @@ output "service_account" {
 }
 
 # Data sources
-data "aws_eks_cluster_auth" "this" {
-  name = module.eks.cluster_name
-}
+# Note: These are only needed for the commented-out modules above
+# data "aws_eks_cluster_auth" "this" {
+#   name = module.eks.cluster_name
+# }
 
-data "tls_certificate" "eks" {
-  url = module.eks.cluster_oidc_issuer_url
-}
+# data "tls_certificate" "eks" {
+#   url = module.eks.cluster_oidc_issuer_url
+# }

@@ -1,0 +1,300 @@
+{
+  "analysis": {
+    "total_monthly_cost": 98930.0,
+    "total_hourly_cost": 135.53400000000002,
+    "by_resource_type": {
+      "google_container_cluster": {
+        "count": 1,
+        "monthly_cost": 25000.0,
+        "resources": [
+          {
+            "name": "google_container_cluster.primary",
+            "monthly_cost": 25000.0
+          }
+        ]
+      },
+      "google_sql_database_instance": {
+        "count": 1,
+        "monthly_cost": 15000.0,
+        "resources": [
+          {
+            "name": "google_sql_database_instance.primary",
+            "monthly_cost": 15000.0
+          }
+        ]
+      },
+      "google_storage_bucket": {
+        "count": 1,
+        "monthly_cost": 5000.0,
+        "resources": [
+          {
+            "name": "google_storage_bucket.data_lake",
+            "monthly_cost": 5000.0
+          }
+        ]
+      },
+      "google_compute_instance": {
+        "count": 1,
+        "monthly_cost": 10000.0,
+        "resources": [
+          {
+            "name": "google_compute_instance.app_servers",
+            "monthly_cost": 10000.0
+          }
+        ]
+      },
+      "google_compute_global_address": {
+        "count": 1,
+        "monthly_cost": 180.0,
+        "resources": [
+          {
+            "name": "google_compute_global_address.lb",
+            "monthly_cost": 180.0
+          }
+        ]
+      },
+      "google_kms_crypto_key": {
+        "count": 1,
+        "monthly_cost": 50.0,
+        "resources": [
+          {
+            "name": "google_kms_crypto_key.main",
+            "monthly_cost": 50.0
+          }
+        ]
+      },
+      "google_logging_project_sink": {
+        "count": 1,
+        "monthly_cost": 2000.0,
+        "resources": [
+          {
+            "name": "google_logging_project_sink.audit",
+            "monthly_cost": 2000.0
+          }
+        ]
+      },
+      "google_monitoring_dashboard": {
+        "count": 1,
+        "monthly_cost": 500.0,
+        "resources": [
+          {
+            "name": "google_monitoring_dashboard.main",
+            "monthly_cost": 500.0
+          }
+        ]
+      },
+      "google_compute_network": {
+        "count": 1,
+        "monthly_cost": 3000.0,
+        "resources": [
+          {
+            "name": "google_compute_network.vpc",
+            "monthly_cost": 3000.0
+          }
+        ]
+      },
+      "google_compute_firewall": {
+        "count": 1,
+        "monthly_cost": 0.0,
+        "resources": [
+          {
+            "name": "google_compute_firewall.allow_http",
+            "monthly_cost": 0.0
+          }
+        ]
+      },
+      "google_dns_managed_zone": {
+        "count": 1,
+        "monthly_cost": 200.0,
+        "resources": [
+          {
+            "name": "google_dns_managed_zone.main",
+            "monthly_cost": 200.0
+          }
+        ]
+      },
+      "google_bigquery_dataset": {
+        "count": 1,
+        "monthly_cost": 20000.0,
+        "resources": [
+          {
+            "name": "google_bigquery_dataset.analytics",
+            "monthly_cost": 20000.0
+          }
+        ]
+      },
+      "google_pubsub_topic": {
+        "count": 1,
+        "monthly_cost": 10000.0,
+        "resources": [
+          {
+            "name": "google_pubsub_topic.events",
+            "monthly_cost": 10000.0
+          }
+        ]
+      },
+      "google_redis_instance": {
+        "count": 1,
+        "monthly_cost": 5000.0,
+        "resources": [
+          {
+            "name": "google_redis_instance.cache",
+            "monthly_cost": 5000.0
+          }
+        ]
+      },
+      "google_compute_autoscaler": {
+        "count": 1,
+        "monthly_cost": 0.0,
+        "resources": [
+          {
+            "name": "google_compute_autoscaler.app",
+            "monthly_cost": 0.0
+          }
+        ]
+      },
+      "google_cloud_run_service": {
+        "count": 1,
+        "monthly_cost": 3000.0,
+        "resources": [
+          {
+            "name": "google_cloud_run_service.api",
+            "monthly_cost": 3000.0
+          }
+        ]
+      }
+    },
+    "by_service": {},
+    "high_cost_resources": [
+      {
+        "name": "google_container_cluster.primary",
+        "type": "google_container_cluster",
+        "monthly_cost": 25000.0,
+        "annual_cost": 300000.0
+      },
+      {
+        "name": "google_sql_database_instance.primary",
+        "type": "google_sql_database_instance",
+        "monthly_cost": 15000.0,
+        "annual_cost": 180000.0
+      },
+      {
+        "name": "google_storage_bucket.data_lake",
+        "type": "google_storage_bucket",
+        "monthly_cost": 5000.0,
+        "annual_cost": 60000.0
+      },
+      {
+        "name": "google_compute_instance.app_servers",
+        "type": "google_compute_instance",
+        "monthly_cost": 10000.0,
+        "annual_cost": 120000.0
+      },
+      {
+        "name": "google_logging_project_sink.audit",
+        "type": "google_logging_project_sink",
+        "monthly_cost": 2000.0,
+        "annual_cost": 24000.0
+      },
+      {
+        "name": "google_compute_network.vpc",
+        "type": "google_compute_network",
+        "monthly_cost": 3000.0,
+        "annual_cost": 36000.0
+      },
+      {
+        "name": "google_bigquery_dataset.analytics",
+        "type": "google_bigquery_dataset",
+        "monthly_cost": 20000.0,
+        "annual_cost": 240000.0
+      },
+      {
+        "name": "google_pubsub_topic.events",
+        "type": "google_pubsub_topic",
+        "monthly_cost": 10000.0,
+        "annual_cost": 120000.0
+      },
+      {
+        "name": "google_redis_instance.cache",
+        "type": "google_redis_instance",
+        "monthly_cost": 5000.0,
+        "annual_cost": 60000.0
+      },
+      {
+        "name": "google_cloud_run_service.api",
+        "type": "google_cloud_run_service",
+        "monthly_cost": 3000.0,
+        "annual_cost": 36000.0
+      }
+    ],
+    "optimization_opportunities": [
+      {
+        "resource": "google_sql_database_instance.primary",
+        "type": "storage",
+        "suggestion": "Consider using lifecycle policies or cheaper storage classes",
+        "potential_savings": 255.0
+      },
+      {
+        "resource": "google_storage_bucket.data_lake",
+        "type": "storage",
+        "suggestion": "Consider using lifecycle policies or cheaper storage classes",
+        "potential_savings": 1500.0
+      },
+      {
+        "resource": "google_bigquery_dataset.analytics",
+        "type": "storage",
+        "suggestion": "Consider using lifecycle policies or cheaper storage classes",
+        "potential_savings": 600.0
+      }
+    ],
+    "compliance_considerations": [
+      {
+        "area": "Data Residency",
+        "requirement": "Ensure multi-region deployment complies with data sovereignty laws",
+        "cost_impact": "High - requires regional data duplication"
+      },
+      {
+        "area": "Disaster Recovery",
+        "requirement": "Maintain hot standby in multiple regions",
+        "cost_impact": "Very High - doubles infrastructure costs"
+      },
+      {
+        "area": "Security & Compliance",
+        "requirement": "Enhanced security monitoring and audit logging",
+        "cost_impact": "Medium - additional logging and monitoring costs"
+      },
+      {
+        "area": "High Availability",
+        "requirement": "99.99% uptime SLA requirement",
+        "cost_impact": "High - redundancy across availability zones"
+      }
+    ],
+    "multi_region_costs": {}
+  },
+  "projections": {
+    "current_monthly": 98930.0,
+    "current_annual": 1187160.0,
+    "with_disaster_recovery": 247325.0,
+    "with_multi_region": 296790.0,
+    "with_compliance": 346255.0,
+    "enterprise_scale": {
+      "small_deployment": 494650.0,
+      "medium_deployment": 1483950.0,
+      "large_deployment": 4946500.0,
+      "global_deployment": 9893000.0
+    },
+    "five_year_projection": {
+      "year_1": 4155060.0,
+      "year_2": 4748640.0,
+      "year_3": 5460936.0,
+      "year_4": 6291948.0,
+      "year_5": 7241676.0
+    },
+    "optimization_savings": {
+      "monthly": 2355.0,
+      "annual": 28260.0,
+      "five_year": 141300.0
+    }
+  },
+  "timestamp": "20260207_054238"
+}

@@ -1,0 +1,76 @@
+{
+  "timestamp": "2026-02-07T05:48:01.359492",
+  "test_results": [
+    {
+      "test": "Pod Kill",
+      "status": "PASSED",
+      "availability": 100.0,
+      "recovery_time": "5s"
+    },
+    {
+      "test": "Network Delay",
+      "status": "PASSED",
+      "baseline_latency_ms": 35.45205156356807,
+      "chaos_latency_ms": 234.50246500534746,
+      "recovery_latency_ms": 31.828865741307975
+    },
+    {
+      "test": "Network Partition",
+      "status": "PASSED",
+      "partition_detected": true,
+      "recovery_successful": true
+    },
+    {
+      "test": "CPU Stress",
+      "status": "PASSED",
+      "baseline_cpu": 13.986220611219412,
+      "stress_cpu": 73.98622061121941,
+      "availability": 100.0
+    },
+    {
+      "test": "Memory Pressure",
+      "status": "PASSED",
+      "baseline_memory_mb": 253.72027289955267,
+      "stress_memory_mb": 453.7202728995527,
+      "availability": 100.0
+    },
+    {
+      "test": "Cascading Failure",
+      "status": "PASSED",
+      "services_affected": 4,
+      "recovery_successful": true
+    }
+  ],
+  "services": {
+    "a2a-agent": {
+      "replicas": 3,
+      "restarts": 2,
+      "final_cpu": 19.908356584799503,
+      "final_memory": 173.6226337952924
+    },
+    "craftplan": {
+      "replicas": 2,
+      "restarts": 0,
+      "final_cpu": 13.986220611219409,
+      "final_memory": 277.93188503023686
+    },
+    "elrmcp-bridge": {
+      "replicas": 2,
+      "restarts": 0,
+      "final_cpu": 24.193855344365346,
+      "final_memory": 253.7202728995527
+    },
+    "postgres": {
+      "replicas": 1,
+      "restarts": 0,
+      "final_cpu": 17.836764979644954,
+      "final_memory": 225.61298089499795
+    },
+    "redis": {
+      "replicas": 1,
+      "restarts": 0,
+      "final_cpu": 18.95969576009133,
+      "final_memory": 117.5360185249903
+    }
+  }
+}

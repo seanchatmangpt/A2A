@@ -1,0 +1,128 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: comprehensive-chaos-workflow
+  namespace: default
+spec:
+  entry: entry
+  templates:
+    - name: entry
+      templateType: Serial
+      deadline: 10m
+      children:
+        - network-delay-test
+        - pod-stress-test
+        - pod-kill-test
+        - recovery-validation
+
+    - name: network-delay-test
+      templateType: NetworkChaos
+      deadline: 2m
+      networkChaos:
+        direction: both
+        action: delay
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'a2a-agent'
+        delay:
+          latency: '200ms'
+          jitter: '50ms'
+        duration: '1m'
+
+    - name: pod-stress-test
+      templateType: StressChaos
+      deadline: 2m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'craftplan'
+        stressors:
+          cpu:
+            workers: 2
+            load: 70
+        duration: '1m'
+
+    - name: pod-kill-test
+      templateType: PodChaos
+      deadline: 1m
+      podChaos:
+        action: pod-kill
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'elrmcp-bridge'
+
+    - name: recovery-validation
+      templateType: Suspend
+      deadline: 1m
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: parallel-chaos-workflow
+  namespace: default
+spec:
+  entry: entry
+  templates:
+    - name: entry
+      templateType: Parallel
+      deadline: 5m
+      children:
+        - network-chaos
+        - cpu-stress
+        - memory-stress
+
+    - name: network-chaos
+      templateType: NetworkChaos
+      deadline: 2m
+      networkChaos:
+        action: loss
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'a2a-agent'
+        loss:
+          loss: '10'
+        duration: '1m'
+
+    - name: cpu-stress
+      templateType: StressChaos
+      deadline: 2m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'craftplan'
+        stressors:
+          cpu:
+            workers: 1
+            load: 60
+        duration: '1m'
+
+    - name: memory-stress
+      templateType: StressChaos
+      deadline: 2m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - default
+          labelSelectors:
+            'app': 'postgres'
+        stressors:
+          memory:
+            workers: 1
+            size: '200MB'
+        duration: '1m'

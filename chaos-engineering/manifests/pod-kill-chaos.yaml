@@ -1,0 +1,34 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-kill-test
+  namespace: default
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'a2a-agent'
+  scheduler:
+    cron: '@every 2m'
+  duration: '30s'
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-test
+  namespace: default
+spec:
+  action: pod-failure
+  mode: fixed
+  value: '1'
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      'app': 'craftplan'
+  duration: '1m'
+  scheduler:
+    cron: '@every 5m'
