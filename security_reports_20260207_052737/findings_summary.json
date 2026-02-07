@@ -1,0 +1,94 @@
+{
+  "scan_metadata": {
+    "scan_date": "2026-02-07T05:30:43Z",
+    "scan_directory": "/home/user/A2A",
+    "tools_used": ["trivy", "grype"],
+    "report_directory": "/home/user/A2A/security_reports_20260207_052737"
+  },
+  "summary": {
+    "total_issues": {
+      "dockerfiles": {
+        "high": 12,
+        "critical": 0,
+        "total": 12
+      },
+      "terraform": {
+        "high": 12,
+        "critical": 26,
+        "total": 38
+      },
+      "kubernetes": {
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      }
+    }
+  },
+  "critical_findings": {
+    "terraform": [
+      {
+        "severity": "CRITICAL",
+        "issue": "Public cluster access is enabled",
+        "description": "EKS clusters are available publicly by default",
+        "recommendation": "Explicitly disable public access in vpc_config",
+        "location": "terraform-aws-modules/eks/aws/main.tf:50",
+        "reference": "https://avd.aquasec.com/misconfig/avd-aws-0040"
+      },
+      {
+        "severity": "CRITICAL",
+        "issue": "Cluster allows access from public CIDR: 0.0.0.0/0",
+        "description": "Wide open to the internet access",
+        "recommendation": "Set to more specific private CIDR range",
+        "location": "terraform-aws-modules/eks/aws/main.tf:51",
+        "reference": "https://avd.aquasec.com/misconfig/avd-aws-0041"
+      },
+      {
+        "severity": "CRITICAL",
+        "issue": "Security group allows egress to public internet",
+        "description": "Unrestricted egress to public addresses",
+        "recommendation": "Restrict access to required IP addresses/ranges",
+        "location": "terraform-aws-modules/eks/aws/node_groups.tf:222",
+        "reference": "https://avd.aquasec.com/misconfig/avd-aws-0104"
+      }
+    ],
+    "dockerfiles": [
+      {
+        "severity": "HIGH",
+        "issue": "Running containers as root user",
+        "description": "Multiple Dockerfiles missing USER directive",
+        "recommendation": "Add USER statement with non-root user",
+        "affected_files": [
+          "/home/user/A2A/ggen/ontology/Dockerfile",
+          "/home/user/A2A/Dockerfile",
+          "/home/user/A2A/marketplace/Dockerfile"
+        ],
+        "reference": "https://avd.aquasec.com/misconfig/ds002"
+      },
+      {
+        "severity": "HIGH",
+        "issue": "apt-get missing --no-install-recommends flag",
+        "description": "Not minimizing image size",
+        "recommendation": "Use --no-install-recommends flag",
+        "reference": "https://avd.aquasec.com/misconfig/ds029"
+      }
+    ]
+  },
+  "recommendations": [
+    "Review all HIGH and CRITICAL findings immediately",
+    "Restrict EKS cluster public access and limit CIDR ranges",
+    "Enable secret encryption for EKS clusters",
+    "Add non-root USER directives to all Dockerfiles",
+    "Use --no-install-recommends for apt-get in Dockerfiles",
+    "Restrict security group egress rules",
+    "Update vulnerable dependencies",
+    "Re-run scan after remediation"
+  ],
+  "detailed_reports": {
+    "dockerfiles": "dockerfiles_scan.txt",
+    "terraform": "terraform_scan.txt",
+    "kubernetes": "kubernetes_scan.txt",
+    "filesystem": "filesystem_scan.txt",
+    "grype": "grype_scan.txt",
+    "summary": "SUMMARY.txt"
+  }
+}

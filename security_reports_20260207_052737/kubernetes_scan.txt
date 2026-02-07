@@ -1,0 +1,99 @@
+Kubernetes Manifests Security Scan Report - 20260207_052737
+========================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/elrmcp_bridge/deployment/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:44.573Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:45.165Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/elrmcp_bridge/deployment/helm/elrmcp-bridge
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:45.914Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:46.358Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/elrmcp_bridge/deployment/helm/elrmcp-bridge/templates
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:47.070Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:47.522Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:48.247Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:50.944Z	[34mINFO[0m	Detected config files: 4
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm/a2a-erl
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:51.681Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:54.374Z	[34mINFO[0m	Detected config files: 4
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm/a2a-erl/templates
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:55.090Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:55.483Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm/a2a-erl/templates/tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:56.195Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:56.616Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm/a2a-erl/tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:57.335Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:57.783Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/helm/tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:58.505Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:58.944Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/erlang/a2a_erl/scripts/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:59.667Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:00.262Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/ggen/templates/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:01.041Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:01.615Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:02.368Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:02.990Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/helm/templates
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:03.747Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:04.159Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/infrastructure/kubernetes/helm
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:04.886Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:05.425Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/infrastructure/kubernetes/helm/craftplan
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:06.170Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:06.744Z	[34mINFO[0m	Detected config files: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/infrastructure/kubernetes/helm/craftplan/templates
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:29:07.518Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:29:08.088Z	[34mINFO[0m	Detected config files: 0
+

@@ -79,7 +79,7 @@ data:
         "project_id": "{{ .Values.gcp.projectId | default "" }}",
         "region": "{{ .Values.gcp.region | default "us-central1" }}",
         "zone": "{{ .Values.gcp.zone | default "" }}",
-        "service_account": "{{ .Values.serviceAccount.annotations.iam.gke.io/gcp-service-account | default "" }}"
+        "service_account": "{{ index .Values.serviceAccount.annotations "iam.gke.io/gcp-service-account" | default "" }}"
       },
       "storage": {
         "type": "{{ .Values.storage.type | default "persistent" }}",

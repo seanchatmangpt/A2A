@@ -1,0 +1,13 @@
+Grype Vulnerability Scan Report - 20260207_052737
+========================================
+
+[0000]  WARN no explicit name and version provided for directory source, deriving artifact ID from the given path (which is not ideal) from=syft
+NAME                       INSTALLED  FIXED IN  TYPE           VULNERABILITY        SEVERITY  EPSS           RISK   
+requests                   2.31.0     2.32.4    python         GHSA-9hjg-9r4m-mvj7  Medium    < 0.1% (27th)  < 0.1  
+mcp                        0.4.0      1.9.4     python         GHSA-3qhf-m339-9g5v  High      < 0.1% (9th)   < 0.1  
+mcp                        0.4.0      1.23.0    python         GHSA-9h52-p55h-vw2f  High      < 0.1% (9th)   < 0.1  
+requests                   2.31.0     2.32.0    python         GHSA-9wx4-h78v-vm56  Medium    < 0.1% (13th)  < 0.1  
+mcp                        0.4.0      1.10.0    python         GHSA-j975-95f5-7wqh  High      < 0.1% (5th)   < 0.1  
+lycheeverse/lychee-action  v2         2.0.2     github-action  GHSA-65rg-554r-9j5x  Medium    < 0.1% (1st)   < 0.1  
+actions/download-artifact  v4         4.1.3     github-action  GHSA-cxww-7g56-2vh6  High      N/A            N/A
+[0063] ERROR discovered vulnerabilities at or above the severity threshold

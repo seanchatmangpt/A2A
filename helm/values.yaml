@@ -11,6 +11,13 @@ image:
 # Replica configuration
 replicaCount: 3
 
+# Update strategy
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
 # Resource limits and requests
 resources:
   limits:
@@ -55,6 +62,16 @@ readinessProbe:
   timeoutSeconds: 3
   successThreshold: 1
   failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 30
 
 # Pod security context
 podSecurityContext:
@@ -130,6 +147,10 @@ serviceAccount:
   annotations:
     iam.gke.io/gcp-service-account: ""
   name: ""
+
+# RBAC Configuration
+rbac:
+  create: true
 
 # Node selector
 nodeSelector: {}
@@ -356,3 +377,90 @@ tracing:
 # Storage configuration
 storage:
   type: "persistent"
+
+# SLO Configuration
+slo:
+  enabled: false
+  timeWindow: "5m"
+  availability:
+    target: 0.999
+    errorBudget: 0.001
+    weeklyTarget: 0.9995
+    weeklyErrorBudget: 0.0005
+  latency:
+    p95Target: 0.5
+    p99Target: 1.0
+    errorBudget: 0.001
+  errorRate:
+    target: 0.01
+  saturation:
+    target: 0.8
+
+# SSO Configuration
+sso:
+  enabled: false
+  defaultProvider: "saml"
+  session:
+    timeout: 28800
+    idleTimeout: 1800
+    absoluteTimeout: 43200
+    refreshTokenTTL: 604800
+    cookieName: "A2A_SESSION"
+    cookieSecure: true
+    cookieHttpOnly: true
+    cookieSameSite: "Strict"
+    cookieDomain: ""
+
+# Observability Configuration
+observability:
+  enabled: false
+  clusterName: "production"
+  scrapeInterval: "30s"
+  scrapeTimeout: "10s"
+  logging:
+    logLevel: "info"
+    flushInterval: 5
+    replicationFactor: 3
+    retentionPeriod: "744h"
+    maxLookBackPeriod: "744h"
+    ingestionRateMB: 50
+    ingestionBurstSizeMB: 100
+    lokiHost: "loki"
+    lokiPort: 3100
+    retryLimit: 5
+  tracing:
+    samplerType: "probabilistic"
+    samplerParam: 0.1
+    logSpans: false
+    maxQueueSize: 10000
+    flushInterval: "5s"
+    agentHost: "jaeger-agent"
+    agentPort: 6831
+    memoryLimitMiB: 2048
+    spikeMemoryLimitMiB: 512
+    samplingPercentage: 10
+    jaegerEndpoint: "jaeger-collector:4317"
+    tempoEndpoint: "tempo:4317"
+    insecure: true
+    logLevel: "info"
+  alerts:
+    resolveTimeout: "5m"
+    groupWait: "30s"
+    groupInterval: "5m"
+    repeatInterval: "4h"
+    errorRateThreshold: 5
+    latencyThreshold: 1
+    cpuThreshold: 0.8
+    memoryThreshold: 0.85
+    transactionFailureThreshold: 0.05
+    slaThreshold: 0.999
+    dbQueryThreshold: 1
+    cacheHitRateThreshold: 0.7
+    email:
+      to: "alerts@example.com"
+    slack:
+      apiUrl: ""
+      criticalChannel: "#alerts-critical"
+      warningChannel: "#alerts-warning"
+      businessChannel: "#business-alerts"
+      databaseChannel: "#database-alerts"

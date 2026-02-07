@@ -30,7 +30,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
             "targets": [
               {
-                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",service=\"{{ include \"a2a.fullname\" . }}\"}[5m])) by (status_code)",
+                "expr": "sum(rate(http_requests_total{namespace='{{ .Release.Namespace }}'}[5m])) by (status_code)",
                 "legendFormat": "{{`{{status_code}}`}}",
                 "refId": "A"
               }
@@ -47,12 +47,12 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
             "targets": [
               {
-                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le))",
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace='{{ .Release.Namespace }}'}[5m])) by (le))",
                 "legendFormat": "p95",
                 "refId": "A"
               },
               {
-                "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le))",
+                "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace='{{ .Release.Namespace }}'}[5m])) by (le))",
                 "legendFormat": "p99",
                 "refId": "B"
               }
@@ -69,7 +69,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
             "targets": [
               {
-                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "expr": "sum(rate(http_requests_total{namespace='{{ .Release.Namespace }}',status_code=~'5..'}[5m])) / sum(rate(http_requests_total{namespace='{{ .Release.Namespace }}'}[5m])) * 100",
                 "legendFormat": "Error Rate %",
                 "refId": "A"
               }
@@ -103,7 +103,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
             "targets": [
               {
-                "expr": "sum(active_connections{namespace=\"{{ .Release.Namespace }}\"})",
+                "expr": "sum(active_connections{namespace='{{ .Release.Namespace }}'})",
                 "legendFormat": "Active Connections",
                 "refId": "A"
               }
@@ -116,7 +116,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
             "targets": [
               {
-                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"{{ .Release.Namespace }}\",pod=~\"{{ include \"a2a.fullname\" . }}.*\"}[5m])) by (pod)",
+                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace='{{ .Release.Namespace }}',pod=~'{{ include "a2a.fullname" . }}.*'}[5m])) by (pod)",
                 "legendFormat": "{{`{{pod}}`}}",
                 "refId": "A"
               }
@@ -133,7 +133,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
             "targets": [
               {
-                "expr": "sum(container_memory_usage_bytes{namespace=\"{{ .Release.Namespace }}\",pod=~\"{{ include \"a2a.fullname\" . }}.*\"}) by (pod)",
+                "expr": "sum(container_memory_usage_bytes{namespace='{{ .Release.Namespace }}',pod=~'{{ include "a2a.fullname" . }}.*'}) by (pod)",
                 "legendFormat": "{{`{{pod}}`}}",
                 "refId": "A"
               }
@@ -150,7 +150,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
             "targets": [
               {
-                "expr": "histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le, operation))",
+                "expr": "histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket{namespace='{{ .Release.Namespace }}'}[5m])) by (le, operation))",
                 "legendFormat": "p95 - {{`{{operation}}`}}",
                 "refId": "A"
               }
@@ -163,7 +163,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
             "targets": [
               {
-                "expr": "sum(rate(cache_hits_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) / (sum(rate(cache_hits_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) + sum(rate(cache_misses_total{namespace=\"{{ .Release.Namespace }}\"}[5m]))) * 100",
+                "expr": "sum(rate(cache_hits_total{namespace='{{ .Release.Namespace }}'}[5m])) / (sum(rate(cache_hits_total{namespace='{{ .Release.Namespace }}'}[5m])) + sum(rate(cache_misses_total{namespace='{{ .Release.Namespace }}'}[5m]))) * 100",
                 "legendFormat": "Hit Rate %",
                 "refId": "A"
               }
@@ -198,7 +198,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
             "targets": [
               {
-                "expr": "sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 60",
+                "expr": "sum(rate(business_transactions_total{namespace='{{ .Release.Namespace }}'}[5m])) * 60",
                 "legendFormat": "Transactions/min",
                 "refId": "A"
               }
@@ -211,7 +211,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
             "targets": [
               {
-                "expr": "sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\",status=\"success\"}[5m])) / sum(rate(business_transactions_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "expr": "sum(rate(business_transactions_total{namespace='{{ .Release.Namespace }}',status='success'}[5m])) / sum(rate(business_transactions_total{namespace='{{ .Release.Namespace }}'}[5m])) * 100",
                 "refId": "A"
               }
             ],
@@ -238,7 +238,7 @@ data:
             "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
             "targets": [
               {
-                "expr": "sum(api_quota_used{namespace=\"{{ .Release.Namespace }}\"}) by (client_id) / sum(api_quota_limit{namespace=\"{{ .Release.Namespace }}\"}) by (client_id) * 100",
+                "expr": "sum(api_quota_used{namespace='{{ .Release.Namespace }}'}) by (client_id) / sum(api_quota_limit{namespace='{{ .Release.Namespace }}'}) by (client_id) * 100",
                 "legendFormat": "{{`{{client_id}}`}}",
                 "refId": "A"
               }
@@ -251,7 +251,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
             "targets": [
               {
-                "expr": "sum(increase(transaction_revenue_total{namespace=\"{{ .Release.Namespace }}\"}[1h]))",
+                "expr": "sum(increase(transaction_revenue_total{namespace='{{ .Release.Namespace }}'}[1h]))",
                 "refId": "A"
               }
             ],
@@ -268,7 +268,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
             "targets": [
               {
-                "expr": "sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\",latency_sla=\"met\"}[5m])) / sum(rate(http_requests_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "expr": "sum(rate(http_requests_total{namespace='{{ .Release.Namespace }}',latency_sla='met'}[5m])) / sum(rate(http_requests_total{namespace='{{ .Release.Namespace }}'}[5m])) * 100",
                 "refId": "A"
               }
             ],
@@ -309,17 +309,17 @@ data:
             "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
             "targets": [
               {
-                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Running\"})",
+                "expr": "count(kube_pod_status_phase{namespace='{{ .Release.Namespace }}',phase='Running'})",
                 "legendFormat": "Running",
                 "refId": "A"
               },
               {
-                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Pending\"})",
+                "expr": "count(kube_pod_status_phase{namespace='{{ .Release.Namespace }}',phase='Pending'})",
                 "legendFormat": "Pending",
                 "refId": "B"
               },
               {
-                "expr": "count(kube_pod_status_phase{namespace=\"{{ .Release.Namespace }}\",phase=\"Failed\"})",
+                "expr": "count(kube_pod_status_phase{namespace='{{ .Release.Namespace }}',phase='Failed'})",
                 "legendFormat": "Failed",
                 "refId": "C"
               }
@@ -332,12 +332,12 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
             "targets": [
               {
-                "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "expr": "sum(rate(container_network_receive_bytes_total{namespace='{{ .Release.Namespace }}'}[5m])) by (pod)",
                 "legendFormat": "RX - {{`{{pod}}`}}",
                 "refId": "A"
               },
               {
-                "expr": "sum(rate(container_network_transmit_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "expr": "sum(rate(container_network_transmit_bytes_total{namespace='{{ .Release.Namespace }}'}[5m])) by (pod)",
                 "legendFormat": "TX - {{`{{pod}}`}}",
                 "refId": "B"
               }
@@ -354,12 +354,12 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
             "targets": [
               {
-                "expr": "sum(rate(container_fs_reads_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "expr": "sum(rate(container_fs_reads_bytes_total{namespace='{{ .Release.Namespace }}'}[5m])) by (pod)",
                 "legendFormat": "Read - {{`{{pod}}`}}",
                 "refId": "A"
               },
               {
-                "expr": "sum(rate(container_fs_writes_bytes_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (pod)",
+                "expr": "sum(rate(container_fs_writes_bytes_total{namespace='{{ .Release.Namespace }}'}[5m])) by (pod)",
                 "legendFormat": "Write - {{`{{pod}}`}}",
                 "refId": "B"
               }
@@ -372,7 +372,7 @@ data:
             "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
             "targets": [
               {
-                "expr": "kubelet_volume_stats_used_bytes{namespace=\"{{ .Release.Namespace }}\"} / kubelet_volume_stats_capacity_bytes{namespace=\"{{ .Release.Namespace }}\"} * 100",
+                "expr": "kubelet_volume_stats_used_bytes{namespace='{{ .Release.Namespace }}'} / kubelet_volume_stats_capacity_bytes{namespace='{{ .Release.Namespace }}'} * 100",
                 "legendFormat": "{{`{{persistentvolumeclaim}}`}}",
                 "refId": "A"
               }
@@ -403,7 +403,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
             "targets": [
               {
-                "expr": "sum(rate(traces_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (service)",
+                "expr": "sum(rate(traces_total{namespace='{{ .Release.Namespace }}'}[5m])) by (service)",
                 "legendFormat": "{{`{{service}}`}}",
                 "refId": "A"
               }
@@ -416,7 +416,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
             "targets": [
               {
-                "expr": "sum(rate(span_duration_seconds_bucket{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (le)",
+                "expr": "sum(rate(span_duration_seconds_bucket{namespace='{{ .Release.Namespace }}'}[5m])) by (le)",
                 "format": "heatmap",
                 "refId": "A"
               }
@@ -429,7 +429,7 @@ data:
             "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
             "targets": [
               {
-                "expr": "sum(rate(traces_service_calls_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (source_service, destination_service)",
+                "expr": "sum(rate(traces_service_calls_total{namespace='{{ .Release.Namespace }}'}[5m])) by (source_service, destination_service)",
                 "refId": "A"
               }
             ]
@@ -441,7 +441,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
             "targets": [
               {
-                "expr": "sum(rate(span_errors_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) by (service, error_type)",
+                "expr": "sum(rate(span_errors_total{namespace='{{ .Release.Namespace }}'}[5m])) by (service, error_type)",
                 "legendFormat": "{{`{{service}}`}} - {{`{{error_type}}`}}",
                 "refId": "A"
               }
@@ -454,7 +454,7 @@ data:
             "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
             "targets": [
               {
-                "expr": "sum(rate(traces_sampled_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) / sum(rate(traces_total{namespace=\"{{ .Release.Namespace }}\"}[5m])) * 100",
+                "expr": "sum(rate(traces_sampled_total{namespace='{{ .Release.Namespace }}'}[5m])) / sum(rate(traces_total{namespace='{{ .Release.Namespace }}'}[5m])) * 100",
                 "refId": "A"
               }
             ]

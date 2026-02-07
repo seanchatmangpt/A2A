@@ -7,7 +7,7 @@ metadata:
     {{- include "a2a.labels" . | nindent 4 }}
     app.kubernetes.io/component: a2a-server
   annotations:
-    marketplace.cloud.google.com/deploy-info: '{"partner_id": "{{ .Values.gcpMarketplace.partnerId }}", "product_id": "{{ .Values.gcpMarketplace.productId }}", "partner_name": "{{ .Values.gcpMarketplace.partnerName }}"}'
+    marketplace.cloud.google.com/deploy-info: '{"partner_id": "{{ .Values.marketplace.partnerId }}", "product_id": "{{ .Values.marketplace.solutionId }}", "partner_name": "A2A Protocol"}'
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:

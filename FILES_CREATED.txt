@@ -1,0 +1,38 @@
+================================================================================
+FORTUNE 5 COST ESTIMATION TOOL - FILES CREATED
+================================================================================
+
+LOCATION: /home/user/A2A/
+
+MAIN SCRIPTS:
+=============
+/home/user/A2A/cost_estimator.py           (526 lines) - Main cost estimation engine
+/home/user/A2A/cost_analyzer.py            (389 lines) - Advanced analysis module  
+/home/user/A2A/demo_cost_estimation.py     (363 lines) - Demo with sample data
+/home/user/A2A/run_cost_estimation.sh      (executable) - Wrapper script
+
+CONFIGURATION:
+==============
+/home/user/A2A/fortune5_config.yaml        (196 lines) - Enterprise settings
+
+DOCUMENTATION:
+==============
+/home/user/A2A/COST_ESTIMATION_README.md   (500+ lines) - Full documentation
+/home/user/A2A/COST_TOOL_SUMMARY.txt       (summary) - Quick reference
+/home/user/A2A/FILES_CREATED.txt           (this file) - File listing
+
+OUTPUT DIRECTORY:
+=================
+/home/user/A2A/cost_estimates/             (directory) - Generated reports
+/home/user/A2A/cost_estimates/latest_cost_report.txt
+/home/user/A2A/cost_estimates/cost_analysis_*.json
+/home/user/A2A/cost_estimates/infracost_data_*.json
+/home/user/A2A/cost_estimates/cost_report_*.txt
+
+INSTALLED TOOLS:
+================
+/home/user/.local/bin/infracost            (v0.10.43) - Infracost CLI
+
+================================================================================
+TOTAL: 11 files created + 1 directory + 1 external tool installed
+================================================================================

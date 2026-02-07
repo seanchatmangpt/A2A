@@ -1,0 +1,781 @@
+Terraform/IaC Security Scan Report - 20260207_052737
+========================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/infrastructure/terraform
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:31.061Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:39.576Z	[34mINFO[0m	Detected config files: 5
+
+terraform-aws-modules/eks/aws/main.tf (terraform)
+=================================================
+Tests: 5 (SUCCESSES: 2, FAILURES: 3, EXCEPTIONS: 0)
+Failures: 3 (HIGH: 1, CRITICAL: 2)
+
+HIGH: Cluster does not have secret encryption enabled.
+════════════════════════════════════════
+EKS cluster resources should have the encryption_config block set with protection of the secrets resource.
+
+See https://avd.aquasec.com/misconfig/avd-aws-0039
+────────────────────────────────────────
+ terraform-aws-modules/eks/aws/main.tf:27-105
+   via main.tf:81-149 (module.eks)
+────────────────────────────────────────
+  27 ┌ resource "aws_eks_cluster" "this" {
+  28 │   count = local.create ? 1 : 0
+  29 │ 
+  30 │   name                      = var.cluster_name
+  31 │   role_arn                  = local.cluster_role
+  32 │   version                   = var.cluster_version
+  33 │   enabled_cluster_log_types = var.cluster_enabled_log_types
+  34 │ 
+  35 └   access_config {
+  ..   
+────────────────────────────────────────
+
+
+CRITICAL: Public cluster access is enabled.
+════════════════════════════════════════
+EKS clusters are available publicly by default, this should be explicitly disabled in the vpc_config of the EKS cluster resource.
+
+See https://avd.aquasec.com/misconfig/avd-aws-0040
+────────────────────────────────────────
+ terraform-aws-modules/eks/aws/main.tf:50
+   via terraform-aws-modules/eks/aws/main.tf:46-52 (vpc_config)
+    via terraform-aws-modules/eks/aws/main.tf:27-105 (aws_eks_cluster.this[0])
+     via main.tf:81-149 (module.eks)
+────────────────────────────────────────
+  27   resource "aws_eks_cluster" "this" {
+  ..   
+  50 [     endpoint_public_access  = var.cluster_endpoint_public_access
+ ...   
+ 105   }
+────────────────────────────────────────
+
+
+CRITICAL: Cluster allows access from a public CIDR: 0.0.0.0/0.
+════════════════════════════════════════
+EKS Clusters have public access cidrs set to 0.0.0.0/0 by default which is wide open to the internet. This should be explicitly set to a more specific private CIDR range
+
+See https://avd.aquasec.com/misconfig/avd-aws-0041
+────────────────────────────────────────
+ terraform-aws-modules/eks/aws/main.tf:51
+   via terraform-aws-modules/eks/aws/main.tf:46-52 (vpc_config)
+    via terraform-aws-modules/eks/aws/main.tf:27-105 (aws_eks_cluster.this[0])
+     via main.tf:81-149 (module.eks)
+────────────────────────────────────────
+  27   resource "aws_eks_cluster" "this" {
+  ..   
+  51 [     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
+ ...   
+ 105   }
+────────────────────────────────────────
+
+
+
+terraform-aws-modules/eks/aws/node_groups.tf (terraform)
+========================================================
+Tests: 2 (SUCCESSES: 1, FAILURES: 1, EXCEPTIONS: 0)
+Failures: 1 (HIGH: 0, CRITICAL: 1)
+
+CRITICAL: Security group rule allows egress to multiple public internet addresses.
+════════════════════════════════════════
+Opening up ports to connect out to the public internet is generally to be avoided. You should restrict access to IP addresses or ranges that are explicitly required where possible.
+
+See https://avd.aquasec.com/misconfig/avd-aws-0104
+────────────────────────────────────────
+ terraform-aws-modules/eks/aws/node_groups.tf:222
+   via terraform-aws-modules/eks/aws/node_groups.tf:206-227 (aws_security_group_rule.node["egress_all"])
+    via main.tf:81-149 (module.eks)
+────────────────────────────────────────
+ 206   resource "aws_security_group_rule" "node" {
+ ...   
+ 222 [   cidr_blocks              = lookup(each.value, "cidr_blocks", null)
+ ...   
+ 227   }
+────────────────────────────────────────
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Directory: /home/user/A2A/terraform
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-07T05:28:40.326Z	[34mINFO[0m	Misconfiguration scanning is enabled
+2026-02-07T05:28:42.846Z	[34mINFO[0m	Detected config files: 16
+
+capacity.tf (terraform)
+=======================
+Tests: 20 (SUCCESSES: 12, FAILURES: 8, EXCEPTIONS: 0)
+Failures: 8 (HIGH: 8, CRITICAL: 0)
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:338-393
+────────────────────────────────────────
+ 338 ┌ resource "google_container_cluster" "autoscaler_config" {
+ 339 │   name     = google_container_cluster.primary.name
+ 340 │   location = var.region
+ 341 │ 
+ 342 │   cluster_autoscaling {
+ 343 │     enabled             = var.enable_cluster_autoscaling
+ 344 │     autoscaling_profile = var.autoscaling_profile
+ 345 │ 
+ 346 └     resource_limits {
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:396-413
+────────────────────────────────────────
+ 396 ┌ resource "google_container_cluster" "vpa_config" {
+ 397 │   name     = google_container_cluster.primary.name
+ 398 │   location = var.region
+ 399 │ 
+ 400 │   vertical_pod_autoscaling {
+ 401 │     enabled = var.enable_vertical_pod_autoscaling
+ 402 │   }
+ 403 │ 
+ 404 └   lifecycle {
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:87-122
+   via capacity.tf:68-129 (google_container_node_pool.compute_optimized)
+────────────────────────────────────────
+  68   resource "google_container_node_pool" "compute_optimized" {
+  ..   
+  87 ┌   node_config {
+  88 │     machine_type = var.compute_machine_type
+  89 │     disk_size_gb = var.compute_disk_size_gb
+  90 │     disk_type    = "pd-ssd"
+  91 │ 
+  92 │     oauth_scopes = [
+  93 └       "https://www.googleapis.com/auth/cloud-platform"
+  ..   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:23-58
+   via capacity.tf:4-65 (google_container_node_pool.general_purpose)
+────────────────────────────────────────
+   4   resource "google_container_node_pool" "general_purpose" {
+   .   
+  23 ┌   node_config {
+  24 │     machine_type = var.general_machine_type
+  25 │     disk_size_gb = var.general_disk_size_gb
+  26 │     disk_type    = "pd-ssd"
+  27 │ 
+  28 │     oauth_scopes = [
+  29 └       "https://www.googleapis.com/auth/cloud-platform"
+  ..   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:151-186
+   via capacity.tf:132-193 (google_container_node_pool.memory_optimized)
+────────────────────────────────────────
+ 132   resource "google_container_node_pool" "memory_optimized" {
+ ...   
+ 151 ┌   node_config {
+ 152 │     machine_type = var.memory_machine_type
+ 153 │     disk_size_gb = var.memory_disk_size_gb
+ 154 │     disk_type    = "pd-ssd"
+ 155 │ 
+ 156 │     oauth_scopes = [
+ 157 └       "https://www.googleapis.com/auth/cloud-platform"
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ capacity.tf:215-251
+   via capacity.tf:196-258 (google_container_node_pool.spot)
+────────────────────────────────────────
+ 196   resource "google_container_node_pool" "spot" {
+ ...   
+ 215 ┌   node_config {
+ 216 │     spot         = true
+ 217 │     machine_type = var.spot_machine_type
+ 218 │     disk_size_gb = var.spot_disk_size_gb
+ 219 │     disk_type    = "pd-standard"
+ 220 │ 
+ 221 └     oauth_scopes = [
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster does not have master authorized networks enabled.
+════════════════════════════════════════
+Enabling authorized networks means you can restrict master access to a fixed set of CIDR ranges
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0061
+────────────────────────────────────────
+ capacity.tf:338-393
+────────────────────────────────────────
+ 338 ┌ resource "google_container_cluster" "autoscaler_config" {
+ 339 │   name     = google_container_cluster.primary.name
+ 340 │   location = var.region
+ 341 │ 
+ 342 │   cluster_autoscaling {
+ 343 │     enabled             = var.enable_cluster_autoscaling
+ 344 │     autoscaling_profile = var.autoscaling_profile
+ 345 │ 
+ 346 └     resource_limits {
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster does not have master authorized networks enabled.
+════════════════════════════════════════
+Enabling authorized networks means you can restrict master access to a fixed set of CIDR ranges
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0061
+────────────────────────────────────────
+ capacity.tf:396-413
+────────────────────────────────────────
+ 396 ┌ resource "google_container_cluster" "vpa_config" {
+ 397 │   name     = google_container_cluster.primary.name
+ 398 │   location = var.region
+ 399 │ 
+ 400 │   vertical_pod_autoscaling {
+ 401 │     enabled = var.enable_vertical_pod_autoscaling
+ 402 │   }
+ 403 │ 
+ 404 └   lifecycle {
+ ...   
+────────────────────────────────────────
+
+
+
+cost_optimization.tf (terraform)
+================================
+Tests: 4 (SUCCESSES: 2, FAILURES: 2, EXCEPTIONS: 0)
+Failures: 2 (HIGH: 2, CRITICAL: 0)
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ cost_optimization.tf:20-58
+   via cost_optimization.tf:4-59 (google_container_node_pool.preemptible_nodes)
+────────────────────────────────────────
+   4   resource "google_container_node_pool" "preemptible_nodes" {
+   .   
+  20 ┌   node_config {
+  21 │     preemptible  = true
+  22 │     spot         = true
+  23 │     machine_type = var.preemptible_machine_type != "" ? var.preemptible_machine_type : "e2-standard-4"
+  24 │     disk_size_gb = 50
+  25 │     disk_type    = "pd-standard"
+  26 └ 
+  ..   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ cost_optimization.tf:78-114
+   via cost_optimization.tf:62-115 (google_container_node_pool.spot_nodes)
+────────────────────────────────────────
+  62   resource "google_container_node_pool" "spot_nodes" {
+  ..   
+  78 ┌   node_config {
+  79 │     spot         = true
+  80 │     machine_type = "e2-medium"
+  81 │     disk_size_gb = 30
+  82 │     disk_type    = "pd-standard"
+  83 │ 
+  84 └     oauth_scopes = [
+  ..   
+────────────────────────────────────────
+
+
+
+gke.tf (terraform)
+==================
+Tests: 6 (SUCCESSES: 5, FAILURES: 1, EXCEPTIONS: 0)
+Failures: 1 (HIGH: 1, CRITICAL: 0)
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ gke.tf:1-61
+────────────────────────────────────────
+   1 ┌ resource "google_container_cluster" "primary" {
+   2 │   name     = var.cluster_name
+   3 │   location = var.region
+   4 │   project  = var.project_id
+   5 │ 
+   6 │   # Enable Autopilot mode
+   7 │   enable_autopilot = true
+   8 │ 
+   9 └   # Workload Identity configuration
+  ..   
+────────────────────────────────────────
+
+
+
+main.tf (terraform)
+===================
+Tests: 8 (SUCCESSES: 6, FAILURES: 2, EXCEPTIONS: 0)
+Failures: 2 (HIGH: 2, CRITICAL: 0)
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ main.tf:158-191
+   via main.tf:142-192 (google_container_node_pool.primary_nodes)
+────────────────────────────────────────
+ 142   resource "google_container_node_pool" "primary_nodes" {
+ ...   
+ 158 ┌   node_config {
+ 159 │     preemptible  = var.preemptible
+ 160 │     machine_type = var.machine_type
+ 161 │     disk_size_gb = var.disk_size_gb
+ 162 │     disk_type    = "pd-standard"
+ 163 │ 
+ 164 └     # OAuth scopes
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ main.tf:95
+   via main.tf:94-97 (cidr_blocks)
+    via main.tf:93-98 (master_authorized_networks_config)
+     via main.tf:65-139 (google_container_cluster.primary)
+────────────────────────────────────────
+  65   resource "google_container_cluster" "primary" {
+  ..   
+  95 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 139   }
+────────────────────────────────────────
+
+
+
+multi_region.tf (terraform)
+===========================
+Tests: 45 (SUCCESSES: 34, FAILURES: 11, EXCEPTIONS: 0)
+Failures: 11 (HIGH: 10, CRITICAL: 1)
+
+CRITICAL: Firewall rule allows ingress traffic from multiple addresses on the public internet.
+════════════════════════════════════════
+Network security rules should not use very broad subnets.
+
+Where possible, segments should be broken into smaller subnets and avoid using the <code>/0</code> subnet.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0027
+────────────────────────────────────────
+ multi_region.tf:861
+   via multi_region.tf:852-863 (google_compute_firewall.allow_lb)
+────────────────────────────────────────
+ 852   resource "google_compute_firewall" "allow_lb" {
+ ...   
+ 861 [   source_ranges = ["0.0.0.0/0"]
+ ...   
+ 863   }
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ multi_region.tf:253-287
+   via multi_region.tf:227-288 (google_container_node_pool.regional_node_pools["asia"])
+────────────────────────────────────────
+ 227   resource "google_container_node_pool" "regional_node_pools" {
+ ...   
+ 253 ┌   node_config {
+ 254 │     preemptible  = false
+ 255 │     machine_type = "n2-standard-8"
+ 256 │     disk_size_gb = 100
+ 257 │     disk_type    = "pd-ssd"
+ 258 │     image_type   = "COS_CONTAINERD"
+ 259 └ 
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ multi_region.tf:253-287
+   via multi_region.tf:227-288 (google_container_node_pool.regional_node_pools["europe"])
+────────────────────────────────────────
+ 227   resource "google_container_node_pool" "regional_node_pools" {
+ ...   
+ 253 ┌   node_config {
+ 254 │     preemptible  = false
+ 255 │     machine_type = "n2-standard-8"
+ 256 │     disk_size_gb = 100
+ 257 │     disk_type    = "pd-ssd"
+ 258 │     image_type   = "COS_CONTAINERD"
+ 259 └ 
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ multi_region.tf:253-287
+   via multi_region.tf:227-288 (google_container_node_pool.regional_node_pools["primary"])
+────────────────────────────────────────
+ 227   resource "google_container_node_pool" "regional_node_pools" {
+ ...   
+ 253 ┌   node_config {
+ 254 │     preemptible  = false
+ 255 │     machine_type = "n2-standard-8"
+ 256 │     disk_size_gb = 100
+ 257 │     disk_type    = "pd-ssd"
+ 258 │     image_type   = "COS_CONTAINERD"
+ 259 └ 
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ multi_region.tf:253-287
+   via multi_region.tf:227-288 (google_container_node_pool.regional_node_pools["secondary"])
+────────────────────────────────────────
+ 227   resource "google_container_node_pool" "regional_node_pools" {
+ ...   
+ 253 ┌   node_config {
+ 254 │     preemptible  = false
+ 255 │     machine_type = "n2-standard-8"
+ 256 │     disk_size_gb = 100
+ 257 │     disk_type    = "pd-ssd"
+ 258 │     image_type   = "COS_CONTAINERD"
+ 259 └ 
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ multi_region.tf:253-287
+   via multi_region.tf:227-288 (google_container_node_pool.regional_node_pools["tertiary"])
+────────────────────────────────────────
+ 227   resource "google_container_node_pool" "regional_node_pools" {
+ ...   
+ 253 ┌   node_config {
+ 254 │     preemptible  = false
+ 255 │     machine_type = "n2-standard-8"
+ 256 │     disk_size_gb = 100
+ 257 │     disk_type    = "pd-ssd"
+ 258 │     image_type   = "COS_CONTAINERD"
+ 259 └ 
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ multi_region.tf:144
+   via multi_region.tf:143-146 (cidr_blocks)
+    via multi_region.tf:142-147 (master_authorized_networks_config)
+     via multi_region.tf:115-224 (google_container_cluster.regional_clusters["asia"])
+────────────────────────────────────────
+ 115   resource "google_container_cluster" "regional_clusters" {
+ ...   
+ 144 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 224   }
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ multi_region.tf:144
+   via multi_region.tf:143-146 (cidr_blocks)
+    via multi_region.tf:142-147 (master_authorized_networks_config)
+     via multi_region.tf:115-224 (google_container_cluster.regional_clusters["europe"])
+────────────────────────────────────────
+ 115   resource "google_container_cluster" "regional_clusters" {
+ ...   
+ 144 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 224   }
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ multi_region.tf:144
+   via multi_region.tf:143-146 (cidr_blocks)
+    via multi_region.tf:142-147 (master_authorized_networks_config)
+     via multi_region.tf:115-224 (google_container_cluster.regional_clusters["primary"])
+────────────────────────────────────────
+ 115   resource "google_container_cluster" "regional_clusters" {
+ ...   
+ 144 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 224   }
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ multi_region.tf:144
+   via multi_region.tf:143-146 (cidr_blocks)
+    via multi_region.tf:142-147 (master_authorized_networks_config)
+     via multi_region.tf:115-224 (google_container_cluster.regional_clusters["secondary"])
+────────────────────────────────────────
+ 115   resource "google_container_cluster" "regional_clusters" {
+ ...   
+ 144 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 224   }
+────────────────────────────────────────
+
+
+HIGH: Cluster exposes control plane to the public internet.
+════════════════════════════════════════
+The GKE control plane is exposed to the public internet by default.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0053
+────────────────────────────────────────
+ multi_region.tf:144
+   via multi_region.tf:143-146 (cidr_blocks)
+    via multi_region.tf:142-147 (master_authorized_networks_config)
+     via multi_region.tf:115-224 (google_container_cluster.regional_clusters["tertiary"])
+────────────────────────────────────────
+ 115   resource "google_container_cluster" "regional_clusters" {
+ ...   
+ 144 [       cidr_block   = "0.0.0.0/0"
+ ...   
+ 224   }
+────────────────────────────────────────
+
+
+
+security_policies.tf (terraform)
+================================
+Tests: 6 (SUCCESSES: 4, FAILURES: 2, EXCEPTIONS: 0)
+Failures: 2 (HIGH: 2, CRITICAL: 0)
+
+HIGH: Cluster has legacy metadata endpoints enabled.
+════════════════════════════════════════
+The Compute Engine instance metadata server exposes legacy v0.1 and v1beta1 endpoints, which do not enforce metadata query headers. 
+
+This is a feature in the v1 APIs that makes it more difficult for a potential attacker to retrieve instance metadata. 
+
+Unless specifically required, we recommend you disable these legacy APIs.
+
+When setting the <code>metadata</code> block, the default value for <code>disable-legacy-endpoints</code> is set to true, they should not be explicitly enabled.
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0048
+────────────────────────────────────────
+ security_policies.tf:308-335
+────────────────────────────────────────
+ 308 ┌ resource "google_container_cluster" "security_config" {
+ 309 │   count   = var.enable_gke_security_posture ? 1 : 0
+ 310 │   project = var.project_id
+ 311 │   name    = var.gke_cluster_name
+ 312 │   location = var.region
+ 313 │ 
+ 314 │   security_posture_config {
+ 315 │     mode               = "BASIC"
+ 316 └     vulnerability_mode = "VULNERABILITY_BASIC"
+ ...   
+────────────────────────────────────────
+
+
+HIGH: Cluster does not have master authorized networks enabled.
+════════════════════════════════════════
+Enabling authorized networks means you can restrict master access to a fixed set of CIDR ranges
+
+See https://avd.aquasec.com/misconfig/avd-gcp-0061
+────────────────────────────────────────
+ security_policies.tf:308-335
+────────────────────────────────────────
+ 308 ┌ resource "google_container_cluster" "security_config" {
+ 309 │   count   = var.enable_gke_security_posture ? 1 : 0
+ 310 │   project = var.project_id
+ 311 │   name    = var.gke_cluster_name
+ 312 │   location = var.region
+ 313 │ 
+ 314 │   security_posture_config {
+ 315 │     mode               = "BASIC"
+ 316 └     vulnerability_mode = "VULNERABILITY_BASIC"
+ ...   
+────────────────────────────────────────
+
+
+
