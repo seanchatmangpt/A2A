@@ -24,8 +24,8 @@ R = receipt(A)
 
 - This portfolio note does not claim authorship of the upstream A2A specification or replace its purpose, governance, license, documentation, or contributor history.
 - Protocol conformance is distinct from successful task execution.
-- A remote agent’s completion claim is observation until admitted.
+- A remote agent's completion claim is observation until admitted.
 - Agent cards and advertised capabilities do not grant execution authority.
-- Consequential actions and downstream promotion require local policy, receipts, and replayable evidence.
+- Consequential actions and downstream promotion require local policy, receipts, and deterministic replay evidence.
 
-The canonical portfolio narrative is maintained in `seanchatmangpt/chatman-ecosystem`.
+The canonical portfolio narrative is maintained in the ecosystem control-plane repository.
