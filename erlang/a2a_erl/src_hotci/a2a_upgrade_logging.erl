@@ -64,13 +64,13 @@
     set_log_level/1,
     set_retention_policy/2,
     set_log_rotation/2,
-    add_log_filter/2,
-    remove_log_filter/2,
+    add_log_filter/1,
+    remove_log_filter/1,
 
     %% Integration
     enable_external_logging/2,
     disable_external_logging/1,
-    set_elasticsearch_endpoint/2
+    set_elasticsearch_endpoint/1
 ]).
 
 %% gen_server callbacks
@@ -116,7 +116,7 @@
     rotation_size :: integer(),
     external_logging_enabled :: boolean(),
     external_endpoint :: binary(),
-    log_filters :: [function()],
+    log_filters :: list(),
     enable_performance_logging :: boolean(),
     enable_audit_logging :: boolean(),
     enable_security_logging :: boolean()
@@ -140,7 +140,8 @@
     performance_metrics :: map(),
     audit_trail :: [map()],
     log_files :: [file:filename_all()],
-    last_cleanup :: integer()
+    last_cleanup :: integer(),
+    cleanup_timer :: reference() | undefined
 }).
 
 -type state() :: #state{}.
@@ -447,7 +448,7 @@ set_elasticsearch_endpoint(Endpoint) ->
 init(Opts) ->
     LogLevel = maps:get(log_level, Opts, info),
     RetentionDays = maps:get(retention_days, Opts, ?DEFAULT_RETENTION_DAYS),
-    RotationSize = maps.get(rotation_size, Opts, ?DEFAULT_ROTATION_SIZE),
+    RotationSize = maps:get(rotation_size, Opts, ?DEFAULT_ROTATION_SIZE),
 
     Config = #log_config{
         log_level = LogLevel,
@@ -458,7 +459,7 @@ init(Opts) ->
         external_endpoint = maps:get(external_endpoint, Opts, <<"">>),
         log_filters = [],
         enable_performance_logging = maps:get(enable_performance_logging, Opts, true),
-        enable_audit_logging = maps.get(enable_audit_logging, Opts, true),
+        enable_audit_logging = maps:get(enable_audit_logging, Opts, true),
         enable_security_logging = maps:get(enable_security_logging, Opts, true)
     },
 
@@ -482,12 +483,12 @@ init(Opts) ->
     %% Start cleanup timer
     Timer = erlang:send_after(3600000, self(), cleanup_old_logs),  % Every hour
 
-    logger:info("Upgrade logging system started", #[
-        {log_level, LogLevel},
-        {retention_days, RetentionDays},
-        {rotation_size, RotationSize},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Upgrade logging system started",
+        [{log_level, LogLevel},
+         {retention_days, RetentionDays},
+         {rotation_size, RotationSize},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     {ok, State#state{cleanup_timer = Timer}, {continue, initialize_logging}}.
 
@@ -565,102 +566,105 @@ handle_cast({log, Level, Message, Details, Context}, State) ->
             FilteredState = apply_log_filters(LogEntry, NewState),
 
             %% Send external logging if enabled
-            if State#state.config#log_config.external_logging_enabled ->
+            FinalState = if State#state.config#log_config.external_logging_enabled ->
                     send_external_log(LogEntry, FilteredState);
                true ->
                     FilteredState
-            end;
+            end,
+            {noreply, FinalState};
        true ->
-            State
+            {noreply, State}
     end;
 
 handle_cast({log_performance, PerformanceData, Context}, State) ->
-    if State#state.config#log_config.enable_performance_logging ->
+    NewState = if State#state.config#log_config.enable_performance_logging ->
             LogEntry = create_performance_log_entry(PerformanceData, Context),
-            NewState = write_log(LogEntry, State),
+            WrittenState = write_log(LogEntry, State),
 
             %% Update performance metrics
-            UpdatedMetrics = update_performance_metrics(PerformanceData, State#state.performance_metrics),
+            UpdatedMetrics = update_performance_metrics(PerformanceData, WrittenState#state.performance_metrics),
 
-            NewState#state{performance_metrics = UpdatedMetrics};
+            WrittenState#state{performance_metrics = UpdatedMetrics};
        true ->
             State
-    end;
+    end,
+    {noreply, NewState};
 
 handle_cast({log_audit, AuditData, Context}, State) ->
-    if State#state.config#log_config.enable_audit_logging ->
+    NewState = if State#state.config#log_config.enable_audit_logging ->
             AuditLog = create_audit_log_entry(AuditData, Context),
-            NewState = write_log(AuditLog, State),
+            WrittenState = write_log(AuditLog, State),
 
             %% Add to audit trail
-            UpdatedAuditTrail = [AuditLog | State#state.audit_trail],
+            UpdatedAuditTrail = [AuditLog | WrittenState#state.audit_trail],
 
             %% External logging for security events
-            case maps:get(<<"event_type">>, AuditData, undefined) of
+            _ = case maps:get(<<"event_type">>, AuditData, undefined) of
                 <<"security_event">> ->
-                    send_external_log(AuditLog, NewState);
+                    send_external_log(AuditLog, WrittenState);
                 _ ->
                     ok
             end,
 
-            NewState#state{audit_trail = UpdatedAuditTrail};
+            WrittenState#state{audit_trail = UpdatedAuditTrail};
        true ->
             State
-    end;
+    end,
+    {noreply, NewState};
 
 handle_cast({set_log_level, LogLevel}, State) ->
-    logger:info("Log level changed", #[
-        {old_level, State#state.config#log_config.log_level},
-        {new_level, LogLevel},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Log level changed",
+        [{old_level, State#state.config#log_config.log_level},
+         {new_level, LogLevel},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewConfig = State#state.config#log_config{log_level = LogLevel},
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({set_retention_policy, Days, _Unit}, State) ->
-    logger:info("Retention policy updated", #[
-        {days, Days},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Retention policy updated",
+        [{days, Days},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewConfig = State#state.config#log_config{retention_days = Days},
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({set_log_rotation, Size, _Unit}, State) ->
-    logger:info("Log rotation updated", #[
-        {size, Size},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Log rotation updated",
+        [{size, Size},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewConfig = State#state.config#log_config{rotation_size = Size},
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({add_log_filter, Filter}, State) ->
-    logger:info("Log filter added", #[
-        {filter_type, element(1, erlang:fun_info(Filter, name))},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Log filter added",
+        [{filter_type, element(1, erlang:fun_info(Filter, name))},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewFilters = [Filter | State#state.config#log_config.log_filters],
     NewConfig = State#state.config#log_config{log_filters = NewFilters},
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({remove_log_filter, Filter}, State) ->
-    logger:info("Log filter removed", #[
-        {filter_type, element(1, erlang:fun_info(Filter, name))},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Log filter removed",
+        [{filter_type, element(1, erlang:fun_info(Filter, name))},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewFilters = lists:delete(Filter, State#state.config#log_config.log_filters),
     NewConfig = State#state.config#log_config{log_filters = NewFilters},
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({enable_external_logging, Endpoint, Config}, State) ->
-    logger:info("External logging enabled", #[
-        {endpoint, Endpoint},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("External logging enabled",
+        [{endpoint, Endpoint},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewConfig = State#state.config#log_config{
         external_logging_enabled = true,
@@ -670,10 +674,10 @@ handle_cast({enable_external_logging, Endpoint, Config}, State) ->
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({disable_external_logging, Endpoint}, State) ->
-    logger:info("External logging disabled", #[
-        {endpoint, Endpoint},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("External logging disabled",
+        [{endpoint, Endpoint},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     NewConfig = State#state.config#log_config{
         external_logging_enabled = false
@@ -682,10 +686,10 @@ handle_cast({disable_external_logging, Endpoint}, State) ->
     {noreply, State#state{config = NewConfig}};
 
 handle_cast({set_elasticsearch_endpoint, Endpoint}, State) ->
-    logger:info("Elasticsearch endpoint configured", #[
-        {endpoint, Endpoint},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Elasticsearch endpoint configured",
+        [{endpoint, Endpoint},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     Config = State#state.config#log_config{external_endpoint = Endpoint},
     {noreply, State#state{config = Config}};
@@ -832,12 +836,12 @@ rotate_log_file(State) ->
         last_rotation = erlang:system_time(millisecond)
     },
 
-    logger:info("Log file rotated", #[
-        {old_file, CurrentFile},
-        {new_file, NewRotationState#log_rotation_state.current_file},
-        {archive_file, ArchiveFile},
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Log file rotated",
+        [{old_file, CurrentFile},
+         {new_file, NewRotationState#log_rotation_state.current_file},
+         {archive_file, ArchiveFile},
+         {domain, [a2a, upgrade, logging]}
+        ]),
 
     State#state{
         rotation_state = NewRotationState,
@@ -856,20 +860,17 @@ write_log_to_file(LogEntry, State) ->
             file:write(FileHandle, FormattedLog),
             file:close(FileHandle);
         {error, Reason} ->
-            logger:error("Failed to write log file", #[
-                {file, LogFile},
-                {reason, Reason},
-                {domain, [a2a, upgrade, logging]}
-            ])
+            logger:error("Failed to write log file",
+                [{file, LogFile},
+                 {reason, Reason},
+                 {domain, [a2a, upgrade, logging]}
+                ])
     end.
 
 %% @brief Format log entry
 -spec format_log_entry(log_entry()) -> binary().
 format_log_entry(LogEntry) ->
-    case State#state.config#log_config.log_format of
-        json -> format_log_json(LogEntry);
-        _ -> format_log_text(LogEntry)
-    end.
+    format_log_json(LogEntry).
 
 %% @brief Format log entry as JSON
 -spec format_log_json(log_entry()) -> binary().
@@ -907,9 +908,12 @@ format_log_text(LogEntry) ->
 %% @brief Format timestamp
 -spec format_timestamp(integer()) -> binary().
 format_timestamp(Timestamp) ->
-    {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:now_to_local_time({Timestamp div 1000, Timestamp rem 1000, 0}),
-    io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B ~2.10.0B:~2.10.0B:~2.10.0B",
-                 [Year, Month, Day, Hour, Minute, Second]).
+    {{Year, Month, Day}, {Hour, Minute, Second}} =
+        calendar:system_time_to_local_time(Timestamp div 1000, seconds),
+    iolist_to_binary(
+        io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B ~2.10.0B:~2.10.0B:~2.10.0B",
+                      [Year, Month, Day, Hour, Minute, Second])
+    ).
 
 %% @brief Initialize log files
 -spec initialize_log_files(state()) -> state().
@@ -981,11 +985,11 @@ send_external_log(LogEntry, State) ->
         _ ->
             LogData = format_log_json(LogEntry),
             %% In production, this would send to external service
-            logger:debug("External log sent", #[
-                {endpoint, Endpoint},
-                {data, LogData},
-                {domain, [a2a, upgrade, logging]}
-            ]),
+            logger:debug("External log sent",
+                [{endpoint, Endpoint},
+                 {data, LogData},
+                 {domain, [a2a, upgrade, logging]}
+                ]),
             State
     end.
 
@@ -1067,10 +1071,10 @@ cleanup_old_logs(State) ->
                 file:delete(FilePath)
             end, OldFiles),
 
-            logger:info("Cleaned up old logs", #[
-                {files_deleted, length(OldFiles)},
-                {domain, [a2a, upgrade, logging]}
-            ]),
+            logger:info("Cleaned up old logs",
+                [{files_deleted, length(OldFiles)},
+                 {domain, [a2a, upgrade, logging]}
+                ]),
 
             State#state{last_cleanup = erlang:system_time(millisecond)};
        true ->
@@ -1080,15 +1084,17 @@ cleanup_old_logs(State) ->
 %% @brief Update performance metrics
 -spec update_performance_metrics(map(), map()) -> map().
 update_performance_metrics(Metric, Metrics) ->
-    MetricName = maps:get(metric_name, Metric),
-    Value = maps:get(value, Metric),
-    Timestamp = maps:get(timestamp, Metric),
+    MetricName = maps:get(metric_name, Metric, <<"unknown">>),
 
     case maps:get(MetricName, Metrics, undefined) of
         undefined ->
             Metrics#{MetricName => Metric};
-        ExistingMetric ->
+        ExistingMetric when is_list(ExistingMetric) ->
             %% Keep only recent metrics (last 100)
+            UpdatedMetrics = lists:sublist([Metric | ExistingMetric], 100),
+            Metrics#{MetricName => UpdatedMetrics};
+        ExistingMetric ->
+            %% Convert single metric to list
             UpdatedMetrics = lists:sublist([Metric, ExistingMetric], 100),
             Metrics#{MetricName => UpdatedMetrics}
     end.
@@ -1096,9 +1102,9 @@ update_performance_metrics(Metric, Metrics) ->
 %% @brief Start performance collection
 -spec start_performance_collection(state()) -> state().
 start_performance_collection(State) ->
-    logger:info("Started performance metrics collection", #[
-        {domain, [a2a, upgrade, logging]}
-    ]),
+    logger:info("Started performance metrics collection",
+        [{domain, [a2a, upgrade, logging]}
+        ]),
     State.
 
 %% @brief Create log directory
@@ -1109,9 +1115,9 @@ ensure_log_directory_exists() ->
         ok -> ok;
         {error, eexist} -> ok;
         {error, Reason} ->
-            logger:error("Failed to create log directory", #[
-                {directory, LogDir},
-                {reason, Reason},
-                {domain, [a2a, upgrade, logging]}
-            ])
+            logger:error("Failed to create log directory",
+                [{directory, LogDir},
+                 {reason, Reason},
+                 {domain, [a2a, upgrade, logging]}
+                ])
     end.

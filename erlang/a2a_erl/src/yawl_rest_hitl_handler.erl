@@ -69,97 +69,141 @@ handle_request(<<"POST">>, Req, State) ->
     case PathInfo of
         [<<"hitl">>, <<"approval">>] ->
             %% Create approval gate
-            WorkflowId = maps:get(<<"workflow_id">>, Data),
-            TaskId = maps:get(<<"task_id">>, Data),
-            DecisionPrompt = maps:get(<<"prompt">>, Data),
-            Options = maps:get(<<"options">>, Data, #{}),
+            case validate_required_fields([<<"workflow_id">>, <<"task_id">>, <<"prompt">>], Data) of
+                {error, Missing} ->
+                    respond_error(<<"missing_required_fields">>, Missing, Req, State);
+                ok ->
+                    WorkflowId = maps:get(<<"workflow_id">>, Data),
+                    TaskId = maps:get(<<"task_id">>, Data),
+                    DecisionPrompt = maps:get(<<"prompt">>, Data),
+                    Options = maps:get(<<"options">>, Data, #{}),
 
-            {ok, ApprovalId} = yawl_human_in_loop:create_approval_gate(
-                WorkflowId,
-                TaskId,
-                DecisionPrompt,
-                Options
-            ),
-
-            Result = #{
-                approval_id => ApprovalId,
-                workflow_id => WorkflowId,
-                task_id => TaskId,
-                status => <<"pending">>
-            },
-            respond(Result, Req, State);
+                    case yawl_human_in_loop:create_approval_gate(
+                        WorkflowId,
+                        TaskId,
+                        DecisionPrompt,
+                        Options
+                    ) of
+                        {ok, ApprovalId} ->
+                            Result = #{
+                                approval_id => ApprovalId,
+                                workflow_id => WorkflowId,
+                                task_id => TaskId,
+                                status => <<"pending">>
+                            },
+                            respond(Result, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"approval_creation_failed">>, Reason, Req, State)
+                    end
+            end;
 
         [<<"hitl">>, <<"approval">>, ApprovalId, <<"submit">>] ->
             %% Submit approval/rejection
-            Decision = case maps:get(<<"decision">>, Data) of
-                <<"approve">> -> approved;
-                <<"reject">> -> rejected;
-                _ -> rejected
-            end,
+            case maps:get(<<"decision">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_fields">>, [<<"decision">>], Req, State);
+                DecisionValue ->
+                    Decision = case DecisionValue of
+                        <<"approve">> -> approved;
+                        <<"reject">> -> rejected;
+                        _ -> rejected
+                    end,
 
-            Feedback = maps:get(<<"feedback">>, Data, #{}),
+                    Feedback = maps:get(<<"feedback">>, Data, #{}),
 
-            ok = yawl_human_in_loop:submit_approval(ApprovalId, Decision, Feedback),
-
-            Result = #{
-                approval_id => ApprovalId,
-                decision => Decision,
-                status => <<"submitted">>
-            },
-            respond(Result, Req, State);
+                    case yawl_human_in_loop:submit_approval(ApprovalId, Decision, Feedback) of
+                        ok ->
+                            Result = #{
+                                approval_id => ApprovalId,
+                                decision => Decision,
+                                status => <<"submitted">>
+                            },
+                            respond(Result, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"approval_submit_failed">>, Reason, Req, State)
+                    end
+            end;
 
         [<<"hitl">>, <<"llm">>, <<"decision">>] ->
             %% Request LLM-assisted decision
-            DecisionPrompt = maps:get(<<"prompt">>, Data),
-            Context = maps:get(<<"context">>, Data, #{}),
+            case maps:get(<<"prompt">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_fields">>, [<<"prompt">>], Req, State);
+                DecisionPrompt ->
+                    Context = maps:get(<<"context">>, Data, #{}),
 
-            {ok, LLMDecision} = yawl_human_in_loop:request_decision_with_llm(
-                DecisionPrompt,
-                Context
-            ),
-
-            respond(LLMDecision, Req, State);
+                    case yawl_human_in_loop:request_decision_with_llm(
+                        DecisionPrompt,
+                        Context
+                    ) of
+                        {ok, LLMDecision} ->
+                            respond(LLMDecision, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"llm_decision_failed">>, Reason, Req, State)
+                    end
+            end;
 
         [<<"hitl">>, <<"session">>, <<"start">>] ->
             %% Start collaborative session
-            WorkflowId = maps:get(<<"workflow_id">>, Data),
-            Participants = maps:get(<<"participants">>, Data, []),
-            ParticipantsList = [binary_to_existing_atom(P, utf8) || P <- Participants],
+            case maps:get(<<"workflow_id">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_fields">>, [<<"workflow_id">>], Req, State);
+                WorkflowId ->
+                    Participants = maps:get(<<"participants">>, Data, []),
+                    ParticipantsList = [binary_to_existing_atom(P, utf8) || P <- Participants],
 
-            {ok, SessionId} = yawl_human_in_loop:start_collaborative_session(
-                WorkflowId,
-                ParticipantsList
-            ),
-
-            Result = #{
-                session_id => SessionId,
-                workflow_id => WorkflowId,
-                participants => Participants,
-                status => <<"active">>
-            },
-            respond(Result, Req, State);
+                    case yawl_human_in_loop:start_collaborative_session(
+                        WorkflowId,
+                        ParticipantsList
+                    ) of
+                        {ok, SessionId} ->
+                            Result = #{
+                                session_id => SessionId,
+                                workflow_id => WorkflowId,
+                                participants => Participants,
+                                status => <<"active">>
+                            },
+                            respond(Result, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"session_start_failed">>, Reason, Req, State)
+                    end
+            end;
 
         [<<"hitl">>, <<"feedback">>] ->
             %% Collect feedback
-            WorkflowId = maps:get(<<"workflow_id">>, Data),
-            Feedback = maps:get(<<"feedback">>, Data),
+            case validate_required_fields([<<"workflow_id">>, <<"feedback">>], Data) of
+                {error, Missing} ->
+                    respond_error(<<"missing_required_fields">>, Missing, Req, State);
+                ok ->
+                    WorkflowId = maps:get(<<"workflow_id">>, Data),
+                    Feedback = maps:get(<<"feedback">>, Data),
 
-            ok = yawl_human_in_loop:collect_feedback(WorkflowId, Feedback),
-
-            Result = #{status => <<"collected">>},
-            respond(Result, Req, State);
+                    case yawl_human_in_loop:collect_feedback(WorkflowId, Feedback) of
+                        ok ->
+                            Result = #{status => <<"collected">>},
+                            respond(Result, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"feedback_collection_failed">>, Reason, Req, State)
+                    end
+            end;
 
         [<<"hitl">>, <<"feedback">>, <<"analyze">>] ->
             %% Analyze feedback with LLM
-            WorkflowId = maps:get(<<"workflow_id">>, Data),
-
-            {ok, Analysis} = yawl_human_in_loop:analyze_feedback_with_llm(WorkflowId),
-
-            Result = #{
-                workflow_id => WorkflowId,
-                analysis => Analysis
-            },
-            respond(Result, Req, State);
+            case maps:get(<<"workflow_id">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_fields">>, [<<"workflow_id">>], Req, State);
+                WorkflowId ->
+                    case yawl_human_in_loop:analyze_feedback_with_llm(WorkflowId) of
+                        {ok, Analysis} ->
+                            Result = #{
+                                workflow_id => WorkflowId,
+                                analysis => Analysis
+                            },
+                            respond(Result, Req, State);
+                        {error, Reason} ->
+                            respond_error(<<"feedback_analysis_failed">>, Reason, Req, State)
+                    end
+            end;
 
         _ ->
             not_found(Req, State)
@@ -218,3 +262,27 @@ respond_json(Data, StatusCode, Req, State) ->
         <<"content-type">> => <<"application/json">>
     }, Body, Req),
     {stop, Req0, State}.
+
+%% @private
+%% @doc Validate that all required fields are present in the data map.
+%% Returns ok if all fields are present, {error, MissingFields} otherwise.
+validate_required_fields(RequiredFields, Data) ->
+    Missing = lists:filter(fun(Field) ->
+        not maps:is_key(Field, Data)
+    end, RequiredFields),
+    case Missing of
+        [] -> ok;
+        _ -> {error, Missing}
+    end.
+
+%% @private
+%% @doc Respond with an error in a standardized format.
+respond_error(ErrorCode, Details, Req, State) when is_binary(Details) ->
+    respond_error(ErrorCode, #{message => Details}, Req, State);
+respond_error(ErrorCode, DetailsMap, Req, State) when is_map(DetailsMap) ->
+    Response = #{
+        status => <<"error">>,
+        error_code => ErrorCode,
+        details => DetailsMap
+    },
+    respond_json(Response, 400, Req, State).

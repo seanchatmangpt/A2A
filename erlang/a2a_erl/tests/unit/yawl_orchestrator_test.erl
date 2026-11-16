@@ -648,20 +648,20 @@ test_init_default() ->
         State = sys:get_state(Pid),
 
         %% Verify state structure
-        ?assert(is_map(State#state.workflows)),
-        ?assert(is_map(State#state.workflow_instances)),
-        ?assert(is_map(State#state.pattern_cache)),
-        ?assert(is_map(State#state.subscribers)),
-        ?assert(is_map(State#state.config)),
-        ?assert(is_map(State#state.statistics)),
+        ?assert(is_map(State#yawl_orchestrator_state.workflows)),
+        ?assert(is_map(State#yawl_orchestrator_state.workflow_instances)),
+        ?assert(is_map(State#yawl_orchestrator_state.pattern_cache)),
+        ?assert(is_map(State#yawl_orchestrator_state.subscribers)),
+        ?assert(is_map(State#yawl_orchestrator_state.config)),
+        ?assert(is_map(State#yawl_orchestrator_state.statistics)),
 
         %% Verify initial values
-        ?assertEqual(0, maps:size(State#state.workflows)),
-        ?assertEqual(0, maps:size(State#state.workflow_instances)),
-        ?assertEqual(0, maps:size(State#state.subscribers)),
-        ?assertEqual(0, maps:get(total_workflows, State#state.statistics)),
-        ?assertEqual(0, maps:get(completed_workflows, State#state.statistics)),
-        ?assertEqual(0, maps:get(failed_workflows, State#state.statistics))
+        ?assertEqual(0, maps:size(State#yawl_orchestrator_state.workflows)),
+        ?assertEqual(0, maps:size(State#yawl_orchestrator_state.workflow_instances)),
+        ?assertEqual(0, maps:size(State#yawl_orchestrator_state.subscribers)),
+        ?assertEqual(0, maps:get(total_workflows, State#yawl_orchestrator_state.statistics)),
+        ?assertEqual(0, maps:get(completed_workflows, State#yawl_orchestrator_state.statistics)),
+        ?assertEqual(0, maps:get(failed_workflows, State#yawl_orchestrator_state.statistics))
     after
         gen_server:stop(Pid)
     end.

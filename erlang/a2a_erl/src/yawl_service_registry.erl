@@ -1,21 +1,36 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Service Registry
+%%% @doc YAWL Service Registry
 %%%
+%%% <h3>Purpose</h3>
 %%% This module provides service registration, discovery, and health
 %%% checking for external services used by YAWL workflows.
 %%%
-%%% Features:
-%%% - Service registration with metadata
-%%% - Service discovery by name or type
-%%% - Health checking with configurable intervals
-%%% - Load balancing and failover
+%%% <h3>Layer</h3>
+%%% Service Layer - Service discovery and health monitoring
 %%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_persistence - For service state storage</li>
+%%% </ul>
+%%%
+%%% <h3>Features</h3>
+%%% <ul>
+%%%   <li>Service registration with metadata</li>
+%%%   <li>Service discovery by name or type</li>
+%%%   <li>Health checking with configurable intervals</li>
+%%%   <li>Load balancing and failover</li>
+%%%   <li>Service status tracking (active, inactive, degraded)</li>
+%%% </ul>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_service_registry).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_server).
 
 %% gen_server callbacks

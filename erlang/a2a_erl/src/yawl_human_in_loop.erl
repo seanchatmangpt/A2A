@@ -209,7 +209,7 @@ handle_call({create_gate, WorkflowId, TaskId, DecisionPrompt, Options}, _From, S
     }};
 
 handle_call({check_status, ApprovalId}, _From, State) ->
-    case maps:get(ApprovalId, State#state.pending_approvals) of
+    case maps:get(ApprovalId, State#state.pending_approvals, undefined) of
         undefined ->
             {reply, {error, not_found}, State};
         Gate ->
@@ -217,7 +217,7 @@ handle_call({check_status, ApprovalId}, _From, State) ->
     end;
 
 handle_call({submit_approval, ApprovalId, Decision, Feedback}, _From, State) ->
-    case maps:get(ApprovalId, State#state.pending_approvals) of
+    case maps:get(ApprovalId, State#state.pending_approvals, undefined) of
         undefined ->
             {reply, {error, not_found}, State};
         Gate ->
@@ -228,9 +228,7 @@ handle_call({submit_approval, ApprovalId, Decision, Feedback}, _From, State) ->
             {reply, ok, State#state{
                 pending_approvals = maps:remove(ApprovalId, State#state.pending_approvals),
                 approval_history = [gate_to_map(UpdatedGate) | State#state.approval_history]
-            }};
-        _ ->
-            {reply, {error, not_found}, State}
+            }}
     end;
 
 handle_call({llm_decision, DecisionPrompt, Context, Options}, _From, State) ->
@@ -266,7 +264,7 @@ handle_call({llm_decision, DecisionPrompt, Context, Options}, _From, State) ->
     end;
 
 handle_call({analyze_feedback, WorkflowId}, _From, State) ->
-    case maps:get(WorkflowId, State#state.feedback_store) of
+    case maps:get(WorkflowId, State#state.feedback_store, undefined) of
         undefined ->
             {reply, {error, no_feedback}, State};
         Feedback ->
@@ -335,7 +333,7 @@ handle_cast({collect_feedback, WorkflowId, Feedback}, State) ->
     }};
 
 handle_cast({end_session, SessionId}, State) ->
-    case maps:get(SessionId, State#state.sessions) of
+    case maps:get(SessionId, State#state.sessions, undefined) of
         undefined ->
             {noreply, State};
         Session ->

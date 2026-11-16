@@ -131,9 +131,8 @@ generate_scenario(BusinessDomain, Complexity, Config) ->
                 end
         end
     catch
-        Class:Error:Stacktrace ->
-            log_error("generate_scenario", {Class, Error}, #{stacktrace => Stacktrace}),
-            {error, {generation_exception, Error}}
+        _Error:_Stacktrace ->
+            {error, {generation_exception, _Error}}
     end.
 
 generate_business_scenario(BusinessDomain, Complexity) ->
@@ -142,7 +141,7 @@ generate_business_scenario(BusinessDomain, Complexity) ->
 generate_edge_case_scenario(BusinessDomain, Complexity) ->
     try
         case generate_scenario(BusinessDomain, Complexity, #{}) of
-            {error, _} = Error -> Error;
+            {error, _} = Err -> Err;
             BaseScenario when is_map(BaseScenario) ->
                 BaseScenario#{
                     type => edge_case,
@@ -151,15 +150,14 @@ generate_edge_case_scenario(BusinessDomain, Complexity) ->
                 }
         end
     catch
-        _:Error:Stacktrace ->
-            log_error("generate_edge_case_scenario", Error, #{stacktrace => Stacktrace}),
-            {error, {edge_case_exception, Error}}
+        _:_Error:_Stacktrace ->
+            {error, edge_case_exception}
     end.
 
 generate_performance_scenario(BusinessDomain, Complexity) ->
     try
         case generate_scenario(BusinessDomain, Complexity, #{}) of
-            {error, _} = Error -> Error;
+            {error, _} = Err -> Err;
             BaseScenario when is_map(BaseScenario) ->
                 BaseScenario#{
                     type => performance,
@@ -168,15 +166,14 @@ generate_performance_scenario(BusinessDomain, Complexity) ->
                 }
         end
     catch
-        _:Error:Stacktrace ->
-            log_error("generate_performance_scenario", Error, #{stacktrace => Stacktrace}),
-            {error, {performance_exception, Error}}
+        _:_Error:_Stacktrace ->
+            {error, performance_exception}
     end.
 
 generate_error_scenario(BusinessDomain, Complexity) ->
     try
         case generate_scenario(BusinessDomain, Complexity, #{}) of
-            {error, _} = Error -> Error;
+            {error, _} = Err -> Err;
             BaseScenario when is_map(BaseScenario) ->
                 BaseScenario#{
                     type => error,
@@ -186,22 +183,20 @@ generate_error_scenario(BusinessDomain, Complexity) ->
                 }
         end
     catch
-        _:Error:Stacktrace ->
-            log_error("generate_error_scenario", Error, #{stacktrace => Stacktrace}),
-            {error, {error_scenario_exception, Error}}
+        _:_Error:_Stacktrace ->
+            {error, error_scenario_exception}
     end.
 
 generate_custom_scenario(BusinessDomain, Complexity, CustomConfig) ->
     try
         case generate_scenario(BusinessDomain, Complexity, CustomConfig) of
-            {error, _} = Error -> Error;
+            {error, _} = Err -> Err;
             BaseScenario when is_map(BaseScenario) ->
                 maps:merge(BaseScenario, CustomConfig)
         end
     catch
-        _:Error:Stacktrace ->
-            log_error("generate_custom_scenario", Error, #{stacktrace => Stacktrace}),
-            {error, {custom_scenario_exception, Error}}
+        _:_Error:_Stacktrace ->
+            {error, custom_scenario_exception}
     end.
 
 list_available_domains() ->

@@ -30,6 +30,7 @@ Key Features:
 import asyncio
 import json
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Type, Union
@@ -512,20 +513,20 @@ class MetricsCollector:
             raise ValueError(f"Unsupported export format: {format}")
 
 
-class MetricsExporter:
-    """Metrics exporter interface"""
+class MetricsExporter(ABC):
+    """Abstract base class for metrics exporters."""
 
     def __init__(self, collector: MetricsCollector):
         self.collector = collector
         self.logger = logging.getLogger(__name__)
 
+    @abstractmethod
     async def export(self) -> str:
-        """Export metrics"""
-        raise NotImplementedError
+        """Export metrics as a formatted string."""
 
+    @abstractmethod
     async def send_to(self, destination: str) -> bool:
-        """Send metrics to destination"""
-        raise NotImplementedError
+        """Send exported metrics to the given destination."""
 
 
 class PrometheusExporter(MetricsExporter):
@@ -588,6 +589,25 @@ class PrometheusExporter(MetricsExporter):
 
         except Exception as e:
             self.logger.error(f"Failed to send metrics to Pushgateway: {e}")
+            return False
+
+
+class JSONMetricsExporter(MetricsExporter):
+    """JSON metrics exporter."""
+
+    async def export(self) -> str:
+        """Export metric names as a JSON payload."""
+        return json.dumps({"metrics": list(self.collector.get_all_metrics().keys())})
+
+    async def send_to(self, destination: str) -> bool:
+        """Write exported JSON metrics to a file at *destination*."""
+        try:
+            content = await self.export()
+            with open(destination, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to write metrics to {destination}: {e}")
             return False
 
 

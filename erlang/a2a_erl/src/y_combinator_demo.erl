@@ -485,26 +485,29 @@ maps_get(Key, Map, Default) ->
         Value -> Value
     end.
 
-%% @private Color print helper for different message types
+%% @private Color print helper for different message types (2-arity)
 color_print(success, Format) ->
     io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_GREEN, ?RESET]);
-color_print(success, Format, Args) ->
-    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_GREEN, Args, ?RESET]);
-
 color_print(error, Format) ->
     io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_RED, ?RESET]);
-color_print(error, Format, Args) ->
-    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_RED, Args, ?RESET]);
-
 color_print(warning, Format) ->
     io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_YELLOW, ?RESET]);
-color_print(warning, Format, Args) ->
-    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_YELLOW, Args, ?RESET]);
-
 color_print(info, Format) ->
     io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_CYAN, ?RESET]);
+color_print(combo, Format) ->
+    io:format("~s" ++ Format ++ "~s~n", [?CYAN, ?RESET]).
+
+%% @private Color print helper for different message types (3-arity)
+color_print(success, Format, Args) ->
+    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_GREEN, Args, ?RESET]);
+color_print(error, Format, Args) ->
+    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_RED, Args, ?RESET]);
+color_print(warning, Format, Args) ->
+    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_YELLOW, Args, ?RESET]);
 color_print(info, Format, Args) ->
-    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_CYAN, Args, ?RESET]).
+    io:format("~s" ++ Format ++ "~s~n", [?BRIGHT_CYAN, Args, ?RESET]);
+color_print(combo, Format, Args) ->
+    io:format("~s" ++ Format ++ "~s~n", [?CYAN, Args, ?RESET]).
 
 %% @private Display summary statistics with visual indicators
 display_summary(Count, Pass, Fail, PassRate, Duration) ->
@@ -513,12 +516,12 @@ display_summary(Count, Pass, Fail, PassRate, Duration) ->
 
     %% Display statistics in a box
     io:format("┌─ ~sStatistics~s ─────────────────────────────────┐~n", [?BOLD, ?RESET]),
-    io:format("│ ~sTotal Combinations:~s   ~4w~n", [?CYAN, ?RESET, [Count]]),
-    io:format("│ ~sPassed:~s               ~4w ~s(~w%)~s~n", [?GREEN, ?RESET, [Pass], [?DIM, [PassRate], ?RESET]]),
-    io:format("│ ~sFailed:~s               ~4w~n", [?RED, ?RESET, [Fail]]),
+    io:format("│ ~sTotal Combinations:~s   ~4w~n", [?CYAN, ?RESET, Count]),
+    io:format("│ ~sPassed:~s               ~4w ~s(~w%)~s~n", [?GREEN, ?RESET, Pass, ?DIM, PassRate, ?RESET]),
+    io:format("│ ~sFailed:~s               ~4w~n", [?RED, ?RESET, Fail]),
     io:format("│                                              │~n"),
-    io:format("│ ~sTotal Duration:~s        ~w ms~n", [?BLUE, ?RESET, [Duration]]),
-    io:format("│ ~sAvg per Combination:~s   ~.2f ms~n", [?BLUE, ?RESET, [AvgTime]]),
+    io:format("│ ~sTotal Duration:~s        ~w ms~n", [?BLUE, ?RESET, Duration]),
+    io:format("│ ~sAvg per Combination:~s   ~.2f ms~n", [?BLUE, ?RESET, AvgTime]),
     io:format("└──────────────────────────────────────────────────┘~n~n"),
 
     %% Display pass rate progress bar
@@ -605,8 +608,8 @@ display_pass_rate_bar(PassRate) ->
         false -> []
     end,
 
-    io:format("  Pass Rate: ~s[~s~s~s~s] ~w%~s~n~n",
-              [Color, BarStr, Color, ?RESET, [PassRate]]).
+    io:format("  Pass Rate: ~s[~s] ~w%~s~n~n",
+              [Color, BarStr, PassRate, ?RESET]).
 
 %% @private Legacy combinations display (for backward compatibility)
 display_combinations_legacy(Combinations) ->
@@ -662,18 +665,19 @@ progress_bar(Current, Total, Label) when Total > 0 ->
     FilledBar = lists:duplicate(Filled, ?PROGRESS_FULL),
     EmptyBar = lists:duplicate(Empty, ?PROGRESS_EMPTY),
 
+    BarWithHead = FilledBar ++ case Empty > 0 of
+        true -> [?PROGRESS_HEAD | EmptyBar];
+        false -> []
+    end,
+
     LabelStr = case Label of
         "" -> "";
         _ -> io_lib:format(" ~s", [Label])
     end,
 
     %% Print progress bar with carriage return for animation
-    io:format("\r~sProgress:~s [~s~s~s~s~s] ~w%~s",
-              [?BOLD, ?RESET, Color, FilledBar,
-               case Empty > 0 of
-                   true -> [?PROGRESS_HEAD | EmptyBar];
-                   false -> []
-               end, ?RESET, [Percentage], LabelStr]),
+    io:format("\r~sProgress:~s [~s~s] ~w%~s ~s",
+              [?BOLD, ?RESET, Color, BarWithHead, Percentage, ?RESET, LabelStr]),
 
     %% Newline when complete
     case Percentage >= 100 of

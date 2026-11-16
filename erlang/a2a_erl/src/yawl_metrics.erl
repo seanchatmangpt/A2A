@@ -311,8 +311,8 @@ init([]) ->
 
 %% @private
 handle_call(get_workflow_metrics, _From, State) ->
-    Metrics = [workflow_metrics_to_map(Id, M) || Id <- maps:keys(State#state.workflow_metrics),
-                                                 M <- [maps:get(Id, State#state.workflow_metrics)]],
+    WorkflowMetrics = State#state.workflow_metrics,
+    Metrics = [workflow_metrics_to_map(Id, maps:get(Id, WorkflowMetrics)) || Id <- maps:keys(WorkflowMetrics)],
     {reply, {ok, Metrics}, State};
 
 handle_call({get_workflow_metrics, WorkflowId}, _From, State) ->
@@ -322,8 +322,8 @@ handle_call({get_workflow_metrics, WorkflowId}, _From, State) ->
     end;
 
 handle_call(get_service_metrics, _From, State) ->
-    Metrics = [service_metrics_to_map(Name, M) || Name <- maps:keys(State#state.service_metrics),
-                                                   M <- [maps:get(Name, State#state.service_metrics)]],
+    ServiceMetrics = State#state.service_metrics,
+    Metrics = [service_metrics_to_map(Name, maps:get(Name, ServiceMetrics)) || Name <- maps:keys(ServiceMetrics)],
     {reply, {ok, Metrics}, State};
 
 handle_call({get_service_metrics, ServiceName}, _From, State) ->
@@ -333,18 +333,18 @@ handle_call({get_service_metrics, ServiceName}, _From, State) ->
     end;
 
 handle_call(get_resource_metrics, _From, State) ->
-    Metrics = [resource_metrics_to_map(Id, M) || Id <- maps:keys(State#state.resource_metrics),
-                                                   M <- [maps:get(Id, State#state.resource_metrics)]],
+    ResourceMetrics = State#state.resource_metrics,
+    Metrics = [resource_metrics_to_map(Id, maps:get(Id, ResourceMetrics)) || Id <- maps:keys(ResourceMetrics)],
     {reply, {ok, Metrics}, State};
 
 handle_call(get_all_metrics, _From, State) ->
+    WorkflowMetrics = State#state.workflow_metrics,
+    ServiceMetrics = State#state.service_metrics,
+    ResourceMetrics = State#state.resource_metrics,
     AllMetrics = #{
-        workflows => [workflow_metrics_to_map(Id, M) || Id <- maps:keys(State#state.workflow_metrics),
-                                                        M <- [maps:get(Id, State#state.workflow_metrics)]],
-        services => [service_metrics_to_map(Name, M) || Name <- maps:keys(State#state.service_metrics),
-                                                         M <- [maps:get(Name, State#state.service_metrics)]],
-        resources => [resource_metrics_to_map(Id, M) || Id <- maps:keys(State#state.resource_metrics),
-                                                          M <- [maps:get(Id, State#state.resource_metrics)]],
+        workflows => [workflow_metrics_to_map(Id, maps:get(Id, WorkflowMetrics)) || Id <- maps:keys(WorkflowMetrics)],
+        services => [service_metrics_to_map(Name, maps:get(Name, ServiceMetrics)) || Name <- maps:keys(ServiceMetrics)],
+        resources => [resource_metrics_to_map(Id, maps:get(Id, ResourceMetrics)) || Id <- maps:keys(ResourceMetrics)],
         counters => State#state.counters,
         gauges => State#state.gauges,
         histograms => State#state.histograms,
@@ -655,13 +655,13 @@ build_resource_prometheus(ResourceMetrics) ->
 
 %% @private
 get_all_metrics_data(State) ->
+    WorkflowMetrics = State#state.workflow_metrics,
+    ServiceMetrics = State#state.service_metrics,
+    ResourceMetrics = State#state.resource_metrics,
     {ok, #{
-        workflows => [workflow_metrics_to_map(Id, M) || Id <- maps:keys(State#state.workflow_metrics),
-                                                        M <- [maps:get(Id, State#state.workflow_metrics)]],
-        services => [service_metrics_to_map(Name, M) || Name <- maps:keys(State#state.service_metrics),
-                                                         M <- [maps:get(Name, State#state.service_metrics)]],
-        resources => [resource_metrics_to_map(Id, M) || Id <- maps:keys(State#state.resource_metrics),
-                                                          M <- [maps:get(Id, State#state.resource_metrics)]],
+        workflows => [workflow_metrics_to_map(Id, maps:get(Id, WorkflowMetrics)) || Id <- maps:keys(WorkflowMetrics)],
+        services => [service_metrics_to_map(Name, maps:get(Name, ServiceMetrics)) || Name <- maps:keys(ServiceMetrics)],
+        resources => [resource_metrics_to_map(Id, maps:get(Id, ResourceMetrics)) || Id <- maps:keys(ResourceMetrics)],
         counters => State#state.counters,
         gauges => State#state.gauges,
         histograms => State#state.histograms,

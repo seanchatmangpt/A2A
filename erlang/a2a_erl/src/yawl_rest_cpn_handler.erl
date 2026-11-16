@@ -79,40 +79,65 @@ handle_request(<<"GET">>, Req, State) ->
 handle_request(<<"POST">>, Req, State) ->
     PathInfo = cowboy_req:path_info(Req),
     {ok, Body, _} = cowboy_req:read_body(Req),
-    Data = jiffy:decode(Body, [return_maps]),
+    Data = try
+        jiffy:decode(Body, [return_maps])
+    catch
+        _:_ ->
+            respond_error(<<"invalid_json">>, #{message => <<"Failed to parse JSON body">>}, Req, State)
+    end,
 
     case PathInfo of
         [<<"cpn">>, <<"export">>] ->
-            Workflow = maps:get(<<"workflow">>, Data),
-            WorkflowAtom = binary_to_existing_atom(Workflow, utf8),
-            CPNJSON = yawl_cpn:workflow_to_cpn_json(WorkflowAtom),
-            Result = #{
-                workflow => Workflow,
-                format => <<"cpn-json">>,
-                data => jiffy:decode(CPNJSON, [return_maps])
-            },
-            respond(Result, Req, State);
+            case maps:get(<<"workflow">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_field">>, <<"workflow">>, Req, State);
+                Workflow ->
+                    try
+                        WorkflowAtom = binary_to_existing_atom(Workflow, utf8),
+                        CPNJSON = yawl_cpn:workflow_to_cpn_json(WorkflowAtom),
+                        Result = #{
+                            workflow => Workflow,
+                            format => <<"cpn-json">>,
+                            data => jiffy:decode(CPNJSON, [return_maps])
+                        },
+                        respond(Result, Req, State)
+                    catch
+                        error:badarg ->
+                            respond_error(<<"invalid_workflow">>, Workflow, Req, State);
+                        error:{badmatch, _} ->
+                            respond_error(<<"export_failed">>, Workflow, Req, State)
+                    end
+            end;
         [<<"cpn">>, <<"parse">>] ->
             CPNJSON = jiffy:encode(Data),
-            Workflow = yawl_cpn:cpn_json_to_workflow(CPNJSON),
-            Result = #{
-                status => <<"parsed">>,
-                workflow => Workflow
-            },
-            respond(Result, Req, State);
+            try
+                Workflow = yawl_cpn:cpn_json_to_workflow(CPNJSON),
+                Result = #{
+                    status => <<"parsed">>,
+                    workflow => Workflow
+                },
+                respond(Result, Req, State)
+            catch
+                _:Error ->
+                    respond_error(<<"parse_failed">>, #{reason => Error}, Req, State)
+            end;
         [<<"cpn">>, <<"llm_parse">>] ->
-            LLMJSON = maps:get(<<"llm_json">>, Data),
-            Result = case yawl_cpn:parse_llm_workflow(LLMJSON) of
-                {ok, ParsedModel} -> #{
-                    status => <<"success">>,
-                    model => ParsedModel
-                };
-                {error, Reason} -> #{
-                    status => <<"error">>,
-                    reason => Reason
-                }
-            end,
-            respond(Result, Req, State);
+            case maps:get(<<"llm_json">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_field">>, <<"llm_json">>, Req, State);
+                LLMJSON ->
+                    Result = case yawl_cpn:parse_llm_workflow(LLMJSON) of
+                        {ok, ParsedModel} -> #{
+                            status => <<"success">>,
+                            model => ParsedModel
+                        };
+                        {error, Reason} -> #{
+                            status => <<"error">>,
+                            reason => Reason
+                        }
+                    end,
+                    respond(Result, Req, State)
+            end;
         [<<"cpn">>, <<"validate">>] ->
             Result = case yawl_cpn:validate_cpn_json(Data) of
                 {ok, Validated} -> #{
@@ -126,25 +151,42 @@ handle_request(<<"POST">>, Req, State) ->
             end,
             respond(Result, Req, State);
         [<<"cpn">>, <<"guard">>, <<"evaluate">>] ->
-            Guard = maps:get(<<"guard">>, Data),
-            Marking = maps:get(<<"marking">>, Data),
-            Result = case yawl_cpn:evaluate_guard(Guard, Marking) of
-                true -> #{result => true, message => <<"Guard evaluates to true">>};
-                false -> #{result => false, message => <<"Guard evaluates to false">>}
-            end,
-            respond(Result, Req, State);
+            case {maps:get(<<"guard">>, Data, undefined), maps:get(<<"marking">>, Data, undefined)} of
+                {undefined, _} ->
+                    respond_error(<<"missing_required_field">>, <<"guard">>, Req, State);
+                {_, undefined} ->
+                    respond_error(<<"missing_required_field">>, <<"marking">>, Req, State);
+                {Guard, Marking} ->
+                    Result = case yawl_cpn:evaluate_guard(Guard, Marking) of
+                        true -> #{result => true, message => <<"Guard evaluates to true">>};
+                        false -> #{result => false, message => <<"Guard evaluates to false">>}
+                    end,
+                    respond(Result, Req, State)
+            end;
         [<<"cpn">>, <<"color_set">>, <<"create">>] ->
-            Name = binary_to_atom(maps:get(<<"name">>, Data), utf8),
-            Type = binary_to_atom(maps:get(<<"type">>, Data), utf8),
-            yawl_cpn:create_color_set(Name, Type),
-            Result = #{
-                status => <<"created">>,
-                color_set => #{
-                    name => Name,
-                    type => Type
-                }
-            },
-            respond(Result, Req, State);
+            case {maps:get(<<"name">>, Data, undefined), maps:get(<<"type">>, Data, undefined)} of
+                {undefined, _} ->
+                    respond_error(<<"missing_required_field">>, <<"name">>, Req, State);
+                {_, undefined} ->
+                    respond_error(<<"missing_required_field">>, <<"type">>, Req, State);
+                {NameBin, TypeBin} ->
+                    try
+                        Name = binary_to_atom(NameBin, utf8),
+                        Type = binary_to_atom(TypeBin, utf8),
+                        yawl_cpn:create_color_set(Name, Type),
+                        Result = #{
+                            status => <<"created">>,
+                            color_set => #{
+                                name => Name,
+                                type => Type
+                            }
+                        },
+                        respond(Result, Req, State)
+                    catch
+                        _:Error ->
+                            respond_error(<<"color_set_creation_failed">>, #{reason => Error}, Req, State)
+                    end
+            end;
         _ ->
             not_found(Req, State)
     end;
@@ -179,3 +221,15 @@ respond_json(Data, StatusCode, Req, State) ->
         <<"content-type">> => <<"application/json">>
     }, Body, Req),
     {stop, Req0, State}.
+
+%% @private
+%% @doc Respond with an error in a standardized format.
+respond_error(ErrorCode, Details, Req, State) when is_binary(Details) ->
+    respond_error(ErrorCode, #{message => Details}, Req, State);
+respond_error(ErrorCode, DetailsMap, Req, State) when is_map(DetailsMap) ->
+    Response = #{
+        status => <<"error">>,
+        error_code => ErrorCode,
+        details => DetailsMap
+    },
+    respond_json(Response, 400, Req, State).

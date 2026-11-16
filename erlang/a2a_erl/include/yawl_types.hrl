@@ -95,12 +95,14 @@
 %% YAWL Orchestrator State Records
 %%====================================================================
 
+%% YAWL Orchestrator gen_server state record (module-prefixed to avoid conflicts)
 -record(yawl_orchestrator_state, {
-    workflows :: map(),
-    pattern_cache :: map(),
-    active_tests :: map(),
-    config :: map(),
-    statistics :: map()
+    workflows = #{},
+    workflow_instances = #{},
+    pattern_cache = #{},
+    subscribers = #{},
+    config = #{},
+    statistics = #{total_workflows => 0, completed_workflows => 0, failed_workflows => 0}
 }).
 
 %%====================================================================

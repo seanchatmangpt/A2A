@@ -269,119 +269,134 @@ handle_get_task_workitems(TaskId) ->
 
 %% @private
 handle_create_task(Data) ->
-    WorkflowId = maps:get(<<"workflow_id">>, Data),
-    TaskName = maps:get(<<"task_name">>, Data),
-    Priority = binary_to_existing_atom(maps:get(<<"priority">>, Data, <<"normal">>), utf8),
-    TaskId = binary_to_existing_atom(maps:get(<<"task_id">>, Data, <<"default_task">>), utf8),
-    DataMap = maps:get(<<"data">>, Data, #{}),
+    %% Validate required fields
+    RequiredFields = [<<"workflow_id">>, <<"task_name">>],
+    MissingFields = lists:filter(fun(F) -> not maps:is_key(F, Data) end, RequiredFields),
+    case MissingFields of
+        [] ->
+            WorkflowId = maps:get(<<"workflow_id">>, Data),
+            TaskName = maps:get(<<"task_name">>, Data),
+            Priority = binary_to_existing_atom(maps:get(<<"priority">>, Data, <<"normal">>), utf8),
+            TaskId = binary_to_existing_atom(maps:get(<<"task_id">>, Data, <<"default_task">>), utf8),
+            DataMap = maps:get(<<"data">>, Data, #{}),
 
-    %% Create workitem
-    Workitem = #yawl_workitem_persist{
-        workitem_id = generate_workitem_id(),
-        workflow_id = WorkflowId,
-        task_id = TaskId,
-        task_name = TaskName,
-        status = pending,
-        data = DataMap,
-        allocated_to = undefined,
-        allocation_time = undefined,
-        start_time = undefined,
-        completion_time = undefined,
-        error = undefined,
-        retry_count = 0,
-        priority = Priority
-    },
+            %% Create workitem
+            Workitem = #yawl_workitem_persist{
+                workitem_id = generate_workitem_id(),
+                workflow_id = WorkflowId,
+                task_id = TaskId,
+                task_name = TaskName,
+                status = pending,
+                data = DataMap,
+                allocated_to = undefined,
+                allocation_time = undefined,
+                start_time = undefined,
+                completion_time = undefined,
+                error = undefined,
+                retry_count = 0,
+                priority = Priority
+            },
 
-    %% Save workitem and queue for processing
-    case save_workitem(Workitem) of
-        ok ->
-            case yawl_human_task:allocate_task(Workitem, #{}) of
-                {ok, _} ->
-                    #{
-                        workitem_id => Workitem#yawl_workitem_persist.workitem_id,
-                        task_id => TaskId,
-                        status => created,
-                        message => <<"Task created and queued">>
-                    };
+            %% Save workitem and queue for processing
+            case save_workitem(Workitem) of
+                ok ->
+                    case yawl_human_task:allocate_task(Workitem, #{}) of
+                        {ok, _} ->
+                            #{
+                                workitem_id => Workitem#yawl_workitem_persist.workitem_id,
+                                task_id => TaskId,
+                                status => created,
+                                message => <<"Task created and queued">>
+                            };
+                        {error, Reason} ->
+                            #{error => to_binary(Reason)}
+                    end;
                 {error, Reason} ->
                     #{error => to_binary(Reason)}
             end;
-        {error, Reason} ->
-            #{error => to_binary(Reason)}
+        _ ->
+            #{error => <<"missing_required_fields">>, missing => MissingFields}
     end.
 
 %% @private
 handle_complete_task(TaskId, Data) ->
-    WorkitemId = maps:get(<<"workitem_id">>, Data),
-    ResultData = maps:get(<<"result">>, Data, #{}),
-    WorkflowId = maps:get(<<"workflow_id">>, Data),
+    RequiredFields = [<<"workitem_id">>],
+    MissingFields = lists:filter(fun(F) -> not maps:is_key(F, Data) end, RequiredFields),
+    case MissingFields of
+        [] ->
+            WorkitemId = maps:get(<<"workitem_id">>, Data),
+            ResultData = maps:get(<<"result">>, Data, #{}),
+            WorkflowId = maps:get(<<"workflow_id">>, Data, undefined),
 
-    %% First update the workitem in persistence
-    case get_workitem_by_id(WorkitemId) of
-        {ok, Workitem} ->
-            %% Update workitem status
-            CompletedWorkitem = Workitem#yawl_workitem_persist{
-                status = completed,
-                completion_time = erlang:monotonic_time(millisecond),
-                data = maps:put(<<"completion_result">>, ResultData, Workitem#yawl_workitem_persist.data)
-            },
+            %% First update the workitem in persistence
+            case get_workitem_by_id(WorkitemId) of
+                {ok, Workitem} ->
+                    %% Update workitem status
+                    CompletedWorkitem = Workitem#yawl_workitem_persist{
+                        status = completed,
+                        completion_time = erlang:monotonic_time(millisecond),
+                        data = maps:put(<<"completion_result">>, ResultData, Workitem#yawl_workitem_persist.data)
+                    },
 
-            case save_workitem(CompletedWorkitem) of
-                ok ->
-                    %% Notify the workflow instance that the task is complete
-                    TaskIdAtom = try
-                        binary_to_existing_atom(TaskId, utf8)
-                    catch
-                        error:badarg ->
-                            %% TaskId might be a binary that's not an atom
-                            %% Try to use the task_id from the workitem
-                            Workitem#yawl_workitem_persist.task_id
-                    end,
-
-                    CompleteResult = case WorkflowId of
-                        undefined ->
-                            %% Try to get workflow_id from workitem
-                            case Workitem#yawl_workitem_persist.workflow_id of
-                                undefined -> {error, no_workflow_id};
-                                WfId -> complete_workflow_task(WfId, TaskIdAtom, ResultData)
-                            end;
-                        _ ->
-                            complete_workflow_task(WorkflowId, TaskIdAtom, ResultData)
-                    end,
-
-                    case CompleteResult of
+                    case save_workitem(CompletedWorkitem) of
                         ok ->
-                            %% Release any allocated resources
-                            case yawl_resource_manager:release_resource(WorkitemId) of
+                            %% Notify the workflow instance that the task is complete
+                            TaskIdAtom = try
+                                binary_to_existing_atom(TaskId, utf8)
+                            catch
+                                error:badarg ->
+                                    %% TaskId might be a binary that's not an atom
+                                    %% Try to use the task_id from the workitem
+                                    Workitem#yawl_workitem_persist.task_id
+                            end,
+
+                            CompleteResult = case WorkflowId of
+                                undefined ->
+                                    %% Try to get workflow_id from workitem
+                                    case Workitem#yawl_workitem_persist.workflow_id of
+                                        undefined -> {error, no_workflow_id};
+                                        WfId -> complete_workflow_task(WfId, TaskIdAtom, ResultData)
+                                    end;
+                                _ ->
+                                    complete_workflow_task(WorkflowId, TaskIdAtom, ResultData)
+                            end,
+
+                            case CompleteResult of
                                 ok ->
-                                    #{
-                                        task_id => TaskId,
-                                        workitem_id => WorkitemId,
-                                        status => completed,
-                                        completion_time => CompletedWorkitem#yawl_workitem_persist.completion_time,
-                                        result => ResultData
-                                    };
+                                    %% Release any allocated resources
+                                    case yawl_resource_manager:release_resource(WorkitemId) of
+                                        ok ->
+                                            #{
+                                                task_id => TaskId,
+                                                workitem_id => WorkitemId,
+                                                status => completed,
+                                                completion_time => CompletedWorkitem#yawl_workitem_persist.completion_time,
+                                                result => ResultData
+                                            };
+                                        {error, Reason} ->
+                                            #{
+                                                task_id => TaskId,
+                                                workitem_id => WorkitemId,
+                                                status => completed,
+                                                warnings => [<<"Resource release failed">>],
+                                                error => to_binary(Reason)
+                                            }
+                                    end;
                                 {error, Reason} ->
                                     #{
+                                        error => to_binary(Reason),
                                         task_id => TaskId,
-                                        workitem_id => WorkitemId,
-                                        status => completed,
-                                        warnings => [<<"Resource release failed">>],
-                                        error => to_binary(Reason)
+                                        workitem_id => WorkitemId
                                     }
                             end;
                         {error, Reason} ->
-                            #{
-                                error => to_binary(Reason),
-                                task_id => TaskId,
-                                workitem_id => WorkitemId
-                            }
+                            #{error => to_binary(Reason), workitem_id => WorkitemId}
                     end;
-                {error, Reason} ->
-                    #{error => to_binary(Reason), workitem_id => WorkitemId}
+                {error, not_found} ->
+                    #{error => <<"workitem_not_found">>, workitem_id => WorkitemId}
             end;
-        {error, not_found} ->
-            #{error => <<"workitem_not_found">>, workitem_id => WorkitemId}
+        _ ->
+            #{error => <<"missing_required_fields">>, missing => MissingFields}
     end.
 
 %% @private

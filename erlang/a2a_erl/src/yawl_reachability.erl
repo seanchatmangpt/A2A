@@ -261,7 +261,7 @@ do_is_reachable(NetMod, TargetMarking) ->
     %% First verify it's an acyclic free-choice net
     AFCVerification = verify_afc_net(NetInfo),
 
-    case maps:get(is_afc, AFCVerification) of
+    case maps:get(is_afc, AFCVerification, false) of
         false ->
             #{
                 is_reachable => false,
@@ -362,8 +362,9 @@ are_places_concurrent(NetInfo, Place1, Place2) ->
     %% For free-choice nets: places are concurrent if they're not in the same
     %% preset of any transition (no structural conflict)
 
-    Postset1 = maps:get(Place1, maps:get(postset, NetInfo, []), []),
-    Postset2 = maps:get(Place2, maps:get(postset, NetInfo, []), []),
+    PostsetMap = maps:get(postset, NetInfo, #{}),
+    Postset1 = maps:get(Place1, PostsetMap, []),
+    Postset2 = maps:get(Place2, PostsetMap, []),
 
     %% Check if there's a shared transition in postset (structural conflict)
     SharedTransitions = sets:to_list(

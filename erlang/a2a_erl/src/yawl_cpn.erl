@@ -214,9 +214,9 @@ llm_format_workflow(NetMod) ->
 -spec parse_llm_workflow(binary()) -> {ok, map()} | {error, term()}.
 parse_llm_workflow(JSONString) ->
     try jiffy:decode(JSONString, [return_maps]) of
-        Parsed -> {ok, validate_and_normalize_cpn(Parsed)};
-        {error, Reason} -> {error, {invalid_json, Reason}}
+        Parsed -> {ok, validate_and_normalize_cpn(Parsed)}
     catch
+        error:{error, Reason} -> {error, {invalid_json, Reason}};
         _:Reason -> {error, {parse_error, Reason}}
     end.
 
@@ -500,14 +500,14 @@ validate_cpn_structure(JSONMap) ->
     Transitions = maps:get(<<"transitions">>, JSONMap, []),
     Arcs = maps:get(<<"arcs">>, JSONMap, []),
 
-    %% Check arc references
-    PlaceIds = sets:from_list([maps:get(<<"id">>, P) || P <- Places]),
-    TransitionIds = sets:from_list([maps:get(<<"id">>, T) || T <- Transitions]),
+    %% Check arc references - use safe maps:get with defaults
+    PlaceIds = sets:from_list([safe_get_id(<<"id">>, P, <<>>) || P <- Places]),
+    TransitionIds = sets:from_list([safe_get_id(<<"id">>, T, <<>>) || T <- Transitions]),
 
     ValidArcs = lists:all(
         fun(Arc) ->
-            Source = maps:get(<<"source">>, Arc),
-            Target = maps:get(<<"target">>, Arc),
+            Source = maps:get(<<"source">>, Arc, <<>>),
+            Target = maps:get(<<"target">>, Arc, <<>>),
             (sets:is_element(Source, PlaceIds) orelse sets:is_element(Source, TransitionIds))
             andalso
             (sets:is_element(Target, PlaceIds) orelse sets:is_element(Target, TransitionIds))
@@ -761,31 +761,37 @@ convert_cpn_to_pm4py_local(CPNJSON) ->
     Transitions = maps:get(<<"transitions">>, CPNJSON, []),
     Arcs = maps:get(<<"arcs">>, CPNJSON, []),
 
-    %% Convert places to PM4Py format
+    %% Convert places to PM4Py format - use safe getters
     PM4PyPlaces = [
-        #{
-            id => maps:get(<<"id">>, P),
-            name => maps:get(<<"name">>, P, maps:get(<<"id">>, P)),
-            initial_tokens => maps:get(<<"initialTokens">>, P, 0)
-        }
+        begin
+            Id = safe_get_id(<<"id">>, P, <<>>),
+            #{
+                id => Id,
+                name => maps:get(<<"name">>, P, Id),
+                initial_tokens => maps:get(<<"initialTokens">>, P, 0)
+            }
+        end
         || P <- Places
     ],
 
     %% Convert transitions to PM4Py format
     PM4PyTransitions = [
-        #{
-            id => maps:get(<<"id">>, T),
-            name => maps:get(<<"name">>, T, maps:get(<<"id">>, T)),
-            guard => maps:get(<<"guard">>, T, null)
-        }
+        begin
+            Id = safe_get_id(<<"id">>, T, <<>>),
+            #{
+                id => Id,
+                name => maps:get(<<"name">>, T, Id),
+                guard => maps:get(<<"guard">>, T, null)
+            }
+        end
         || T <- Transitions
     ],
 
     %% Convert arcs to PM4Py format
     PM4PyArcs = [
         #{
-            source => maps:get(<<"source">>, A),
-            target => maps:get(<<"target">>, A),
+            source => maps:get(<<"source">>, A, <<>>),
+            target => maps:get(<<"target">>, A, <<>>),
             arc_type => maps:get(<<"type">>, A, <<"normal">>)
         }
         || A <- Arcs
@@ -804,3 +810,14 @@ convert_cpn_to_pm4py_local(CPNJSON) ->
         conversion_method => local,
         timestamp => erlang:system_time(millisecond)
     }.
+
+%% @private
+%% @doc Safe get for required id fields - returns default if missing
+%% Logs a warning when default is used to help debugging
+safe_get_id(Key, Map, Default) ->
+    case maps:get(Key, Map, Default) of
+        Default ->
+            logger:warning("Missing required field ~p in CPN data, using default: ~p~nMap: ~p~n", [Key, Default, Map]),
+            Default;
+        Value -> Value
+    end.

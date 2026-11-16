@@ -20,6 +20,8 @@
       yawl_a2a_resource_integration,
       yawl_error_recovery,
       yawl_metrics,
+      yawl_xes_logger,
+      yawl_xes_formatter,
       yawl_workflow_templates,
       yawl_workflow_definition_storage,
       %% Claude Headless & Human-in-the-Loop
@@ -87,8 +89,12 @@
       yawl_rest_workitem_handler,
       yawl_rest_service_handler,
       yawl_rest_metrics_handler,
+      yawl_rest_events_handler,
+      yawl_rest_xes_handler,
       yawl_health_handler,
       yawl_metrics,
+      yawl_cors_middleware,
+      yawl_sse,
       %% YAWL Templates and Definitions
       yawl_workflow_templates,
       yawl_workflow_definition_storage,

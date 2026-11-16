@@ -9,7 +9,6 @@
 -module(y_combinator_logger_tests).
 -author("A2A Team").
 
--include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -253,6 +252,8 @@ counter_gauge_test_() ->
 %% Property-Based Tests
 %%====================================================================
 
+-ifdef(PROPER).
+-include_lib("proper/include/proper.hrl").
 prop_log_message_roundtrip() ->
     ?FORALL(Type, oneof([combination, test, demo, system, performance]),
         begin
@@ -295,3 +296,4 @@ prop_metrics_non_negative() ->
             maps:get(tests_passed, Metrics, 0) >= 0 andalso
             maps:get(tests_failed, Metrics, 0) >= 0
         end).
+-endif.

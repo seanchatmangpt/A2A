@@ -1,28 +1,46 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Demo Scenarios - Predefined Business Workflow Scenarios
+%%% @doc YAWL Demo Scenarios - Predefined Business Workflow Scenarios
 %%%
+%%% <h3>Purpose</h3>
 %%% This module provides ready-to-run demo scenarios for the Y Combinator
 %%% demo, showcasing real-world workflow patterns with visual progress
 %%% indicators and color-coded status output.
 %%%
-%%% Scenarios:
-%%%   - order_processing: E-commerce order flow demo
-%%%   - document_approval: Multi-level approval demo
-%%%   - data_pipeline: ETL processing demo
-%%%   - financial_audit: Compliance checking demo
+%%% <h3>Layer</h3>
+%%% Business Layer - Demo and example business scenarios
 %%%
-%%% Usage:
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_orchestrator - For workflow execution</li>
+%%%   <li>yawl_patterns - For pattern selection</li>
+%%% </ul>
+%%%
+%%% <h3>Supported Scenarios</h3>
+%%% <ul>
+%%%   <li><b>order_processing:</b> E-commerce order flow demo</li>
+%%%   <li><b>document_approval:</b> Multi-level approval demo</li>
+%%%   <li><b>data_pipeline:</b> ETL processing demo</li>
+%%%   <li><b>financial_audit:</b> Compliance checking demo</li>
+%%% </ul>
+%%%
+%%% <h3>Usage</h3>
+%%% <pre>
 %%%   y_demo_scenarios:run_scenario(order_processing).
 %%%   y_demo_scenarios:run_scenario(document_approval).
 %%%   y_demo_scenarios:run_scenario(data_pipeline).
 %%%   y_demo_scenarios:run_scenario(financial_audit).
 %%%   y_demo_scenarios:list_scenarios().
+%%% </pre>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(y_demo_scenarios).
 -author("A2A Team").
+-modified("2025-02-05").
 -export([
     run_scenario/1,
     list_scenarios/0,
@@ -152,7 +170,7 @@ validate_scenario(ScenarioName) ->
             RequiredModules = [yawl_combinatoric_test, yawl_patterns],
             case lists:all(fun(M) -> code:is_loaded(M) =/= false orelse
                                      whereis(M) =/= undefined orelse
-                                     module_loaded(M) end
+                                     is_module_loaded(M) end
                             , RequiredModules) of
                 true -> {ok, valid};
                 false -> {error, missing_dependencies}
@@ -407,22 +425,22 @@ print_steps_header(Steps) ->
     io:format("~s    ~s─────────────────────────────────────────────────────~n",
               [?DIM, ?RESET]),
     lists:foreach(fun(#step{id = Id, name = Name, pattern = Pattern}) ->
-        io:format("~s[~2d]~s ~s ~-24s ~s~n",
+        io:format("~s[~2p]~s ~s ~-24s ~s~n",
                   [?DIM, Id, ?RESET, ?WAIT, format_pattern(Pattern), Name])
     end, Steps).
 
 %% @private Print step running status
 print_step_running(Index, Name, Pattern) ->
-    io:format("~s[~2d]~s ~s ~-24s ~s~n",
+    io:format("~s[~2p]~s ~s ~-24s ~s~n",
               [?DIM, Index, ?RESET, ?RUNNING, format_pattern(Pattern), Name]).
 
 %% @private Print step passed status
 print_step_passed(Index, Name) ->
-    io:format("~s[~2d]~s ~s ~s~n", [?DIM, Index, ?RESET, ?CHECK, Name]).
+    io:format("~s[~2p]~s ~s ~s~n", [?DIM, Index, ?RESET, ?CHECK, Name]).
 
 %% @private Print step failed status
 print_step_failed(Index, Name) ->
-    io:format("~s[~2d]~s ~s ~s~n", [?DIM, Index, ?RESET, ?CROSS, Name]).
+    io:format("~s[~2p]~s ~s ~s~n", [?DIM, Index, ?RESET, ?CROSS, Name]).
 
 %% @private Print progress bar
 print_progress_bar(Percentage) ->
@@ -431,7 +449,7 @@ print_progress_bar(Percentage) ->
     Bar = lists:duplicate(Filled, ?PROGRESS_FULL) ++
           [?PROGRESS_HEAD] ++
           lists:duplicate(Empty, ?PROGRESS_EMPTY),
-    io:format("~sProgress: [~s~s] ~3d%%~s~n~n",
+    io:format("~sProgress: [~s~s] ~3p%%~s~n~n",
               [?DIM, ?BRIGHT_CYAN, lists:flatten(Bar), Percentage, ?RESET]).
 
 %% @private Print scenario summary
@@ -500,7 +518,7 @@ format_performance(Actual, Expected) ->
     end.
 
 %% @private Check if a module is loaded
-module_loaded(Module) ->
+is_module_loaded(Module) ->
     case code:is_loaded(Module) of
         {file, _} -> true;
         false -> false

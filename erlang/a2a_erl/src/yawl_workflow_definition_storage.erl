@@ -320,7 +320,11 @@ do_save_definition(Id, DefinitionMap, State) ->
                 version = CurrentVersion + 1,
                 created_at = case CurrentVersion of
                     0 -> Now;
-                    _ -> (maps:get(Id, State#state.definitions))#definition.created_at
+                    _ ->
+                        case maps:get(Id, State#state.definitions, undefined) of
+                            undefined -> Now;
+                            ExistingDef -> ExistingDef#definition.created_at
+                        end
                 end,
                 updated_at = Now,
                 created_by = maps_get(<<"created_by">>, DefinitionMap, undefined),

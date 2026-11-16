@@ -1,15 +1,35 @@
 %%%-------------------------------------------------------------------
 %%% @doc YAWL Workflow Orchestrator
 %%%
+%%% <h3>Purpose</h3>
 %%% This module is the central orchestrator for YAWL workflow execution.
 %%% It manages workflow instances, delegates to workflow instance processes,
 %%% and coordinates with the persistence layer.
 %%%
+%%% <h3>Layer</h3>
+%%% Orchestration Layer - Manages workflow lifecycle and instance coordination
+%%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_patterns - For pattern structure and validation</li>
+%%%   <li>yawl_persistence - For workflow state persistence</li>
+%%%   <li>yawl_workflow_instance - For individual workflow execution</li>
+%%%   <li>yawl_workitem_processor - For task execution</li>
+%%% </ul>
+%%%
+%%% <h3>State Machine</h3>
+%%% Workflows transition through these states:
+%%% <code>pending -> running -> completed | failed | cancelled</code>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_orchestrator).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_server).
 
 %% gen_server callbacks
@@ -27,10 +47,10 @@
 -include("yawl_types.hrl").
 -include("yawl_schema.hrl").
 
-%% State record
+%% State record (local to this module)
 -record(state, {
     workflows = #{},
-    workflow_instances = #{},  %% workflow_id => {pid, monitor_ref}
+    workflow_instances = #{},
     pattern_cache = #{},
     subscribers = #{},
     config = #{},

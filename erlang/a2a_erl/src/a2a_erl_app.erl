@@ -1,7 +1,42 @@
 %%% @doc A2A Erlang Application
 %%%
 %%% This is the main OTP application module for the A2A protocol implementation.
-%%% It starts the supervisor which manages all the A2A services.
+%%% It starts the supervisor which manages all the A2A services and YAWL workflow engine.
+%%%
+%%% ## Supervision Hierarchy
+%%%
+%%% ```
+%%% a2a_erl_sup (one_for_one)
+%%% ├── yawl_persistence          - Mnesia-based workflow storage
+%%% ├── a2a_task_store            - ETS-backed task storage
+%%% ├── yawl_events               - Observer pattern for workflow events
+%%% ├── yawl_service_registry     - Service discovery and registration
+%%% ├── yawl_resource_manager     - Dynamic resource allocation
+%%% ├── yawl_orchestrator         - Workflow lifecycle management
+%%% ├── yawl_metrics              - Metrics collection
+%%% ├── yawl_error_recovery       - Error recovery strategies
+%%% ├── yawl_human_task           - Human-in-the-loop tasks
+%%% ├── yawl_workitem_processor   - Work item processing
+%%% ├── a2a_agent_card            - Agent card management
+%%% ├── yawl_a2a_bridge           - YAWL-A2A protocol bridge
+%%% ├── yawl_a2a_events           - A2A event notifications
+%%% ├── yawl_a2a_resource_integration - Resource integration
+%%% ├── y_combinator_logger       - Demo logging and telemetry
+%%% ├── yawl_workflow_instance_sup (simple_one_for_one)
+%%% │   └── [workflow_instance_1, workflow_instance_2, ...]
+%%% └── a2a_task_sup (simple_one_for_one)
+%%%     └── [task_state_1, task_state_2, ...]
+%%% '''
+%%%
+%%% ## Application Startup Sequence
+%%%
+%%% 1. Mnesia schema is created (if needed)
+%%% 2. Mnesia is started and tables are initialized
+%%% 3. Core services start (persistence, task store)
+%%% 4. YAWL services start (events, orchestrator, resource manager)
+%%% 5. HTTP server starts
+%%%
+%%% @end
 -module(a2a_erl_app).
 -behaviour(application).
 
@@ -12,32 +47,88 @@
 %%% Application Callbacks
 %%% ============================================================================
 
+%% @doc Start the A2A application.
+%%
+%% Initializes Mnesia, starts the supervision tree, and starts the HTTP server.
 start(_StartType, _StartArgs) ->
-    %% Start inets for httpc (push notifications)
-    case inets:start() of
-        ok -> ok;
-        {error, {already_started, inets}} -> ok
-    end,
+    %% Initialize Mnesia first - required for YAWL persistence
+    case initialize_mnesia() of
+        ok ->
+            %% Start inets for httpc (push notifications)
+            case inets:start() of
+                ok -> ok;
+                {error, {already_started, inets}} -> ok
+            end,
 
-    %% Start the supervisor
-    case a2a_erl_sup:start_link() of
-        {ok, Pid} ->
-            %% Start Cowboy HTTP server
-            _ = start_cowboy(),
-            {ok, Pid};
-        Error ->
-            Error
+            %% Start the supervisor
+            case a2a_erl_sup:start_link() of
+                {ok, Pid} ->
+                    %% Wait for Mnesia tables to be ready
+                    case yawl_persistence:wait_for_tables() of
+                        ok ->
+                            logger:info("Mnesia tables ready for YAWL persistence"),
+                            ok;
+                        {timeout, Tables} ->
+                            logger:warning("Mnesia table wait timeout, tables may not be ready: ~p", [Tables]),
+                            ok
+                    end,
+
+                    %% Start Cowboy HTTP server
+                    _ = start_cowboy(),
+                    logger:info("A2A application started successfully"),
+                    {ok, Pid};
+                Error ->
+                    logger:error("Failed to start A2A supervisor: ~p", [Error]),
+                    Error
+            end;
+        {error, Reason} ->
+            logger:error("Failed to initialize Mnesia: ~p", [Reason]),
+            {error, {mnesia_init_failed, Reason}}
     end.
 
+%% @doc Stop the A2A application.
+%%
+%% Performs graceful shutdown of all services.
 stop(_State) ->
-    %% Stop Cowboy
+    logger:info("Stopping A2A application"),
+
+    %% Stop Cowboy HTTP listener
     _ = cowboy:stop_listener(a2a_http_listener),
+
+    %% Mnesia will be stopped by the persistence supervisor
+    logger:info("A2A application stopped"),
     ok.
 
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
 
+%% @private
+%% @doc Initialize Mnesia for YAWL persistence.
+%%
+%% Creates the Mnesia schema on this node if it doesn't exist.
+%% Note: Tables are created by the yawl_persistence gen_server during init.
+initialize_mnesia() ->
+    case mnesia:system_info(is_running) of
+        yes ->
+            logger:info("Mnesia is already running"),
+            ok;
+        no ->
+            logger:info("Initializing Mnesia for YAWL persistence"),
+            case yawl_persistence:create_schema() of
+                ok ->
+                    logger:info("Mnesia schema created successfully"),
+                    ok;
+                {error, {already_exists, _}} ->
+                    logger:info("Mnesia schema already exists"),
+                    ok;
+                {error, Reason} ->
+                    logger:error("Failed to create Mnesia schema: ~p", [Reason]),
+                    {error, Reason}
+            end
+    end.
+
+%% @private
 start_cowboy() ->
     %% Get configuration with fallback for testing
     Port = get_available_port(application:get_env(a2a_erl, port, 8080)),

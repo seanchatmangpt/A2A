@@ -339,37 +339,73 @@ handle_allocate_resource(ResourceId, Req) ->
 
 %% @private
 handle_create_resource(Data) ->
-    ResourceName = maps:get(<<"name">>, Data),
-    ResourceType = binary_to_existing_atom(maps:get(<<"type">>, Data, <<"human">>), utf8),
-    Options = case maps:get(<<"options">>, Data, undefined) of
-        undefined -> #{};
-        Opts -> Opts
-    end,
+    %% Validate required fields
+    RequiredFields = [<<"name">>],
+    MissingFields = lists:filter(fun(F) -> not maps:is_key(F, Data) end, RequiredFields),
+    case MissingFields of
+        [] ->
+            ResourceName = maps:get(<<"name">>, Data),
+            ResourceType = binary_to_existing_atom(maps:get(<<"type">>, Data, <<"human">>), utf8),
+            Options = case maps:get(<<"options">>, Data, undefined) of
+                undefined -> #{};
+                Opts -> Opts
+            end,
 
-    %% Add required options
-    FinalOptions = Options#{
-        capabilities => maps:get(<<"capabilities">>, Options, []),
-        max_capacity => maps:get(<<"max_capacity">>, Options, 10),
-        attributes => maps:get(<<"attributes">>, Options, #{}),
-        metadata => maps:get(<<"metadata">>, Options, #{})
-    },
+            %% Add required options
+            FinalOptions = Options#{
+                capabilities => maps:get(<<"capabilities">>, Options, []),
+                max_capacity => maps:get(<<"max_capacity">>, Options, 10),
+                attributes => maps:get(<<"attributes">>, Options, #{}),
+                metadata => maps:get(<<"metadata">>, Options, #{})
+            },
 
-    case yawl_resource_manager:register_resource(ResourceName, ResourceType, FinalOptions) of
-        {ok, ResourceId} ->
-            #{
-                resource_id => ResourceId,
-                status => created,
-                message => <<"Resource created successfully">>
-            };
-        {error, Reason} ->
-            #{error => to_binary(Reason)}
+            case yawl_resource_manager:register_resource(ResourceName, ResourceType, FinalOptions) of
+                {ok, ResourceId} ->
+                    #{
+                        resource_id => ResourceId,
+                        status => created,
+                        message => <<"Resource created successfully">>
+                    };
+                {error, Reason} ->
+                    #{error => to_binary(Reason)}
+            end;
+        _ ->
+            #{error => <<"missing_required_fields">>, missing => MissingFields}
     end.
 
 %% @private
 handle_update_resource(ResourceId, Data) ->
     case maps:get(<<"data">>, Data, undefined) of
         undefined ->
-            #{error => <<"no_data">>};
+            %% Check for individual field updates
+            case maps:to_list(maps:without([<<"data">>], Data)) of
+                [] ->
+                    #{error => <<"no_data">>};
+                UpdateList ->
+                    %% Handle different update operations
+                    UpdateResults = lists:foldl(fun({Key, Value}, Acc) ->
+                        case update_resource_field(ResourceId, Key, Value) of
+                            {ok, _} -> Acc#{Key => updated};
+                            {error, _} -> Acc#{Key => error}
+                        end
+                    end, #{}, UpdateList),
+
+                    case lists:all(fun({_, Status}) -> Status =/= error end, maps:to_list(UpdateResults)) of
+                        true ->
+                            #{
+                                resource_id => ResourceId,
+                                status => updated,
+                                updated_fields => maps:keys(UpdateResults)
+                            };
+                        false ->
+                            #{
+                                resource_id => ResourceId,
+                                status => partial_update,
+                                updated_fields => [K || {K, V} <- maps:to_list(UpdateResults), V =/= error],
+                                errors => [K || {K, V} <- maps:to_list(UpdateResults), V =:= error]
+                            }
+                    end
+            end;
         UpdateData ->
             %% Handle different update operations
             UpdateResults = lists:foldl(fun({Key, Value}, Acc) ->
@@ -489,12 +525,16 @@ handle_specific_resource_allocate(ResourceId, Data) ->
         _ ->
             %% Get the resource to verify it exists and get its type/capabilities
             case yawl_resource_manager:get_resource(ResourceId) of
-                {ok, ResourceMap} ->
-                    ResourceType = maps:get(resource_type, ResourceMap),
+                {ok, ResourceMap} when is_map(ResourceMap) ->
+                    ResourceType = maps_get(resource_type, ResourceMap, service),
                     Capabilities = maps_get(<<"capabilities">>, Data, []),
 
                     %% Allocate the specific resource
-                    ResourceTypeAtom = binary_to_existing_atom(erlang:atom_to_binary(ResourceType, utf8), utf8),
+                    ResourceTypeAtom = try
+                        binary_to_existing_atom(erlang:atom_to_binary(ResourceType, utf8), utf8)
+                    catch
+                        error:badarg -> ResourceType
+                    end,
                     CapabilitiesAtoms = convert_capabilities_to_atoms(Capabilities),
 
                     case yawl_resource_manager:allocate_resource(WorkitemId, ResourceTypeAtom, CapabilitiesAtoms) of
@@ -520,7 +560,34 @@ handle_specific_resource_allocate(ResourceId, Data) ->
                             #{error => to_binary(Reason), workitem_id => WorkitemId}
                     end;
                 {error, not_found} ->
-                    #{error => <<"resource_not_found">>, resource_id => ResourceId}
+                    #{error => <<"resource_not_found">>, resource_id => ResourceId};
+                {ok, ResourceRecord} when is_record(ResourceRecord, yawl_resource_persist) ->
+                    ResourceType = ResourceRecord#yawl_resource_persist.resource_type,
+                    Capabilities = maps_get(<<"capabilities">>, Data, []),
+
+                    CapabilitiesAtoms = convert_capabilities_to_atoms(Capabilities),
+
+                    case yawl_resource_manager:allocate_resource(WorkitemId, ResourceType, CapabilitiesAtoms) of
+                        {ok, AllocatedId, Resource} when AllocatedId =:= ResourceId ->
+                            #{
+                                workitem_id => WorkitemId,
+                                allocated_resource_id => ResourceId,
+                                status => allocated,
+                                resource => resource_to_map(Resource),
+                                message => <<"Specific resource allocated successfully">>
+                            };
+                        {ok, AllocatedId, Resource} ->
+                            #{
+                                workitem_id => WorkitemId,
+                                requested_resource_id => ResourceId,
+                                allocated_resource_id => AllocatedId,
+                                status => allocated,
+                                resource => resource_to_map(Resource),
+                                message => <<"Alternative resource allocated">>
+                            };
+                        {error, Reason} ->
+                            #{error => to_binary(Reason), workitem_id => WorkitemId}
+                    end
             end
     end.
 

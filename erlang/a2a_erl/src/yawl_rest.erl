@@ -16,33 +16,38 @@
 %%% - `POST /workflows/{id}/cancel` - Cancel a workflow
 %%% - `POST /workflows/{id}/suspend` - Suspend a workflow
 %%% - `POST /workflows/{id}/resume` - Resume a workflow
+%%% - `GET /workflows/{id}/events` - Stream workflow events (SSE)
+%%% - `GET /workflows/{id}/marking` - Get workflow marking
+%%% - `GET /workflows/{id}/history` - Get workflow execution history
 %%%
 %%% ### Pattern Management
 %%% - `GET /patterns` - List all available workflow patterns
 %%% - `GET /patterns/{type}` - Get detailed information about a pattern
 %%% - `GET /patterns/categories` - List pattern categories
 %%% - `GET /patterns/validate` - Validate a pattern configuration
+%%% - `GET /patterns/{category}` - Query patterns by category
 %%%
-%%% ### Template Management
-%%% - `GET /templates` - List all available templates
-%%% - `GET /templates/{id}` - Get template details
-%%% - `POST /templates/{id}/instantiate` - Instantiate a template
+%%% ### Resource Management
+%%% - `GET /resources` - List all resources
+%%% - `POST /resources/allocate` - Allocate a resource
+%%% - `POST /resources/deallocate` - Deallocate a resource
+%%% - `GET /resources/{id}` - Get resource details
 %%%
-%%% ### Workflow Definitions
-%%% - `GET /definitions` - List workflow definitions
-%%% - `POST /definitions` - Save a workflow definition
-%%% - `GET /definitions/{id}` - Get a workflow definition
-%%% - `DELETE /definitions/{id}` - Delete a workflow definition
-%%% - `GET /definitions/search` - Search workflow definitions
+%%% ### Task Management
+%%% - `GET /tasks` - List all tasks
+%%% - `POST /tasks` - Create a new task
+%%% - `GET /tasks/{id}` - Get task details
+%%% - `POST /tasks/{id}/complete` - Complete a task
+%%% - `POST /tasks/{id}/claim` - Claim a task
+%%% - `POST /tasks/{id}/reassign` - Reassign a task
+%%%
+%%% ### Metrics
+%%% - `GET /metrics` - Get system metrics
+%%% - `GET /metrics/performance` - Get performance metrics
 %%%
 %%% ### XES Log Management
-%%% - `GET /xes/logs` - List all XES logs
-%%% - `GET /xes/logs/{log_id}` - Get specific XES log metadata
-%%% - `GET /xes/logs/{log_id}/export` - Export XES log as XML
-%%% - `POST /xes/logs/{log_id}/export` - Export XES log to specific directory
-%%% - `DELETE /xes/logs/{log_id}` - Delete an XES log
-%%% - `GET /xes/workflows/{workflow_id}/events` - Get XES events for workflow
-%%% - `POST /xes/workflows/{workflow_id}/export` - Export workflow as XES
+%%% - `GET /xes` - Export all workflows as XES
+%%% - `GET /xes/workflows/{workflow_id}` - Export workflow as XES
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -100,6 +105,9 @@ start_link(Options) ->
             {"/workflows/:workflow_id", yawl_rest_handler, []},
             {"/workflows/:workflow_id/:action", yawl_rest_handler, []},
             {"/workflows/:workflow_id/workitems", yawl_rest_workitem_handler, []},
+            {"/workflows/:workflow_id/events", yawl_rest_events_handler, []},
+            {"/workflows/events", yawl_rest_events_handler, []},
+            {"/events", yawl_rest_events_handler, []},
             %% Pattern endpoints
             {"/patterns", yawl_rest_pattern_handler, []},
             {"/patterns/:pattern_type", yawl_rest_pattern_handler, []},
@@ -184,7 +192,8 @@ start_link(Options) ->
     ]),
 
     case cowboy:start_clear(yawl_http_listener, [{port, Port}], #{
-        env => #{dispatch => Dispatch}
+        env => #{dispatch => Dispatch},
+        middlewares => [cowboy_router, cowboy_handler, yawl_cors_middleware]
     }) of
         {ok, _Pid} -> {ok, self()};
         {error, Reason} -> {error, Reason}
@@ -210,6 +219,9 @@ child_spec(Options) ->
             {"/workflows/:workflow_id", yawl_rest_handler, []},
             {"/workflows/:workflow_id/:action", yawl_rest_handler, []},
             {"/workflows/:workflow_id/workitems", yawl_rest_workitem_handler, []},
+            {"/workflows/:workflow_id/events", yawl_rest_events_handler, []},
+            {"/workflows/events", yawl_rest_events_handler, []},
+            {"/events", yawl_rest_events_handler, []},
             %% Pattern endpoints
             {"/patterns", yawl_rest_pattern_handler, []},
             {"/patterns/:pattern_type", yawl_rest_pattern_handler, []},
@@ -296,7 +308,8 @@ child_spec(Options) ->
     #{
         id => yawl_rest,
         start => {cowboy, start_clear, [yawl_http_listener, [{port, Port}], #{
-            env => #{dispatch => Dispatch}
+            env => #{dispatch => Dispatch},
+            middlewares => [cowboy_router, cowboy_handler, yawl_cors_middleware]
         }]},
         restart => permanent,
         shutdown => 5000,
@@ -305,7 +318,8 @@ child_spec(Options) ->
                    yawl_rest_resource_handler, yawl_rest_task_handler, yawl_health_handler,
                    yawl_rest_service_handler, yawl_rest_metrics_handler,
                    yawl_rest_pattern_handler, yawl_rest_template_handler,
-                   yawl_rest_definition_handler, yawl_rest_xes_handler]
+                   yawl_rest_definition_handler, yawl_rest_xes_handler,
+                   yawl_rest_events_handler, yawl_cors_middleware]
     }.
 
 %%====================================================================

@@ -1,20 +1,49 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Persistence Manager
+%%% @doc YAWL Persistence Manager
 %%%
+%%% <h3>Purpose</h3>
 %%% This module provides persistent storage for YAWL workflows using
-%%% Mnesia. It supports:
+%%% Mnesia distributed database.
 %%%
-%%% - Workflow state persistence
-%%% - Work item persistence
-%%% - Resource persistence
-%%% - Checkpoint/recovery for workflows
+%%% <h3>Layer</h3>
+%%% Persistence Layer - Bottom layer for all data storage
 %%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>None (standalone persistence layer)</li>
+%%% </ul>
+%%%
+%%% <h3>Features</h3>
+%%% <ul>
+%%%   <li>Workflow state persistence</li>
+%%%   <li>Work item persistence</li>
+%%%   <li>Resource persistence</li>
+%%%   <li>Checkpoint/recovery for workflows</li>
+%%%   <li>Execution history tracking</li>
+%%%   <li>Service registry storage</li>
+%%%   <li>Task queue management</li>
+%%% </ul>
+%%%
+%%% <h3>Mnesia Tables</h3>
+%%% <ul>
+%%%   <li>yawl_workflow_persist - Workflow states</li>
+%%%   <li>yawl_workitem_persist - Work items</li>
+%%%   <li>yawl_resource_persist - Resources</li>
+%%%   <li>yawl_checkpoint - Recovery checkpoints</li>
+%%%   <li>yawl_execution_history - Event history</li>
+%%%   <li>yawl_service_registry - Service definitions</li>
+%%%   <li>yawl_task_queue - Human task queues</li>
+%%% </ul>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_persistence).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_server).
 
 %% gen_server callbacks
@@ -732,78 +761,117 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 
 %% @private
-map_to_workflow_record(Map) ->
-    #yawl_workflow_persist{
-        workflow_id = maps:get(workflow_id, Map),
-        spec_id = maps:get(spec_id, Map, <<>>),
-        pattern_type = maps:get(pattern_type, Map, basic_sequential),
-        status = maps:get(status, Map, pending),
-        marking = maps:get(marking, Map, #{}),
-        current_place = maps:get(current_place, Map, undefined),
-        data = maps:get(data, Map, #{}),
-        parent_workflow_id = maps:get(parent_workflow_id, Map, undefined),
-        created_at = maps:get(created_at, Map, erlang:monotonic_time(millisecond)),
-        updated_at = maps:get(updated_at, Map, erlang:monotonic_time(millisecond)),
-        completed_at = maps:get(completed_at, Map, undefined),
-        error = maps:get(error, Map, undefined)
-    }.
+map_to_workflow_record(Map) when is_map(Map) ->
+    RequiredFields = [workflow_id],
+    case validate_required_fields(RequiredFields, Map) of
+        {error, Missing} ->
+            error({missing_required_fields, Missing, Map});
+        ok ->
+            #yawl_workflow_persist{
+                workflow_id = maps:get(workflow_id, Map),
+                spec_id = maps:get(spec_id, Map, <<>>),
+                pattern_type = maps:get(pattern_type, Map, basic_sequential),
+                status = maps:get(status, Map, pending),
+                marking = maps:get(marking, Map, #{}),
+                current_place = maps:get(current_place, Map, undefined),
+                data = maps:get(data, Map, #{}),
+                parent_workflow_id = maps:get(parent_workflow_id, Map, undefined),
+                created_at = maps:get(created_at, Map, erlang:monotonic_time(millisecond)),
+                updated_at = maps:get(updated_at, Map, erlang:monotonic_time(millisecond)),
+                completed_at = maps:get(completed_at, Map, undefined),
+                error = maps:get(error, Map, undefined)
+            }
+    end.
 
 %% @private
-map_to_workitem_record(Map) ->
-    #yawl_workitem_persist{
-        workitem_id = maps:get(workitem_id, Map),
-        workflow_id = maps:get(workflow_id, Map),
-        task_id = maps:get(task_id, Map),
-        task_name = maps:get(task_name, Map, <<>>),
-        status = maps:get(status, Map, pending),
-        data = maps:get(data, Map, #{}),
-        allocated_to = maps:get(allocated_to, Map, undefined),
-        allocation_time = maps:get(allocation_time, Map, undefined),
-        start_time = maps:get(start_time, Map, undefined),
-        completion_time = maps:get(completion_time, Map, undefined),
-        error = maps:get(error, Map, undefined),
-        retry_count = maps:get(retry_count, Map, 0),
-        priority = maps:get(priority, Map, normal)
-    }.
+map_to_workitem_record(Map) when is_map(Map) ->
+    RequiredFields = [workitem_id, workflow_id, task_id],
+    case validate_required_fields(RequiredFields, Map) of
+        {error, Missing} ->
+            error({missing_required_fields, Missing, Map});
+        ok ->
+            #yawl_workitem_persist{
+                workitem_id = maps:get(workitem_id, Map),
+                workflow_id = maps:get(workflow_id, Map),
+                task_id = maps:get(task_id, Map),
+                task_name = maps:get(task_name, Map, <<>>),
+                status = maps:get(status, Map, pending),
+                data = maps:get(data, Map, #{}),
+                allocated_to = maps:get(allocated_to, Map, undefined),
+                allocation_time = maps:get(allocation_time, Map, undefined),
+                start_time = maps:get(start_time, Map, undefined),
+                completion_time = maps:get(completion_time, Map, undefined),
+                error = maps:get(error, Map, undefined),
+                retry_count = maps:get(retry_count, Map, 0),
+                priority = maps:get(priority, Map, normal)
+            }
+    end.
 
 %% @private
-map_to_resource_record(Map) ->
-    #yawl_resource_persist{
-        resource_id = maps:get(resource_id, Map),
-        resource_type = maps:get(resource_type, Map, service),
-        name = maps:get(name, Map, <<>>),
-        capabilities = maps:get(capabilities, Map, []),
-        attributes = maps:get(attributes, Map, #{}),
-        status = maps:get(status, Map, available),
-        current_load = maps:get(current_load, Map, 0),
-        max_capacity = maps:get(max_capacity, Map, 10),
-        last_heartbeat = maps:get(last_heartbeat, Map, undefined),
-        metadata = maps:get(metadata, Map, #{})
-    }.
+map_to_resource_record(Map) when is_map(Map) ->
+    RequiredFields = [resource_id],
+    case validate_required_fields(RequiredFields, Map) of
+        {error, Missing} ->
+            error({missing_required_fields, Missing, Map});
+        ok ->
+            #yawl_resource_persist{
+                resource_id = maps:get(resource_id, Map),
+                resource_type = maps:get(resource_type, Map, service),
+                name = maps:get(name, Map, <<>>),
+                capabilities = maps:get(capabilities, Map, []),
+                attributes = maps:get(attributes, Map, #{}),
+                status = maps:get(status, Map, available),
+                current_load = maps:get(current_load, Map, 0),
+                max_capacity = maps:get(max_capacity, Map, 10),
+                last_heartbeat = maps:get(last_heartbeat, Map, undefined),
+                metadata = maps:get(metadata, Map, #{})
+            }
+    end.
 
 %% @private
-map_to_checkpoint_record(Map) ->
-    #yawl_checkpoint{
-        checkpoint_id = maps:get(checkpoint_id, Map),
-        workflow_id = maps:get(workflow_id, Map),
-        checkpoint_state = maps:get(checkpoint_state, Map, undefined),
-        marking = maps:get(marking, Map, #{}),
-        data = maps:get(data, Map, #{}),
-        timestamp = maps:get(timestamp, Map, erlang:monotonic_time(millisecond)),
-        sequence_num = maps:get(sequence_num, Map, 1)
-    }.
+map_to_checkpoint_record(Map) when is_map(Map) ->
+    RequiredFields = [checkpoint_id, workflow_id],
+    case validate_required_fields(RequiredFields, Map) of
+        {error, Missing} ->
+            error({missing_required_fields, Missing, Map});
+        ok ->
+            #yawl_checkpoint{
+                checkpoint_id = maps:get(checkpoint_id, Map),
+                workflow_id = maps:get(workflow_id, Map),
+                checkpoint_state = maps:get(checkpoint_state, Map, undefined),
+                marking = maps:get(marking, Map, #{}),
+                data = maps:get(data, Map, #{}),
+                timestamp = maps:get(timestamp, Map, erlang:monotonic_time(millisecond)),
+                sequence_num = maps:get(sequence_num, Map, 1)
+            }
+    end.
 
 %% @private
-map_to_history_record(Map) ->
-    #yawl_execution_history{
-        history_id = maps:get(history_id, Map),
-        workflow_id = maps:get(workflow_id, Map),
-        workitem_id = maps:get(workitem_id, Map, undefined),
-        event_type = maps:get(event_type, Map),
-        event_data = maps:get(event_data, Map, #{}),
-        timestamp = maps:get(timestamp, Map, erlang:monotonic_time(millisecond)),
-        source = maps:get(source, Map, undefined)
-    }.
+map_to_history_record(Map) when is_map(Map) ->
+    RequiredFields = [history_id, workflow_id, event_type],
+    case validate_required_fields(RequiredFields, Map) of
+        {error, Missing} ->
+            error({missing_required_fields, Missing, Map});
+        ok ->
+            #yawl_execution_history{
+                history_id = maps:get(history_id, Map),
+                workflow_id = maps:get(workflow_id, Map),
+                workitem_id = maps:get(workitem_id, Map, undefined),
+                event_type = maps:get(event_type, Map),
+                event_data = maps:get(event_data, Map, #{}),
+                timestamp = maps:get(timestamp, Map, erlang:monotonic_time(millisecond)),
+                source = maps:get(source, Map, undefined)
+            }
+    end.
+
+%% @private
+%% @doc Validate that all required fields are present in the map
+validate_required_fields(RequiredFields, Map) ->
+    Missing = lists:filter(fun(Field) -> not maps:is_key(Field, Map) end, RequiredFields),
+    case Missing of
+        [] -> ok;
+        _ -> {error, Missing}
+    end.
 
 %%====================================================================
 %% Periodic Checkpoint API Functions

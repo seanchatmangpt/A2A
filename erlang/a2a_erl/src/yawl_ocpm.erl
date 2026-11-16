@@ -311,9 +311,9 @@ pi_object_lifecycle(OCELLog, ObjectId) ->
     States = lists:map(
         fun(E) ->
             #{
-                timestamp => maps:get(timestamp, E),
-                activity => maps:get(activity, E),
-                state => infer_state_from_activity(maps:get(activity, E))
+                timestamp => maps:get(timestamp, E, erlang:system_time(millisecond)),
+                activity => maps:get(activity, E, <<"unknown">>),
+                state => infer_state_from_activity(maps:get(activity, E, <<"unknown">>))
             }
         end,
         ObjectEvents
@@ -361,8 +361,8 @@ pi_object_interactions(OCELLog) ->
         fun(E) ->
             Objects = maps:get(objects, E, #{}),
             #{
-                activity => maps:get(activity, E),
-                timestamp => maps:get(timestamp, E),
+                activity => maps:get(activity, E, <<"unknown">>),
+                timestamp => maps:get(timestamp, E, erlang:system_time(millisecond)),
                 participating_types => maps:keys(Objects),
                 interaction_type => classify_interaction(Objects)
             }
@@ -377,11 +377,11 @@ pi_process_variant(OCELLog, ObjectType) ->
     TypeEvents = extract_object_type(OCELLog, ObjectType),
 
     Sorted = lists:sort(
-        fun(E1, E2) -> maps:get(timestamp, E1) =< maps:get(timestamp, E2) end,
+        fun(E1, E2) -> maps:get(timestamp, E1, 0) =< maps:get(timestamp, E2, 0) end,
         TypeEvents
     ),
 
-    [maps:get(activity, E) || E <- Sorted].
+    [maps:get(activity, E, <<"unknown">>) || E <- Sorted].
 
 %%====================================================================
 %% gen_server Callbacks
@@ -431,26 +431,33 @@ handle_cast({log_oc_event, EventMap}, State) ->
         undefined -> {noreply, NewState};
         Log ->
             %% Convert map to OCEL event
-            OCELEvent = #{
-                event_id => maps:get(event_id, EventMap, generate_event_id()),
-                timestamp => maps:get(timestamp, EventMap, erlang:system_time(millisecond)),
-                activity => maps:get(activity, EventMap),
-                objects => maps:get(objects, EventMap, #{}),
-                attributes => maps:get(attributes, EventMap, #{})
-            },
+            %% Validate required fields
+            case maps:get(activity, EventMap, undefined) of
+                undefined ->
+                    logger:warning("OCEL event missing 'activity' field: ~p~n", [EventMap]),
+                    {noreply, NewState};
+                Activity ->
+                    OCELEvent = #{
+                        event_id => maps:get(event_id, EventMap, generate_event_id()),
+                        timestamp => maps:get(timestamp, EventMap, erlang:system_time(millisecond)),
+                        activity => Activity,
+                        objects => maps:get(objects, EventMap, #{}),
+                        attributes => maps:get(attributes, EventMap, #{})
+                    },
 
-            %% Update object types
-            NewObjectTypes = lists:usort(
-                maps:get(object_types, Log, []) ++ maps:keys(maps:get(objects, OCELEvent, #{}))
-            ),
+                    %% Update object types
+                    NewObjectTypes = lists:usort(
+                        maps:get(object_types, Log, []) ++ maps:keys(maps:get(objects, OCELEvent, #{}))
+                    ),
 
-            %% Add event
-            NewLog = Log#{
-                events => maps:get(events, Log, []) ++ [OCELEvent],
-                object_types => NewObjectTypes
-            },
+                    %% Add event
+                    NewLog = Log#{
+                        events => maps:get(events, Log, []) ++ [OCELEvent],
+                        object_types => NewObjectTypes
+                    },
 
-            {noreply, NewState#{logs => maps:put(LogId, NewLog, Logs)}}
+                    {noreply, NewState#{logs => maps:put(LogId, NewLog, Logs)}}
+            end
     end;
 
 handle_cast(_Msg, State) ->
@@ -495,8 +502,8 @@ create_trace_for_object_type(Events, ObjType) ->
         fun(E) ->
             #xes_event{
                 event_id = maps:get(event_id, E, <<"">>),
-                timestamp = maps:get(timestamp, E),
-                activity = maps:get(activity, E),
+                timestamp = maps:get(timestamp, E, erlang:system_time(millisecond)),
+                activity = maps:get(activity, E, <<"unknown">>),
                 lifecycle = complete,
                 transition = undefined,
                 resource = undefined,
@@ -550,13 +557,13 @@ extract_grounding_model(Events, ObjectTypes) ->
     %% Extract process model from OCEL events
     lists:foldl(
         fun(E, Acc) ->
-            Activity = maps:get(activity, E),
+            Activity = maps:get(activity, E, <<"unknown">>),
             Objects = maps:get(objects, E, #{}),
 
             maps:fold(
                 fun(Type, _ObjList, Acc2) ->
                     Key = {Type, Activity},
-                    Acc2#{Key => maps:get(Key, Acc2, 0) + 1}
+                    Acc2#{Key => maps_get_with_default(Key, Acc2, 0) + 1}
                 end,
                 Acc,
                 Objects
@@ -571,8 +578,8 @@ extract_temporal_patterns(Events) ->
     %% Extract temporal patterns from events
     lists:foldl(
         fun(E, Acc) ->
-            Activity = maps:get(activity, E),
-            Timestamp = maps:get(timestamp, E),
+            Activity = maps:get(activity, E, <<"unknown">>),
+            Timestamp = maps:get(timestamp, E, erlang:system_time(millisecond)),
             #{
                 activity => Activity,
                 timestamp => Timestamp,
@@ -588,7 +595,7 @@ extract_action_patterns(Events) ->
     %% Extract valid action patterns
     lists:foldl(
         fun(E, Acc) ->
-            Activity = maps:get(activity, E),
+            Activity = maps:get(activity, E, <<"unknown">>),
             Objects = maps:get(objects, E, #{}),
             #{
                 activity => Activity,
@@ -637,7 +644,7 @@ get_last_event(Events) ->
 
 %% @private
 build_co_occurrence_matrix(Events) ->
-    %% Build matrix of object type co-occurrences
+    %% Build co-occurrence matrix for object types
     lists:foldl(
         fun(E, Acc) ->
             Objects = maps:get(objects, E, #{}),
@@ -647,8 +654,8 @@ build_co_occurrence_matrix(Events) ->
                 fun(T1, Acc1) ->
                     lists:foldl(
                         fun(T2, Acc2) ->
-                            Type1Map = maps:get(T1, Acc2, #{}),
-                            Acc2#{T1 => Type1Map#{T2 => maps:get(T2, Type1Map, 0) + 1}}
+                            Type1Map = maps_get_with_default(T1, Acc2, #{}),
+                            Acc2#{T1 => Type1Map#{T2 => maps_get_with_default(T2, Type1Map, 0) + 1}}
                         end,
                         Acc1,
                         Types
@@ -661,6 +668,11 @@ build_co_occurrence_matrix(Events) ->
         #{},
         Events
     ).
+
+%% @private
+%% @doc Safe maps:get for nested maps with defaults
+maps_get_with_default(Key, Map, Default) ->
+    maps:get(Key, Map, Default).
 
 %% @private
 classify_interaction(Objects) ->

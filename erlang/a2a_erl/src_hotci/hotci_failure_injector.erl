@@ -15,18 +15,18 @@
          terminate/2, code_change/3]).
 
 %% Records
--record.failure_scenario, {
+-record(failure_scenario, {
     id :: binary(),
     name :: binary(),
     description :: binary(),
     probability :: float(),  % 0.0 to 1.0
     failure_type :: atom(),
-    injection_points :: [binary()],
+    injection_points :: [atom()],
     recovery_timeout :: integer(),
     impact :: 'low' | 'medium' | 'high' | 'critical'
-}.
+}).
 
-record.failure_injection, {
+-record(failure_injection, {
     id :: binary(),
     scenario_id :: binary(),
     node_id :: binary(),
@@ -34,16 +34,19 @@ record.failure_injection, {
     start_time :: integer() | undefined,
     end_time :: integer() | undefined,
     details :: term()
-}.
+}).
 
 %% State record
--record.state, {
-    scenarios = [] :: [record(failure_scenario)],
-    injections = [] :: [record(failure_injection)],
+-record(injector_state, {
+    scenarios = [] :: [#failure_scenario{}],
+    injections = [] :: [#failure_injection{}],
     enabled_scenarios = [] :: [binary()],
-    enabled_failures = #{} :: map(),  #{binary() => boolean()},
+    enabled_failures = #{} :: #{binary() => float()},
     failure_log = [] :: [term()]
-}.
+}).
+
+%% Type alias for backward compatibility
+-type state() :: #injector_state{}.
 
 -define(SERVER, ?MODULE).
 -define(DEFAULT_INJECTION_TIMEOUT, 5000).
@@ -72,22 +75,22 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc Inject a failure immediately
--spec inject_failure(cluster_id(), node_id(), binary()) -> ok | {error, term()}.
+-spec inject_failure(binary(), binary(), binary()) -> ok | {error, term()}.
 inject_failure(ClusterId, NodeId, ScenarioId) ->
     gen_server:call(?SERVER, {inject_failure, ClusterId, NodeId, ScenarioId}).
 
 %% @doc Schedule a failure for injection at a future time
--spec schedule_failure(cluster_id(), node_id(), binary()) -> ok | {error, term()}.
+-spec schedule_failure(binary(), binary(), binary()) -> ok | {error, term()}.
 schedule_failure(ClusterId, NodeId, ScenarioId) ->
     gen_server:call(?SERVER, {schedule_failure, ClusterId, NodeId, ScenarioId}).
 
 %% @doc Get all available failure scenarios
--spec get_failure_scenarios() -> {ok, [record(failure_scenario)]}.
+-spec get_failure_scenarios() -> {ok, [#failure_scenario{}]}.
 get_failure_scenarios() ->
     gen_server:call(?SERVER, get_failure_scenarios).
 
 %% @doc Clear failures for a cluster
--spec clear_failures(cluster_id()) -> ok.
+-spec clear_failures(binary()) -> ok.
 clear_failures(ClusterId) ->
     gen_server:cast(?SERVER, {clear_failures, ClusterId}).
 
@@ -105,7 +108,7 @@ disable_failure_mode(ScenarioId) ->
 %%% gen_server Callbacks
 %%% ============================================================================
 
--spec init([]) -> {ok, #state{}}.
+-spec init([]) -> {ok, #injector_state{}}.
 init([]) ->
     %% Initialize default failure scenarios
     Scenarios = create_default_scenarios(),
@@ -113,9 +116,9 @@ init([]) ->
     %% Start scheduled failure checker
     erlang:send_after(?SCHEDULED_CHECK_INTERVAL, self(), check_scheduled_failures),
 
-    {ok, #state{scenarios = Scenarios}}.
+    {ok, #injector_state{scenarios = Scenarios}}.
 
--spec handle_call(term(), {pid(), reference()}, #state{}) -> {reply, term(), #state{}}.
+-spec handle_call(term(), {pid(), reference()}, #injector_state{}) -> {reply, term(), #injector_state{}}.
 handle_call({inject_failure, ClusterId, NodeId, ScenarioId}, _From, State) ->
     Result = do_inject_failure(ClusterId, NodeId, ScenarioId, State),
     {reply, Result, State};
@@ -125,30 +128,30 @@ handle_call({schedule_failure, ClusterId, NodeId, ScenarioId}, _From, State) ->
     {reply, Result, State};
 
 handle_call(get_failure_scenarios, _From, State) ->
-    {reply, {ok, State#state.scenarios}, State};
+    {reply, {ok, State#injector_state.scenarios}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
--spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
+-spec handle_cast(term(), #injector_state{}) -> {noreply, #injector_state{}}.
 handle_cast({clear_failures, ClusterId}, State) ->
     NewInjections = lists:filter(fun(Injection) ->
         case Injection#failure_injection.node_id of
             ClusterId -> false;
             _ -> true
         end
-    end, State#state.injections),
+    end, State#injector_state.injections),
 
-    NewState = State#state{injections = NewInjections},
+    NewState = State#injector_state{injections = NewInjections},
     {noreply, NewState};
 
 handle_cast({enable_failure_mode, ScenarioId, Probability}, State) ->
-    case lists:any(fun(Scenario) -> Scenario#failure_scenario.id =:= ScenarioId end, State#state.scenarios) of
+    case lists:any(fun(Scenario) -> Scenario#failure_scenario.id =:= ScenarioId end, State#injector_state.scenarios) of
         true ->
-            NewEnabledScenarios = lists:usort([ScenarioId | State#state.enabled_scenarios]),
-            NewFailures = maps:put(ScenarioId, Probability, State#state.enabled_failures),
+            NewEnabledScenarios = lists:usort([ScenarioId | State#injector_state.enabled_scenarios]),
+            NewFailures = maps:put(ScenarioId, Probability, State#injector_state.enabled_failures),
 
-            NewState = State#state{
+            NewState = State#injector_state{
                 enabled_scenarios = NewEnabledScenarios,
                 enabled_failures = NewFailures
             },
@@ -161,10 +164,10 @@ handle_cast({enable_failure_mode, ScenarioId, Probability}, State) ->
     end;
 
 handle_cast({disable_failure_mode, ScenarioId}, State) ->
-    NewEnabledScenarios = lists:delete(ScenarioId, State#state.enabled_scenarios),
-    NewFailures = maps:remove(ScenarioId, State#state.enabled_failures),
+    NewEnabledScenarios = lists:delete(ScenarioId, State#injector_state.enabled_scenarios),
+    NewFailures = maps:remove(ScenarioId, State#injector_state.enabled_failures),
 
-    NewState = State#state{
+    NewState = State#injector_state{
         enabled_scenarios = NewEnabledScenarios,
         enabled_failures = NewFailures
     },
@@ -175,7 +178,7 @@ handle_cast({disable_failure_mode, ScenarioId}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
--spec handle_info(term(), #state{}) -> {noreply, #state{}}.
+-spec handle_info(term(), #injector_state{}) -> {noreply, #injector_state{}}.
 handle_info(check_scheduled_failures, State) ->
     NewState = check_and_execute_scheduled_failures(State),
     erlang:send_after(?SCHEDULED_CHECK_INTERVAL, self(), check_scheduled_failures),
@@ -187,11 +190,11 @@ handle_info(recovery_timeout, InjectionId) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
--spec terminate(term(), #state{}) -> ok.
+-spec terminate(term(), #injector_state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
--spec code_change(term(), #state{}, term()) -> {ok, #state{}}.
+-spec code_change(term(), #injector_state{}, term()) -> {ok, #injector_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -200,9 +203,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%% ============================================================================
 
 %% @doc Inject failure immediately
--spec do_inject_failure(cluster_id(), node_id(), binary(), #state{}) -> ok | {error, term()}.
+-spec do_inject_failure(binary(), binary(), binary(), #injector_state{}) -> ok | {error, scenario_not_found}.
 do_inject_failure(ClusterId, NodeId, ScenarioId, State) ->
-    case lists:keyfind(ScenarioId, #failure_scenario.id, State#state.scenarios) of
+    case lists:keyfind(ScenarioId, #failure_scenario.id, State#injector_state.scenarios) of
         false ->
             {error, scenario_not_found};
         Scenario ->
@@ -230,8 +233,8 @@ do_inject_failure(ClusterId, NodeId, ScenarioId, State) ->
             },
 
             %% Update state
-            NewInjections = [Injection | State#state.injections],
-            NewFailureLog = [FailureLog | State#state.failure_log],
+            NewInjections = [Injection | State#injector_state.injections],
+            NewFailureLog = [FailureLog | State#injector_state.failure_log],
 
             %% Schedule recovery if applicable
             case Scenario#failure_scenario.recovery_timeout > 0 of
@@ -250,9 +253,9 @@ do_inject_failure(ClusterId, NodeId, ScenarioId, State) ->
     end.
 
 %% @doc Schedule failure for future injection
--spec do_schedule_failure(cluster_id(), node_id(), binary(), #state{}) -> ok | {error, term()}.
+-spec do_schedule_failure(binary(), binary(), binary(), #injector_state{}) -> {ok, [#failure_injection{}]} | {error, scenario_not_found}.
 do_schedule_failure(ClusterId, NodeId, ScenarioId, State) ->
-    case lists:keyfind(ScenarioId, #failure_scenario.id, State#state.scenarios) of
+    case lists:keyfind(ScenarioId, #failure_scenario.id, State#injector_state.scenarios) of
         false ->
             {error, scenario_not_found};
         _ ->
@@ -266,7 +269,7 @@ do_schedule_failure(ClusterId, NodeId, ScenarioId, State) ->
                 details = #{scheduled_time => erlang:system_time(millisecond)}
             },
 
-            NewInjections = [Injection | State#state.injections],
+            NewInjections = [Injection | State#injector_state.injections],
             logger:info("Scheduled failure injection ~p on node ~p", [
                 ScenarioId, NodeId
             ]),
@@ -275,7 +278,7 @@ do_schedule_failure(ClusterId, NodeId, ScenarioId, State) ->
     end.
 
 %% @doc Check and execute scheduled failures
--spec check_and_execute_scheduled_failures(#state{}) -> #state{}.
+-spec check_and_execute_scheduled_failures(#injector_state{}) -> #injector_state{}.
 check_and_execute_scheduled_failures(State) ->
     Now = erlang:system_time(millisecond),
 
@@ -286,7 +289,7 @@ check_and_execute_scheduled_failures(State) ->
                 Now - maps:get(scheduled_time, Injection#failure_injection.details, 0) > 0;
             _ -> false
         end
-    end, State#state.injections),
+    end, State#injector_state.injections),
 
     %% Execute scheduled failures
     lists:foldl(fun(ScheduledInjection, AccState) ->
@@ -303,7 +306,7 @@ check_and_execute_scheduled_failures(State) ->
     end, State, ScheduledFailures).
 
 %% @doc Create default failure scenarios
--spec create_default_scenarios() -> [record(failure_scenario)].
+-spec create_default_scenarios() -> [#failure_scenario{}].
 create_default_scenarios() ->
     [
         #failure_scenario{
@@ -409,7 +412,7 @@ create_default_scenarios() ->
     ].
 
 %% @doc Perform the actual failure injection
--spec perform_failure_injection(record(failure_injection), record(failure_scenario)) -> term().
+-spec perform_failure_injection(#failure_injection{}, #failure_scenario{}) -> term().
 perform_failure_injection(Injection, Scenario) ->
     FailureType = Scenario#failure_scenario.failure_type,
     NodeId = Injection#failure_injection.node_id,

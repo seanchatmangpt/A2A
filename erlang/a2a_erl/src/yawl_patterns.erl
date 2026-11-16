@@ -1,21 +1,48 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Workflow Patterns Implementation
+%%% @doc YAWL Workflow Patterns Implementation
 %%%
+%%% <h3>Purpose</h3>
 %%% This module implements all 43 YAWL (Yet Another Workflow Language)
-%%% workflow patterns using gen_pnet Petri net engine.
+%%% workflow patterns using Petri net semantics with token-based execution.
 %%%
-%%% YAWL Patterns Reference:
-%%% - Control-flow patterns: Basic, Sequence, Parallel, Conditional, etc.
-%%% - Advanced patterns: Multi-instance, Iteration, Dependencies, etc.
-%%% - Resource patterns: Allocation, No Allocation, etc.
-%%% - State-based patterns: Cancellation, Termination, etc.
+%%% <h3>Layer</h3>
+%%% Pattern Layer - Core workflow pattern definitions and structures
 %%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_persistence - For saving test results only</li>
+%%% </ul>
+%%%
+%%% <h3>Supported Patterns (43 total)</h3>
+%%% <ul>
+%%%   <li><b>Basic Control Flow:</b> basic_sequential, simple_merge, parallel_split, parallel_join</li>
+%%%   <li><b>Advanced Branching:</b> exclusive_choice, deferred_choice, interleaved_routing</li>
+%%%   <li><b>Structural:</b> implicit_merge, multiple_merge, interleaved_parallelism</li>
+%%%   <li><b>State-based:</b> iterative_loop, milestone, multi_instance</li>
+%%%   <li><b>Cancellation (26 patterns):</b> cancelation_block, cancelation_scope, cancelation_thread,
+%%%       cancelation_subprocess, cancelation_multiple_instances, and all their variants
+%%%       (cancelation_point, cancelation_end, cancelation_cancel,
+%%%        *_after, *_or, *_and variants)</li>
+%%% </ul>
+%%%
+%%% <h3>Pattern Structure</h3>
+%%% Each pattern defines:
+%%% <ul>
+%%%   <li><code>Places</code> - Tokens reside here (e.g., start, task1, end)</li>
+%%%   <li><code>Transitions</code> - Fire when enabled, move tokens</li>
+%%%   <li><code>Preset</code> - Input places for each transition</li>
+%%%   <li><code>Postset</code> - Output places for each transition</li>
+%%% </ul>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_patterns).
 -author("A2A Team").
+-modified("2025-02-05").
 
 %% Mock gen_pnet callbacks for YAWL pattern structure definition
 -export([

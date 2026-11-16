@@ -1,19 +1,41 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Resource Manager
+%%% @doc YAWL Resource Manager
 %%%
+%%% <h3>Purpose</h3>
 %%% This module handles dynamic resource allocation for YAWL workflows.
-%%% It manages:
 %%%
-%%% - Human resources (users, groups)
-%%% - Service resources (external services)
-%%% - System resources (internal services)
+%%% <h3>Layer</h3>
+%%% Service Layer - Resource allocation and lifecycle management
 %%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_service_registry - For service health checks</li>
+%%%   <li>yawl_persistence - For resource state</li>
+%%% </ul>
+%%%
+%%% <h3>Resource Types</h3>
+%%% <ul>
+%%%   <li><b>human:</b> Users and groups for manual tasks</li>
+%%%   <li><b>service:</b> External API services</li>
+%%%   <li><b>system:</b> Internal system resources</li>
+%%% </ul>
+%%%
+%%% <h3>Allocation Strategies</h3>
+%%% <ul>
+%%%   <li><b>round_robin:</b> Distribute evenly across resources</li>
+%%%   <li><b>least_loaded:</b> Always pick the least busy resource</li>
+%%%   <li><b>random:</b> Random selection from available resources</li>
+%%% </ul>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_resource_manager).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_server).
 
 %% gen_server callbacks

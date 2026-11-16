@@ -1,43 +1,57 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Workflow Instance State Machine
+%%% @doc YAWL Workflow Instance State Machine
 %%%
+%%% <h3>Purpose</h3>
 %%% This module implements the workflow instance as a gen_statem that
 %%% manages the lifecycle of a single workflow execution. It handles
 %%% token-based execution using proper Petri net semantics.
 %%%
-%%% ## State Machine
+%%% <h3>Layer</h3>
+%%% Orchestration Layer - Individual workflow execution state machine
 %%%
-%%% ```
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_patterns - For pattern structures</li>
+%%%   <li>yawl_persistence - For state persistence/checkpoints</li>
+%%%   <li>yawl_workitem_processor - For task execution</li>
+%%% </ul>
+%%%
+%%% <h3>State Machine</h3>
+%%% <pre>
 %%%   idle -> running -> waiting -> completing -> terminated
 %%%            ^           |
 %%%            |           v
 %%%            '--------<------'
 %%%            (on task completion)
-%%% '''
+%%% </pre>
+%%% Any state can transition to <code>cancelled</code> or <code>failed</code>.
 %%%
-%%% Any state can transition to `cancelled` or `failed`.
-%%%
-%%% ## Token Passing
-%%%
+%%% <h3>Token Passing</h3>
 %%% The workflow uses token-based execution following Petri net semantics:
-%%% - Places hold tokens (represented as lists)
-%%% - Transitions fire when all input places have at least one token
-%%% - Firing consumes one token from each input place
-%%% - Firing produces one token to each output place
+%%% <ul>
+%%%   <li>Places hold tokens (represented as lists)</li>
+%%%   <li>Transitions fire when all input places have at least one token</li>
+%%%   <li>Firing consumes one token from each input place</li>
+%%%   <li>Firing produces one token to each output place</li>
+%%% </ul>
 %%%
-%%% ## Deadlock Detection
-%%%
+%%% <h3>Deadlock Detection</h3>
 %%% The system automatically detects deadlock conditions:
-%%% - Places with tokens but no enabled transitions
-%%% - Circular wait patterns
-%%% - Resource starvation scenarios
+%%% <ul>
+%%%   <li>Places with tokens but no enabled transitions</li>
+%%%   <li>Circular wait patterns</li>
+%%%   <li>Resource starvation scenarios</li>
+%%% </ul>
 %%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_workflow_instance).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_statem).
 
 %% gen_statem callbacks

@@ -328,7 +328,7 @@ convert_event_to_xes(EventData) when is_map(EventData) ->
 %% @doc Convert an event to XES with custom options.
 -spec convert_event_to_xes(event_data(), map()) -> {ok, binary()} | {error, term()}.
 convert_event_to_xes(EventData, Options) when is_map(EventData), is_map(Options) ->
-    EventType = maps:get(event_type, EventData),
+    EventType = maps:get(event_type, EventData, <<"unknown">>),
     Timestamp = maps:get(timestamp, EventData, erlang:monotonic_time(millisecond)),
     Activity = event_type_to_activity(EventType),
     Lifecycle = event_type_to_lifecycle(EventType),

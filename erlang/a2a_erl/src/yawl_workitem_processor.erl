@@ -1,22 +1,37 @@
 %%%-------------------------------------------------------------------
-%%% @doc
-%%% YAWL Work Item Processor
+%%% @doc YAWL Work Item Processor
 %%%
+%%% <h3>Purpose</h3>
 %%% This module handles the execution of individual work items (tasks)
-%%% within a workflow. It supports:
+%%% within a workflow. It dispatches tasks to appropriate executors.
 %%%
-%%% - Human task allocation with resource manager integration
-%%% - Automated service calls with resource manager integration
-%%% - Code execution for custom tasks
-%%% - Retry policies
-%%% - Work item persistence
-%%% - Resource lifecycle management
+%%% <h3>Layer</h3>
+%%% Service Layer - Task execution engine
 %%%
+%%% <h3>Dependencies</h3>
+%%% <ul>
+%%%   <li>yawl_resource_manager - For resource allocation</li>
+%%%   <li>yawl_service_registry - For service discovery</li>
+%%%   <li>yawl_human_task - For human task management</li>
+%%%   <li>yawl_persistence - For workitem state</li>
+%%% </ul>
+%%%
+%%% <h3>Task Types</h3>
+%%% <ul>
+%%%   <li><b>Human:</b> Requires human interaction, allocated to users</li>
+%%%   <li><b>Service:</b> Calls external services via HTTP/gRPC</li>
+%%%   <li><b>Code:</b> Executes Erlang functions directly</li>
+%%% </ul>
+%%%
+%%% @author A2A Team
+%%% @since 1.0.0
+%%% @version 1.0.0
 %%% @end
 %%%-------------------------------------------------------------------
 
 -module(yawl_workitem_processor).
 -author("A2A Team").
+-modified("2025-02-05").
 -behaviour(gen_server).
 
 %% gen_server callbacks

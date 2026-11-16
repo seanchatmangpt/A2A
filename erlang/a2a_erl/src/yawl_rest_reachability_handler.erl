@@ -81,22 +81,46 @@ handle_request(<<"GET">>, Req, State) ->
 handle_request(<<"POST">>, Req, State) ->
     PathInfo = cowboy_req:path_info(Req),
     {ok, Body, _} = cowboy_req:read_body(Req),
-    Data = jiffy:decode(Body, [return_maps]),
+    Data = try
+        jiffy:decode(Body, [return_maps])
+    catch
+        _:_ ->
+            respond_error(<<"invalid_json">>, #{message => <<"Failed to parse JSON body">>}, Req, State)
+    end,
 
     case PathInfo of
         [<<"reachability">>, <<"diagnostics">>] ->
-            Workflow = binary_to_existing_atom(maps:get(<<"workflow">>, Data), utf8),
-            Marking = maps:get(<<"marking">>, Data),
-            Result = yawl_reachability:reachability_diagnostics(Workflow, Marking),
-            respond(Result, Req, State);
+            case {maps:get(<<"workflow">>, Data, undefined), maps:get(<<"marking">>, Data, undefined)} of
+                {undefined, _} ->
+                    respond_error(<<"missing_required_field">>, <<"workflow">>, Req, State);
+                {_, undefined} ->
+                    respond_error(<<"missing_required_field">>, <<"marking">>, Req, State);
+                {WorkflowBin, Marking} ->
+                    try
+                        Workflow = binary_to_existing_atom(WorkflowBin, utf8),
+                        Result = yawl_reachability:reachability_diagnostics(Workflow, Marking),
+                        respond(Result, Req, State)
+                    catch
+                        error:badarg ->
+                            respond_error(<<"invalid_workflow">>, WorkflowBin, Req, State)
+                    end
+            end;
         [<<"reachability">>, <<"admissibility">>] ->
-            Marking = maps:get(<<"marking">>, Data),
-            Result = #{is_admissible => yawl_reachability:is_admissible(Marking)},
-            respond(Result, Req, State);
+            case maps:get(<<"marking">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_field">>, <<"marking">>, Req, State);
+                Marking ->
+                    Result = #{is_admissible => yawl_reachability:is_admissible(Marking)},
+                    respond(Result, Req, State)
+            end;
         [<<"reachability">>, <<"maximum_admissible">>] ->
-            Places = maps:get(<<"places">>, Data),
-            Result = #{maximum_admissible => yawl_reachability:maximum_admissible(Places)},
-            respond(Result, Req, State);
+            case maps:get(<<"places">>, Data, undefined) of
+                undefined ->
+                    respond_error(<<"missing_required_field">>, <<"places">>, Req, State);
+                Places ->
+                    Result = #{maximum_admissible => yawl_reachability:maximum_admissible(Places)},
+                    respond(Result, Req, State)
+            end;
         _ ->
             not_found(Req, State)
     end;
@@ -147,3 +171,15 @@ respond_json(Data, StatusCode, Req, State) ->
         <<"content-type">> => <<"application/json">>
     }, Body, Req),
     {stop, Req0, State}.
+
+%% @private
+%% @doc Respond with an error in a standardized format.
+respond_error(ErrorCode, Details, Req, State) when is_binary(Details) ->
+    respond_error(ErrorCode, #{message => Details}, Req, State);
+respond_error(ErrorCode, DetailsMap, Req, State) when is_map(DetailsMap) ->
+    Response = #{
+        status => <<"error">>,
+        error_code => ErrorCode,
+        details => DetailsMap
+    },
+    respond_json(Response, 400, Req, State).
